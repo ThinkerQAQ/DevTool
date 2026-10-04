@@ -94,6 +94,9 @@ func (e *Extension) invoke(ctx context.Context, request portable.Invocation) (js
 	if request.Module != "" {
 		args = append(args, "-m", request.Module)
 	}
+	if request.Output != "" {
+		args = append(args, "--output="+request.Output)
+	}
 	args = append(args, request.Function)
 
 	keys := make([]string, 0, len(request.Args))
