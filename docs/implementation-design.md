@@ -468,30 +468,38 @@ PhotoWaypoint
 
 这样 portable build logic 仍然属于项目，不进入 DevTool 仓库。
 
-### 8.3 DevEnvironment
+### 8.3 DevEnvironment / Environment Service
 
-继续保留：
+DevEnvironment 继续作为 **Shared Toolchain Image**，但 DevTool 不再让 CodeGraph/Serena 直接操作 Docker。
 
-~~~text
-DevEnvironment
-= Shared Toolchain Image
-~~~
-
-Dagger 使用 DevEnvironment 镜像作为 build base。
-
-因此：
+正式边界：
 
 ~~~text
-DevEnvironment
-      │
-      ▼
-Dagger Container
-      │
-      ▼
-Project Build
+CodeGraph / Serena / future tools
+              │
+              ▼
+       environment Service
+              │
+              ▼
+      environment.docker
+              │
+              ▼
+ project-scoped reusable container
 ~~~
 
-版本继续由 DevEnvironment 管理，不在 Dagger Module 复制一份。
+当前 Docker Provider 以 project + image 为边界创建一个可复用容器；后续命令通过 docker exec 进入已有环境。镜像变化时重建该 project container。
+
+Dagger 仍可使用同一 DevEnvironment 镜像作为 build base：
+
+~~~text
+DevEnvironment image
+      ├── environment.docker -> long-lived development workspace
+      └── runtime.dagger     -> portable build/test/package execution
+~~~
+
+工具版本继续由 DevEnvironment 管理，不在 Dagger Module、CodeGraph Extension 或 Serena Extension 内复制一份。
+
+Environment 是可替换 Service。未来可以增加 Podman/Kubernetes/Remote Provider，而不修改 CodeGraph、Serena 或 Core。
 
 
 ---
@@ -555,7 +563,7 @@ workspaces = [".", "./devcontrol"]
 
 工具链由 DevEnvironment 提供。DevTool 负责 discovery、workspace/branch 上下文、生命周期、路由和 doctor；项目仓库不再各自下载或固定 CodeGraph / Serena 二进制。
 
-DevTool 为每个 worktree 自动创建 `.devtool/cache/devenv-home`，并挂载为 DevEnvironment 的 `/tmp/devenv-home`。这样 CodeGraph 的 graph DB、Serena/语言服务运行态可以跨短生命周期容器复用，同时仍然保持项目/worktree 隔离；不需要 Agent 手工安装、创建缓存目录或直接启动依赖。
+Environment Provider 为每个 project/worktree 维护一个可复用的开发容器，并将 `.devtool/cache/devenv-home` 挂载为 `/tmp/devenv-home`。CodeGraph graph DB、Serena/语言服务运行态与工具缓存可以持续复用，同时保持 project/worktree 隔离；Agent 不需要手工安装、创建缓存目录或直接启动依赖。
 
 Agent 使用规则：
 
@@ -641,12 +649,12 @@ DeploymentTarget
 只包含：
 
 - project identity
-- Extension source
+- Extension loader/build metadata
 - Service provider mapping
 - UI Feature enablement
 - optional profile
 
-例如：
+当前 Go Extension 示例：
 
 ~~~toml
 version = 1
@@ -655,7 +663,17 @@ version = 1
 name = "PhotoWaypoint"
 
 [extension.project]
-source = "./go/devcontrol"
+type = "go"
+module = "./go/devcontrol"
+package = "./cmd/provider"
+
+[extension.environment]
+type = "go"
+module = "."
+package = "./extensions/environment/docker/cmd/provider"
+
+[service.environment]
+provider = "environment.docker"
 
 [service.portable-runtime]
 provider = "runtime.dagger"
@@ -663,12 +681,11 @@ provider = "runtime.dagger"
 [service.adb]
 provider = "native.adb"
 
-[service.vcs]
-provider = "vcs.github"
-
 [ui]
 features = ["environment", "settings", "jobs", "logs"]
 ~~~
+
+配置选择的是 loader/provider，Core 不枚举具体 Provider ID。Go 的 build/cache 由 adapters/extensionloader 负责，Core 只接收解析后的 executable。
 
 不允许 executable workflow。
 
@@ -1325,3 +1342,39 @@ DevTool 完整 Control Surface 使用 React + TypeScript；Browser Extension 保
 - https://react.dev/
 
 外部产品只作为 Extension 实现或设计参考，任何第三方产品都不能成为 DevTool Core 的不可替换依赖。
+
+
+---
+
+## 18. Process Extension 与 Loader 收口（2026-10-04）
+
+当前 Extension 装载路径已经统一为：
+
+~~~text
+.devtool.toml
+     │
+     ▼
+Extension Loader Adapter
+     │ resolve executable
+     ▼
+Core Process Host
+     │ bidirectional RPC
+     ├── provider service/tool calls
+     └── provider -> Host service callback
+~~~
+
+Environment、Dagger、CodeGraph、Serena、SCM 都以独立 Process Extension 运行。
+
+关键结果：
+
+- 删除中央 extensions/catalog.go，不再按 Provider ID 写 switch；
+- Core 不再执行 go build；
+- Project Extension 与普通 Capability Extension 共用 executable-resolution 边界；
+- Go-specific build/cache 位于 adapters/extensionloader；
+- CodeGraph/Serena 作为进程 Extension，仍可通过双向 RPC 调用 environment Service；
+- Provider 进程在 ProjectHost 生命周期内复用并显式关闭；
+- Agent MCP 子进程继续由 MCP bridge 在同一 session 内复用。
+
+这保持了“极简 Core + 可插拔 + 配置化”的边界，同时没有引入全局 daemon、插件市场或集群调度器。
+
+完整生命周期、性能动机与 Kubernetes 边界见 docs/runtime-lifecycle.md。
