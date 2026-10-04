@@ -18,8 +18,6 @@ import (
 )
 
 type ProcessExtension struct {
-	project    project.Project
-	executable string
 	descriptor extensioncontract.Descriptor
 	client     *processExtensionClient
 }
@@ -59,8 +57,6 @@ func LoadProcessExtension(ctx context.Context, p project.Project, name, executab
 		return nil, fmt.Errorf("extension %q returned project kind; project extension is loaded separately", descriptor.ID)
 	}
 	return &ProcessExtension{
-		project:    p,
-		executable: executable,
 		descriptor: descriptor,
 		client:     client,
 	}, nil
