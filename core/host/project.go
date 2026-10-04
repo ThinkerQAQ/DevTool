@@ -21,7 +21,7 @@ type ProjectHost struct {
 	Extension  extensioncontract.Descriptor
 	Descriptor contract.ProjectDescriptor
 	Registry   *registry.Registry
-	process    coreextension.ProjectProcess
+	process    *coreextension.ProjectProcess
 	closers    []io.Closer
 }
 
@@ -97,11 +97,16 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 	if err != nil {
 		return nil, fmt.Errorf("resolve project extension executable: %w", err)
 	}
-	process := coreextension.ProjectProcess{
-		Project:    p,
-		Executable: projectExecutable,
-		Services:   reg,
+	process, err := coreextension.StartProjectProcess(ctx, p, projectExecutable, reg)
+	if err != nil {
+		return nil, fmt.Errorf("start project extension: %w", err)
 	}
+	keepProjectProcess := false
+	defer func() {
+		if !keepProjectProcess {
+			_ = process.Close()
+		}
+	}()
 	extensionDescriptor, projectDescriptor, err := process.Describe(ctx)
 	if err != nil {
 		return nil, err
@@ -122,6 +127,7 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		process:    process,
 		closers:    closers,
 	}
+	keepProjectProcess = true
 	keepExtensions = true
 	return h, nil
 }
@@ -130,9 +136,18 @@ func (h *ProjectHost) Close() error {
 	if h == nil {
 		return nil
 	}
-	err := closeExtensions(h.closers)
+	var firstErr error
+	if h.process != nil {
+		if err := h.process.Close(); err != nil {
+			firstErr = err
+		}
+		h.process = nil
+	}
+	if err := closeExtensions(h.closers); err != nil && firstErr == nil {
+		firstErr = err
+	}
 	h.closers = nil
-	return err
+	return firstErr
 }
 
 func closeExtensions(closers []io.Closer) error {
