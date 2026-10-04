@@ -83,7 +83,7 @@ func TestContextInvokeService(t *testing.T) {
 	defer left.Close()
 	defer right.Close()
 
-	client := protocol.NewSession(left, left, func(_ context.Context, envelope protocol.Envelope) (any, error) {
+	_ = protocol.NewSession(left, left, func(_ context.Context, envelope protocol.Envelope) (any, error) {
 		if envelope.Method != protocol.MethodServiceInvoke {
 			return nil, io.EOF
 		}
