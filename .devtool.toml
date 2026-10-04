@@ -3,6 +3,10 @@ version = 1
 [project]
 name = "DevTool"
 
+[dev.environment]
+profile = "base"
+image = "ghcr.io/thinkerqaq/dev-base@sha256:f922f24b2dd917faa87bfc090dd90321aaf82651cc9a2de320a22519c3b77a8e"
+
 [extension.project]
 type = "go"
 module = "./devcontrol"
@@ -12,5 +16,22 @@ package = "./cmd/provider"
 type = "builtin"
 source = "runtime.dagger"
 
+[extension.codegraph]
+type = "builtin"
+source = "intelligence.codegraph"
+
+[extension.lsp]
+type = "builtin"
+source = "intelligence.lsp.serena"
+
 [service.portable-runtime]
 provider = "runtime.dagger"
+
+[service.code-graph]
+provider = "intelligence.codegraph"
+
+[service.code-lsp]
+provider = "intelligence.lsp.serena"
+
+[code]
+workspaces = ["."]

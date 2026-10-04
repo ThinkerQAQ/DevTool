@@ -53,3 +53,16 @@ func TestValidateRejectsGoExtensionWithoutPackage(t *testing.T) {
 		t.Fatal("Validate() expected missing package error")
 	}
 }
+
+func TestValidateRequiresConfiguredEnvironmentForCodeIntelligence(t *testing.T) {
+	cfg := Config{
+		Version: CurrentVersion,
+		Project: Project{Name: "Example"},
+		Service: map[string]Service{
+			"code-graph": {Provider: "intelligence.codegraph"},
+		},
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("Validate() expected missing dev.environment.image error")
+	}
+}

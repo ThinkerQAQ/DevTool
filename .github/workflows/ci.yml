@@ -27,6 +27,17 @@ jobs:
         run: DEVTOOL_DAGGER_INTEGRATION=1 go test ./extensions/runtime/dagger -run TestInvokeRealDagger -v
       - name: Inspect through project extension
         run: go run ./cmd/devtool project inspect --json
+      - name: Code intelligence through configured DevEnvironment
+        run: |
+          go run ./cmd/devtool code doctor
+          go run ./cmd/devtool code verify
+          go run ./cmd/devtool code graph query get_module_summary '{"path":"core"}'
+      - name: Reject project-local code intelligence bootstrap
+        run: |
+          if git grep -n -E 'npm (install|exec)|pip install|uv tool install|go install .*gopls|CODEGRAPH_VERSION|SERENA_VERSION|GOPLS_VERSION' -- ':!docs/**'; then
+            echo "project-local code-intelligence dependency bootstrap is forbidden"
+            exit 1
+          fi
       - name: Portable runtime doctor
         run: go run ./cmd/devtool runtime.doctor
       - name: Self-host build

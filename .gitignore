@@ -1,1 +1,6 @@
 .devtool/
+.serena/cache/
+.serena/logs/
+.serena/memories/
+.serena/project.local.yml
+.serena/.gitignore

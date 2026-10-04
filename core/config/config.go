@@ -25,6 +25,19 @@ type Service struct {
 	Provider string `toml:"provider" json:"provider"`
 }
 
+type Environment struct {
+	Profile string `toml:"profile" json:"profile,omitempty"`
+	Image   string `toml:"image" json:"image,omitempty"`
+}
+
+type Dev struct {
+	Environment Environment `toml:"environment" json:"environment"`
+}
+
+type Code struct {
+	Workspaces []string `toml:"workspaces" json:"workspaces,omitempty"`
+}
+
 type UI struct {
 	Features []string `toml:"features" json:"features"`
 }
@@ -34,6 +47,8 @@ type Config struct {
 	Project   Project              `toml:"project" json:"project"`
 	Extension map[string]Extension `toml:"extension" json:"extension,omitempty"`
 	Service   map[string]Service   `toml:"service" json:"service,omitempty"`
+	Dev       Dev                  `toml:"dev" json:"dev,omitempty"`
+	Code      Code                 `toml:"code" json:"code,omitempty"`
 	UI        UI                   `toml:"ui" json:"ui"`
 }
 
@@ -85,6 +100,17 @@ func Validate(cfg Config) error {
 		}
 		if strings.TrimSpace(service.Provider) == "" {
 			return fmt.Errorf("service.%s.provider is required", name)
+		}
+	}
+	if _, ok := cfg.Service["code-graph"]; ok && strings.TrimSpace(cfg.Dev.Environment.Image) == "" {
+		return fmt.Errorf("dev.environment.image is required when code-graph service is configured")
+	}
+	if _, ok := cfg.Service["code-lsp"]; ok && strings.TrimSpace(cfg.Dev.Environment.Image) == "" {
+		return fmt.Errorf("dev.environment.image is required when code-lsp service is configured")
+	}
+	for index, workspace := range cfg.Code.Workspaces {
+		if strings.TrimSpace(workspace) == "" {
+			return fmt.Errorf("code.workspaces[%d] cannot be empty", index)
 		}
 	}
 	for index, feature := range cfg.UI.Features {

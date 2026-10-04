@@ -8,12 +8,13 @@ import (
 type Kind string
 
 const (
-	KindProject        Kind = "project"
-	KindRuntime        Kind = "runtime"
-	KindNative         Kind = "native"
-	KindInfrastructure Kind = "infrastructure"
-	KindPolicy         Kind = "policy"
-	KindUI             Kind = "ui"
+	KindProject          Kind = "project"
+	KindRuntime          Kind = "runtime"
+	KindNative           Kind = "native"
+	KindInfrastructure   Kind = "infrastructure"
+	KindCodeIntelligence Kind = "code-intelligence"
+	KindPolicy           Kind = "policy"
+	KindUI               Kind = "ui"
 )
 
 type Descriptor struct {
