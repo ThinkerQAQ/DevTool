@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	if err := extensioncontract.ServeProcess(scmgithub.New()); err != nil {
+	if err := extensioncontract.ServeExtension(scmgithub.New()); err != nil {
 		fmt.Fprintln(os.Stderr, "scm.github:", err)
 		os.Exit(1)
 	}
