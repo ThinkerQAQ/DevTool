@@ -7,8 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/thinkerqaq/devtool/core/contract"
@@ -19,10 +17,9 @@ import (
 )
 
 type ProjectProcess struct {
-	Project  project.Project
-	Module   string
-	Package  string
-	Services *registry.Registry
+	Project    project.Project
+	Executable string
+	Services   *registry.Registry
 }
 
 type describePayload struct {
@@ -31,13 +28,8 @@ type describePayload struct {
 }
 
 func (p ProjectProcess) Describe(ctx context.Context) (extensioncontract.Descriptor, contract.ProjectDescriptor, error) {
-	executable, err := p.build(ctx)
-	if err != nil {
-		return extensioncontract.Descriptor{}, contract.ProjectDescriptor{}, err
-	}
-
 	var payload describePayload
-	if err := p.invoke(ctx, executable, protocol.MethodDescribe, nil, io.Discard, &payload); err != nil {
+	if err := p.invoke(ctx, protocol.MethodDescribe, nil, io.Discard, &payload); err != nil {
 		return extensioncontract.Descriptor{}, contract.ProjectDescriptor{}, err
 	}
 	if payload.Extension.Kind != extensioncontract.KindProject {
@@ -50,66 +42,15 @@ func (p ProjectProcess) Describe(ctx context.Context) (extensioncontract.Descrip
 }
 
 func (p ProjectProcess) Execute(ctx context.Context, command string, args map[string]any, out io.Writer) error {
-	executable, err := p.build(ctx)
-	if err != nil {
-		return err
-	}
 	request := protocol.ExecuteRequest{Command: command, Args: args}
-	return p.invoke(ctx, executable, protocol.MethodExecute, request, out, nil)
+	return p.invoke(ctx, protocol.MethodExecute, request, out, nil)
 }
 
-func (p ProjectProcess) build(ctx context.Context) (string, error) {
-	module := strings.TrimSpace(p.Module)
-	pkg := strings.TrimSpace(p.Package)
-	if module == "" {
-		return "", fmt.Errorf("project extension module is required")
+func (p ProjectProcess) invoke(ctx context.Context, method string, payload any, out io.Writer, result any) error {
+	executable := strings.TrimSpace(p.Executable)
+	if executable == "" {
+		return fmt.Errorf("project extension executable is required")
 	}
-	if pkg == "" {
-		return "", fmt.Errorf("project extension package is required")
-	}
-
-	moduleDir := filepath.Join(p.Project.Root, filepath.FromSlash(module))
-	info, err := os.Stat(moduleDir)
-	if err != nil {
-		return "", fmt.Errorf("project extension module %q: %w", module, err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("project extension module %q is not a directory", module)
-	}
-
-	cacheDir := filepath.Join(p.Project.Root, ".devtool", "cache")
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return "", err
-	}
-	name := "project-provider"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	output := filepath.Join(cacheDir, name)
-
-	// The Project Extension may depend on Go code outside its own module
-	// directory (DevTool itself does), so use the project root as the
-	// conservative cache boundary. This avoids rebuilding for every
-	// Describe/Execute while still invalidating when project Go sources change.
-	rebuild, err := processExtensionNeedsBuild(p.Project.Root, output)
-	if err != nil {
-		return "", fmt.Errorf("check project extension build cache: %w", err)
-	}
-	if !rebuild {
-		return output, nil
-	}
-
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, pkg)
-	cmd.Dir = moduleDir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("build project extension: %w", err)
-	}
-	return output, nil
-}
-
-func (p ProjectProcess) invoke(ctx context.Context, executable, method string, payload any, out io.Writer, result any) error {
 	cmd := exec.CommandContext(ctx, executable)
 	cmd.Dir = p.Project.Root
 	stdin, err := cmd.StdinPipe()
@@ -149,8 +90,6 @@ func (p ProjectProcess) invoke(ctx context.Context, executable, method string, p
 		}
 	}, result)
 
-	// Closing stdin tells the provider there will be no more requests. Drain the
-	// protocol stream before cmd.Wait closes the stdout pipe owned by os/exec.
 	_ = stdin.Close()
 	sessionErr := session.Wait()
 	processErr := cmd.Wait()
