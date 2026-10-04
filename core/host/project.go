@@ -47,15 +47,23 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 
 	for _, name := range names {
 		configured := p.Config.Extension[name]
-		if configured.Type != "builtin" {
+		var ext extensioncontract.Extension
+		switch configured.Type {
+		case "builtin":
+			if resolve == nil {
+				return nil, fmt.Errorf("extension %q requires a resolver", name)
+			}
+			ext, err = resolve(configured.Source)
+			if err != nil {
+				return nil, fmt.Errorf("resolve extension %q: %w", name, err)
+			}
+		case "go":
+			ext, err = coreextension.LoadProcessExtension(ctx, p, name, configured.Module, configured.Package)
+			if err != nil {
+				return nil, fmt.Errorf("load extension %q: %w", name, err)
+			}
+		default:
 			return nil, fmt.Errorf("extension %q type %q is unsupported by the host", name, configured.Type)
-		}
-		if resolve == nil {
-			return nil, fmt.Errorf("extension %q requires a resolver", name)
-		}
-		ext, err := resolve(configured.Source)
-		if err != nil {
-			return nil, fmt.Errorf("resolve extension %q: %w", name, err)
 		}
 		if err := ext.Register(reg); err != nil {
 			return nil, fmt.Errorf("register extension %q: %w", ext.Descriptor().ID, err)

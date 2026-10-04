@@ -33,6 +33,7 @@ type Registrar interface {
 	RegisterFeature(contract.FeatureBinding) error
 	RegisterNavigation(contract.NavigationItem) error
 	ProvideService(name, extensionID string, value service.Invoker) error
+	Service(name string) (service.Invoker, bool)
 	ProvideAgentTools(extensionID string, provider agentsdk.ToolProvider) error
 }
 

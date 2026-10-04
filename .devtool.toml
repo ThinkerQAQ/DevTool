@@ -24,6 +24,11 @@ source = "intelligence.codegraph"
 type = "builtin"
 source = "intelligence.lsp.serena"
 
+[extension.scm]
+type = "go"
+module = "."
+package = "./extensions/scm/github/cmd/provider"
+
 [service.portable-runtime]
 provider = "runtime.dagger"
 
@@ -32,6 +37,9 @@ provider = "intelligence.codegraph"
 
 [service.code-lsp]
 provider = "intelligence.lsp.serena"
+
+[service.scm-publish]
+provider = "scm.github"
 
 [code]
 workspaces = ["."]
