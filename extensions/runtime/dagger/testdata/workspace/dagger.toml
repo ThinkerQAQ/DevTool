@@ -1,0 +1,13 @@
+[modules.dang-sdk]
+source = "dagger.io/sdk/dang"
+
+[sdks.dang]
+module = "dang-sdk"
+
+[sdks.dang.scopes.".dagger/modules/smoke"]
+is-module = true
+name = "smoke"
+
+[modules.smoke]
+source = "./.dagger/modules/smoke"
+entrypoint = true
