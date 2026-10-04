@@ -16,8 +16,9 @@ type = "go"
 module = "./devcontrol"
 package = "./cmd/provider"
 [extension.runtime]
-type = "builtin"
-source = "runtime.dagger"
+type = "go"
+module = "."
+package = "./extensions/runtime/dagger/cmd/provider"
 [service.portable-runtime]
 provider = "runtime.dagger"
 [ui]
