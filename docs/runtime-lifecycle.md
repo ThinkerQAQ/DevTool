@@ -6,7 +6,7 @@ Status: Phase A + Phase B + extension-loader closure implemented and verified
 
 DevTool started as a thin wrapper that gave agents one stable entry point for project tooling. As CodeGraph, Serena/LSP, SCM and portable runtimes were added, the main performance cost moved away from the tools themselves and into repeated lifecycle setup.
 
-The current hot path contains three avoidable cold starts:
+The original hot path contained three avoidable cold starts:
 
 ```text
 Agent
@@ -21,9 +21,9 @@ Observed behavior:
 
 - file edits themselves complete in milliseconds;
 - CodeGraph incremental indexing is already incremental;
-- a Go-backed process extension is started for individual calls;
-- the project extension can be rebuilt again for Describe/Execute;
-- CodeGraph and Serena currently reach the development environment through `docker run --rm`, creating a new container for a fresh command.
+- a Go-backed process extension was started for individual calls;
+- the project extension could be rebuilt and its provider process restarted across Describe/Execute;
+- CodeGraph and Serena originally reached the development environment through `docker run --rm`, creating a new container for each fresh command.
 
 The result is that cheap operations pay process/container startup costs repeatedly.
 
@@ -38,11 +38,11 @@ This work keeps the original DevTool direction:
 5. **No historical fallback path**: one configured path should be authoritative.
 6. **Do not build a platform without a real bottleneck**: daemonization, plugin marketplaces, hot reload and distributed scheduling are explicitly out of scope for this phase.
 
-## 3. Current problems
+## 3. Problems discovered
 
 ### 3.1 Development environment is ephemeral per command
 
-The current development-environment adapter translates each tool launch into:
+The original development-environment adapter translated each tool launch into:
 
 ```text
 docker run --rm -i ...
@@ -69,7 +69,7 @@ If the configured image changes, the project container is recreated.
 
 ### 3.2 Go process extensions are one-call processes
 
-A configured process extension is currently executed for Describe/Invoke/ListTools/CallTool by creating a fresh process for calls.
+Originally, a configured process extension executed Describe/Invoke/ListTools/CallTool by creating a fresh process for calls.
 
 Desired lifecycle:
 
@@ -87,22 +87,20 @@ The protocol already supports multiple requests on one Session, so reuse belongs
 
 ### 3.3 Project extension rebuilds on repeated host operations
 
-The Project Extension build path always invokes `go build` before Describe/Execute.
+The original Project Extension path invoked `go build` before Describe/Execute and started a new provider process for each invocation.
 
-The first implementation step is to reuse the existing artifact when the Go source/module files are not newer than the cached provider binary.
-
-Longer term, language-specific build knowledge should leave Core entirely and become an extension/transport concern. That larger extraction is deliberately separated from the current performance fix.
+The implemented path resolves/caches the Project Extension executable through `adapters/extensionloader`, starts the provider once when the ProjectHost opens, and reuses the same bidirectional RPC Session for Describe and Execute. Language-specific build knowledge is outside Core.
 
 ## 4. Minimal implementation for this phase
 
 ### Phase A — implemented
 
-- cache Project Extension build output;
-- retain a Go Process Extension process for the lifetime of the DevTool host;
+- cache Project Extension build output through the external loader;
+- retain normal Process Extensions for the lifetime of the DevTool host;
 - reuse one development-environment container per project;
 - recreate that container only when the configured image changes;
 - continue reusing CodeGraph/Serena MCP clients through the existing MCP bridge;
-- bind reusable extension/MCP processes to the Project Host lifecycle and close them explicitly.
+- bind Project Extension, capability extension and MCP processes to the ProjectHost lifecycle and close them explicitly, with the Project Extension closed before its dependency providers.
 
 ### Phase B — implemented
 
