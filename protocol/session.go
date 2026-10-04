@@ -143,6 +143,12 @@ func (s *Session) Wait() error {
 }
 
 func (s *Session) readLoop(in io.Reader) {
+	defer func() {
+		s.cancelAllActive()
+		s.handlers.Wait()
+		close(s.done)
+	}()
+
 	scanner := bufio.NewScanner(in)
 	for scanner.Scan() {
 		var envelope Envelope
@@ -193,9 +199,6 @@ func (s *Session) readLoop(in io.Reader) {
 	if err := scanner.Err(); err != nil {
 		s.setError(err)
 	}
-	s.cancelAllActive()
-	s.handlers.Wait()
-	close(s.done)
 }
 
 func (s *Session) handleRequest(ctx context.Context, request Envelope) {
