@@ -378,6 +378,76 @@ The current refactor has met the closure criteria:
 5. ✅ CodeGraph/Serena remain independent of the concrete Environment backend;
 6. ✅ N -> N+1 -> N+2 self-hosting passes;
 7. ✅ the full CodeGraph/LSP configured-environment path passes;
-8. ✅ no global daemon is required to obtain the lifecycle reuse achieved in this phase.
+8. ✅ no global daemon is required to obtain the lifecycle reuse achieved in this phase;
+9. ✅ Agent Gateway can list CodeGraph/Serena/SCM tools and then call a CodeGraph tool in the same MCP session.
 
 CI verification also covers Go tests, DevControl tests, real Dagger integration, project inspection, runtime doctor, self-host build, verify and package.
+
+
+## 15. Lifecycle scope rule: cached handle != persistent process
+
+The Agent Gateway end-to-end test exposed a subtle lifecycle bug after the first reuse implementation.
+
+The MCP bridge cached its child client correctly, but the child process had been created with the context of the current `tools/list` RPC:
+
+```text
+Agent tools/list request
+        |
+        v
+request-scoped context
+        |
+        v
+start CodeGraph MCP with exec.CommandContext
+        |
+        v
+tools/list returns
+        |
+        v
+request context canceled
+        |
+        v
+CodeGraph MCP killed
+        |
+        v
+next tools/call -> broken pipe
+```
+
+This demonstrates an important rule:
+
+> **A reusable object must be created from the lifecycle context of its owner, not from the context of the request that happened to initialize it.**
+
+The corrected ownership model is:
+
+```text
+ProjectHost
+  |
+  +-- Process Extension lifetime
+        |
+        +-- MCP bridge lifetime
+              |
+              +-- CodeGraph / Serena child MCP process
+
+individual RPC context
+  |
+  +-- only controls that request/wait path
+```
+
+Implementation consequences:
+
+- `mcpbridge.Provider` owns a lifecycle context and cancellation function;
+- child MCP processes are created from that lifecycle context;
+- request cancellation no longer destroys a cached long-lived child;
+- `Provider.Close()` cancels the lifecycle and closes the child;
+- Process Extensions close gracefully by closing protocol stdin and waiting for the provider to exit, so provider-side deferred `Close()` hooks actually run;
+- Project Extension is also retained for the full `ProjectHost` lifetime and is closed before dependency providers.
+
+The CI acceptance path now performs, in one real `devtool agent mcp` session:
+
+```text
+initialize
+  -> tools/list
+  -> verify CodeGraph + Serena + SCM tools
+  -> tools/call(codegraph_get_module_summary)
+```
+
+This specifically protects against the request-context/long-lived-process regression that the CLI-only tests could not detect.
