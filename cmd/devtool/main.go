@@ -42,6 +42,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
+		defer h.Close()
 		return h.Execute(ctx, args[0], args[1:], out)
 	}
 }
@@ -64,6 +65,7 @@ func runProject(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	defer h.Close()
 	if *jsonOutput {
 		return json.NewEncoder(out).Encode(map[string]any{
 			"name":       h.Project.Config.Project.Name,
