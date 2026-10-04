@@ -16,7 +16,6 @@ type Project struct {
 
 type Extension struct {
 	Type    string `toml:"type" json:"type"`
-	Source  string `toml:"source" json:"source,omitempty"`
 	Module  string `toml:"module" json:"module,omitempty"`
 	Package string `toml:"package" json:"package,omitempty"`
 }
@@ -78,14 +77,8 @@ func Validate(cfg Config) error {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("extension name is required")
 		}
-		if ext.Type != "go" {
-			return fmt.Errorf("extension.%s.type %q is unsupported; configured extensions must use a process-backed loader", name, ext.Type)
-		}
-		if strings.TrimSpace(ext.Module) == "" {
-			return fmt.Errorf("extension.%s.module is required for go extension", name)
-		}
-		if strings.TrimSpace(ext.Package) == "" {
-			return fmt.Errorf("extension.%s.package is required for go extension", name)
+		if strings.TrimSpace(ext.Type) == "" {
+			return fmt.Errorf("extension.%s.type is required", name)
 		}
 	}
 	for name, service := range cfg.Service {
