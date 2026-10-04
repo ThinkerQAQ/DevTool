@@ -5,6 +5,7 @@ import "encoding/json"
 const (
 	ServiceName   = "environment"
 	MethodCommand = "command"
+	WorkspaceRoot = "/workspace"
 )
 
 type CommandRequest struct {
