@@ -127,7 +127,7 @@ func inspectWorkspaceContainer(ctx context.Context, name string) (image string, 
 	out, commandErr := cmd.CombinedOutput()
 	if commandErr != nil {
 		message := strings.TrimSpace(string(out))
-		if strings.Contains(message, "No such object") || strings.Contains(message, "No such container") {
+		if isContainerNotFoundMessage(message) {
 			return "", false, false, nil
 		}
 		return "", false, false, fmt.Errorf("inspect development environment container %s: %w: %s", name, commandErr, message)
@@ -137,6 +137,11 @@ func inspectWorkspaceContainer(ctx context.Context, name string) (image string, 
 		return "", false, false, fmt.Errorf("inspect development environment container %s returned unexpected output %q", name, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]) == "true", true, nil
+}
+
+func isContainerNotFoundMessage(message string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(normalized, "no such object") || strings.Contains(normalized, "no such container")
 }
 
 func createWorkspaceContainer(ctx context.Context, name, root, devenvHome, image, uid, gid string) error {
