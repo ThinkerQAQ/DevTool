@@ -19,18 +19,34 @@ type CommandFactory func(context.Context, agentsdk.Session) (*exec.Cmd, error)
 type Provider struct {
 	factory CommandFactory
 
+	lifecycleCtx context.Context
+	cancel       context.CancelFunc
+
 	mu        sync.Mutex
 	client    *client
 	sessionID string
+	closed    bool
 }
 
 func New(factory CommandFactory) *Provider {
-	return &Provider{factory: factory}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Provider{
+		factory:      factory,
+		lifecycleCtx: ctx,
+		cancel:       cancel,
+	}
 }
 
 func (p *Provider) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.closed {
+		return nil
+	}
+	p.closed = true
+	if p.cancel != nil {
+		p.cancel()
+	}
 	if p.client == nil {
 		return nil
 	}
@@ -89,11 +105,17 @@ func (p *Provider) CallTool(ctx context.Context, session agentsdk.Session, name 
 }
 
 func (p *Provider) ensureClient(ctx context.Context, session agentsdk.Session) (*client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	keyBytes, _ := json.Marshal(session)
 	key := string(keyBytes)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.closed {
+		return nil, fmt.Errorf("MCP bridge is closed")
+	}
 	if p.client != nil && p.sessionID == key {
 		return p.client, nil
 	}
@@ -101,7 +123,7 @@ func (p *Provider) ensureClient(ctx context.Context, session agentsdk.Session) (
 		_ = p.client.close()
 		p.client = nil
 	}
-	cmd, err := p.factory(ctx, session)
+	cmd, err := p.factory(p.lifecycleCtx, session)
 	if err != nil {
 		return nil, err
 	}
