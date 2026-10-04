@@ -20,6 +20,7 @@ type Invocation struct {
 	Module    string            `json:"module,omitempty"`
 	Function  string            `json:"function"`
 	Args      map[string]string `json:"args,omitempty"`
+	Output    string            `json:"output,omitempty"`
 }
 
 type Result struct {
