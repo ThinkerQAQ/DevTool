@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -91,10 +92,15 @@ func (e *Extension) invoke(ctx context.Context, request portable.Invocation) (js
 	if request.Workspace != "" {
 		args = append(args, "-W", request.Workspace)
 	}
+	args = append(args, "api", "call")
 	if request.Module != "" {
-		args = append(args, "-m", request.Module)
+		module := request.Module
+		if request.Workspace != "" && !filepath.IsAbs(module) {
+			module = filepath.Join(request.Workspace, module)
+		}
+		args = append(args, "-m", module)
 	}
-	args = append(args, "api", "call", request.Function)
+	args = append(args, request.Function)
 
 	keys := make([]string, 0, len(request.Args))
 	for key := range request.Args {

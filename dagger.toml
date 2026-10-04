@@ -1,0 +1,13 @@
+[modules.dang-sdk]
+source = "dagger.io/sdk/dang"
+
+[sdks.dang]
+module = "dang-sdk"
+
+[sdks.dang.scopes.".dagger/modules/devtool"]
+is-module = true
+name = "dev-tool"
+
+[modules.dev-tool]
+source = "./.dagger/modules/devtool"
+entrypoint = true
