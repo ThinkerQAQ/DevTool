@@ -12,7 +12,6 @@ import (
 	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/host"
 	"github.com/thinkerqaq/devtool/core/project"
-	"github.com/thinkerqaq/devtool/extensions"
 )
 
 func main() {
@@ -38,7 +37,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	case "agent":
 		return runAgent(ctx, args[1:], out)
 	default:
-		h, err := host.OpenProject(ctx, "", extensions.Resolve)
+		h, err := host.OpenProject(ctx, "")
 		if err != nil {
 			return err
 		}
@@ -61,7 +60,7 @@ func runProject(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
 
-	h, err := host.OpenProject(ctx, "", extensions.Resolve)
+	h, err := host.OpenProject(ctx, "")
 	if err != nil {
 		return err
 	}
