@@ -11,9 +11,10 @@ import (
 
 	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
 	"github.com/thinkerqaq/devtool/core/service"
-	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/devenv"
+	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/envexec"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
+	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
 
@@ -21,12 +22,23 @@ const ExtensionID = "intelligence.lsp.serena"
 
 type Extension struct {
 	// executable exists only for isolated adapter tests. Production execution
-	// always uses the project's pinned DevEnvironment image.
+	// is resolved through the configured Environment service.
 	executable string
+	services   extensioncontract.Registrar
+	bridge     *mcpbridge.Provider
 }
 
 func New() *Extension {
-	return &Extension{}
+	e := &Extension{}
+	e.bridge = mcpbridge.New(e.agentMCPCommand)
+	return e
+}
+
+func (e *Extension) Close() error {
+	if e.bridge == nil {
+		return nil
+	}
+	return e.bridge.Close()
 }
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
@@ -34,15 +46,20 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 		ID:         ExtensionID,
 		Kind:       extensioncontract.KindCodeIntelligence,
 		Provides:   []string{codeintelligence.LSPServiceName},
+		Requires:   []string{environmentcontract.ServiceName},
 		AgentTools: true,
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
+	e.services = reg
 	if err := reg.ProvideService(codeintelligence.LSPServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
 		return err
 	}
-	return reg.ProvideAgentTools(ExtensionID, mcpbridge.New(e.agentMCPCommand))
+	if e.bridge == nil {
+		e.bridge = mcpbridge.New(e.agentMCPCommand)
+	}
+	return reg.ProvideAgentTools(ExtensionID, e.bridge)
 }
 
 func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Session) (*exec.Cmd, error) {
@@ -57,7 +74,7 @@ func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Sessio
 	}
 	return e.command(ctx, workspace,
 		"start-mcp-server",
-		"--project", projectPath(workspace),
+		"--project", e.projectPath(workspace),
 		"--context", contextName,
 	)
 }
@@ -104,7 +121,7 @@ func (e *Extension) doctor(ctx context.Context, workspace codeintelligence.Works
 }
 
 func (e *Extension) verify(ctx context.Context, workspace codeintelligence.Workspace) (json.RawMessage, error) {
-	out, err := e.combinedOutput(ctx, workspace, "project", "health-check", projectPath(workspace))
+	out, err := e.combinedOutput(ctx, workspace, "project", "health-check", e.projectPath(workspace))
 	if err != nil {
 		return nil, fmt.Errorf("Serena project health-check: %w", err)
 	}
@@ -122,7 +139,7 @@ func (e *Extension) mcp(ctx context.Context, request codeintelligence.MCPRequest
 	}
 	cmd, err := e.command(ctx, request.Workspace,
 		"start-mcp-server",
-		"--project", projectPath(request.Workspace),
+		"--project", e.projectPath(request.Workspace),
 		"--context", contextName,
 	)
 	if err != nil {
@@ -137,9 +154,9 @@ func (e *Extension) mcp(ctx context.Context, request codeintelligence.MCPRequest
 	return nil
 }
 
-func projectPath(workspace codeintelligence.Workspace) string {
-	if strings.TrimSpace(workspace.EnvironmentImage) != "" {
-		return "/workspace"
+func (e *Extension) projectPath(workspace codeintelligence.Workspace) string {
+	if strings.TrimSpace(e.executable) == "" {
+		return environmentcontract.WorkspaceRoot
 	}
 	return workspace.Root
 }
@@ -150,21 +167,20 @@ func (e *Extension) command(ctx context.Context, workspace codeintelligence.Work
 		cmd.Dir = workspace.Root
 		return cmd, nil
 	}
-	return devenv.Command(ctx, workspace, "serena", args...)
+	return envexec.Command(ctx, e.services, workspace, "serena", args...)
 }
 
 func (e *Extension) combinedOutput(ctx context.Context, workspace codeintelligence.Workspace, args ...string) ([]byte, error) {
-	if strings.TrimSpace(e.executable) != "" {
-		cmd := exec.CommandContext(ctx, e.executable, args...)
-		cmd.Dir = workspace.Root
-		var stdout bytes.Buffer
-		var stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			return nil, fmt.Errorf("%s: %w: %s", e.executable, err, strings.TrimSpace(stderr.String()))
-		}
-		return stdout.Bytes(), nil
+	cmd, err := e.command(ctx, workspace, args...)
+	if err != nil {
+		return nil, err
 	}
-	return devenv.CombinedOutput(ctx, workspace, "serena", args...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("serena: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
 }

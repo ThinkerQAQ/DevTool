@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thinkerqaq/devtool/core/service"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/sdk/scm"
@@ -35,6 +36,13 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 		Provides:   []string{scm.ServiceName},
 		AgentTools: true,
 	}
+}
+
+func (e *Extension) Register(reg extensioncontract.Registrar) error {
+	if err := reg.ProvideService(scm.ServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
+		return err
+	}
+	return reg.ProvideAgentTools(ExtensionID, e)
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {

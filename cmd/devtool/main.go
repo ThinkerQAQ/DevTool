@@ -9,10 +9,10 @@ import (
 	"io"
 	"os"
 
+	"github.com/thinkerqaq/devtool/adapters/extensionloader"
 	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/host"
 	"github.com/thinkerqaq/devtool/core/project"
-	"github.com/thinkerqaq/devtool/extensions"
 )
 
 func main() {
@@ -38,10 +38,11 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	case "agent":
 		return runAgent(ctx, args[1:], out)
 	default:
-		h, err := host.OpenProject(ctx, "", extensions.Resolve)
+		h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
 		if err != nil {
 			return err
 		}
+		defer h.Close()
 		return h.Execute(ctx, args[0], args[1:], out)
 	}
 }
@@ -60,10 +61,11 @@ func runProject(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
 
-	h, err := host.OpenProject(ctx, "", extensions.Resolve)
+	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
 	if err != nil {
 		return err
 	}
+	defer h.Close()
 	if *jsonOutput {
 		return json.NewEncoder(out).Encode(map[string]any{
 			"name":       h.Project.Config.Project.Name,

@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/contract"
 	coreextension "github.com/thinkerqaq/devtool/core/extension"
 	"github.com/thinkerqaq/devtool/core/project"
@@ -13,17 +14,18 @@ import (
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
 
-type ExtensionResolver func(source string) (extensioncontract.Extension, error)
+type ExecutableResolver func(context.Context, project.Project, string, config.Extension) (string, error)
 
 type ProjectHost struct {
 	Project    project.Project
 	Extension  extensioncontract.Descriptor
 	Descriptor contract.ProjectDescriptor
 	Registry   *registry.Registry
-	process    coreextension.ProjectProcess
+	process    *coreextension.ProjectProcess
+	closers    []io.Closer
 }
 
-func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (*ProjectHost, error) {
+func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) (*ProjectHost, error) {
 	p, err := project.Discover(start)
 	if err != nil {
 		return nil, err
@@ -32,11 +34,21 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 	if !ok {
 		return nil, fmt.Errorf("project extension is not configured")
 	}
-	if projectExtension.Type != "go" {
-		return nil, fmt.Errorf("project extension type %q is unsupported", projectExtension.Type)
+	if resolve == nil {
+		return nil, fmt.Errorf("extension executable resolver is required")
 	}
 
 	reg := registry.New()
+	var descriptors []extensioncontract.Descriptor
+	var closers []io.Closer
+	keepExtensions := false
+	defer func() {
+		if keepExtensions {
+			return
+		}
+		closeExtensions(closers)
+	}()
+
 	names := make([]string, 0, len(p.Config.Extension))
 	for name := range p.Config.Extension {
 		if name != "project" {
@@ -47,26 +59,27 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 
 	for _, name := range names {
 		configured := p.Config.Extension[name]
-		var ext extensioncontract.Extension
-		switch configured.Type {
-		case "builtin":
-			if resolve == nil {
-				return nil, fmt.Errorf("extension %q requires a resolver", name)
-			}
-			ext, err = resolve(configured.Source)
-			if err != nil {
-				return nil, fmt.Errorf("resolve extension %q: %w", name, err)
-			}
-		case "go":
-			ext, err = coreextension.LoadProcessExtension(ctx, p, name, configured.Module, configured.Package)
-			if err != nil {
-				return nil, fmt.Errorf("load extension %q: %w", name, err)
-			}
-		default:
-			return nil, fmt.Errorf("extension %q type %q is unsupported by the host", name, configured.Type)
+		executable, err := resolve(ctx, p, name, configured)
+		if err != nil {
+			return nil, fmt.Errorf("resolve extension %q executable: %w", name, err)
 		}
+		ext, err := coreextension.LoadProcessExtension(ctx, p, name, executable, reg)
+		if err != nil {
+			return nil, fmt.Errorf("load extension %q: %w", name, err)
+		}
+		descriptor := ext.Descriptor()
+		descriptors = append(descriptors, descriptor)
+		closers = append(closers, ext)
 		if err := ext.Register(reg); err != nil {
 			return nil, fmt.Errorf("register extension %q: %w", ext.Descriptor().ID, err)
+		}
+	}
+
+	for _, descriptor := range descriptors {
+		for _, required := range descriptor.Requires {
+			if _, ok := reg.Service(required); !ok {
+				return nil, fmt.Errorf("extension %q requires service %q, but no provider is registered", descriptor.ID, required)
+			}
 		}
 	}
 
@@ -80,12 +93,20 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 		}
 	}
 
-	process := coreextension.ProjectProcess{
-		Project:  p,
-		Module:   projectExtension.Module,
-		Package:  projectExtension.Package,
-		Services: reg,
+	projectExecutable, err := resolve(ctx, p, "project", projectExtension)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project extension executable: %w", err)
 	}
+	process, err := coreextension.StartProjectProcess(ctx, p, projectExecutable, reg)
+	if err != nil {
+		return nil, fmt.Errorf("start project extension: %w", err)
+	}
+	keepProjectProcess := false
+	defer func() {
+		if !keepProjectProcess {
+			_ = process.Close()
+		}
+	}()
 	extensionDescriptor, projectDescriptor, err := process.Describe(ctx)
 	if err != nil {
 		return nil, err
@@ -93,13 +114,50 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 	if projectDescriptor.Identity.Name != p.Config.Project.Name {
 		return nil, fmt.Errorf("project extension identity %q does not match config project name %q", projectDescriptor.Identity.Name, p.Config.Project.Name)
 	}
-	return &ProjectHost{
+	for _, required := range extensionDescriptor.Requires {
+		if _, ok := reg.Service(required); !ok {
+			return nil, fmt.Errorf("project extension %q requires service %q, but no provider is registered", extensionDescriptor.ID, required)
+		}
+	}
+	h := &ProjectHost{
 		Project:    p,
 		Extension:  extensionDescriptor,
 		Descriptor: projectDescriptor,
 		Registry:   reg,
 		process:    process,
-	}, nil
+		closers:    closers,
+	}
+	keepProjectProcess = true
+	keepExtensions = true
+	return h, nil
+}
+
+func (h *ProjectHost) Close() error {
+	if h == nil {
+		return nil
+	}
+	var firstErr error
+	if h.process != nil {
+		if err := h.process.Close(); err != nil {
+			firstErr = err
+		}
+		h.process = nil
+	}
+	if err := closeExtensions(h.closers); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	h.closers = nil
+	return firstErr
+}
+
+func closeExtensions(closers []io.Closer) error {
+	var firstErr error
+	for i := len(closers) - 1; i >= 0; i-- {
+		if err := closers[i].Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (h *ProjectHost) Execute(ctx context.Context, command string, args []string, out io.Writer) error {

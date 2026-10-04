@@ -346,16 +346,23 @@ version = 1
 [project]
 name = "PhotoWaypoint"
 
-[extensions.project]
-source = "./go/devcontrol"
+[extension.project]
+type = "go"
+module = "./go/devcontrol"
+package = "./cmd/provider"
 
-[services.portable-runtime]
+[extension.runtime]
+type = "go"
+module = "."
+package = "./extensions/runtime/dagger/cmd/provider"
+
+[service.portable-runtime]
 provider = "runtime.dagger"
 
-[services.adb]
+[service.adb]
 provider = "native.adb"
 
-[services.vcs]
+[service.vcs]
 provider = "vcs.github"
 
 [ui]
@@ -638,3 +645,62 @@ Self-hosting 的意义是持续证明：
 长期约束：
 
 > **Core 越小越稳定；能力全部通过清晰 Contract 扩展；配置只做 wiring；项目不依赖具体实现；DevTool 必须持续用自己开发自己。**
+
+
+---
+
+## 14. Agent Runtime 边界与项目价值
+
+DevTool 已经从“统一 CLI 壳”演进为 **project-scoped capability runtime for agents**，但产品边界仍然保持克制。
+
+~~~text
+Human / Local Agent / Cloud Agent / CI
+                 │
+                 ▼
+              DevTool
+     config / capability / policy
+       provider routing / lifecycle
+                 │
+                 ▼
+        Environment / Runtime
+                 │
+       ┌─────────┼─────────┐
+       ▼         ▼         ▼
+     Docker    Podman    Kubernetes
+~~~
+
+DevTool 负责的是：
+
+- 项目声明一次能力和 Provider；
+- Local Agent / Cloud Agent 使用同一套 Capability Contract；
+- CodeGraph、LSP、SCM、Runtime 等能力统一发现和路由；
+- Provider 生命周期、side effect/policy 和 self-hosting；
+- 避免 Agent 临时拼 shell command 或自行决定 fallback。
+
+Docker / Kubernetes 等负责的是执行基础设施。Kubernetes 可以成为 Environment Provider，但不会替代 DevTool 的 Agent/Project capability 语义。
+
+明确不进入 DevTool Core 的职责：
+
+- Pod/Node 调度；
+- 集群网络和 Service Discovery；
+- Autoscaling；
+- 容器恢复策略；
+- 多节点资源编排。
+
+当前演进依据真实问题驱动：
+
+~~~text
+thin wrapper
+  -> Project Contract
+  -> Extension / Provider
+  -> config wiring
+  -> Agent Gateway
+  -> CodeGraph + LSP
+  -> SCM
+  -> self-hosting
+  -> process/MCP/container lifecycle reuse
+  -> Environment abstraction
+  -> generic process extension + external loader
+~~~
+
+详细性能问题、Kubernetes 边界和 Lifecycle 决策见 docs/runtime-lifecycle.md。

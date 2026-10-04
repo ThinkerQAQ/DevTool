@@ -398,14 +398,39 @@ code-lsp
 
 ### Toolchain ownership
 
-CodeGraph、Serena、gopls、Kotlin language server 由 DevEnvironment 提供。
+CodeGraph、Serena、gopls、Kotlin language server 由 DevEnvironment 镜像提供；具体执行通过配置的 `environment` Service。
+
+当前链路：
+
+~~~text
+CodeGraph / Serena
+      -> environment Service
+      -> environment.docker
+      -> reusable project container
+~~~
 
 DevTool：
 
 - 不下载这些工具；
 - 不在项目代码里固定工具版本；
-- 只发现 executable、绑定当前 project/worktree、路由请求并验证 health；
-- 允许环境通过标准 PATH 或显式 executable override 提供实现。
+- 绑定当前 project/worktree、路由请求并验证 health；
+- 不在 Code Intelligence Extension 内直接依赖 Docker；
+- Environment Provider 可以替换为 Podman/Kubernetes/Remote，而不修改上层 Capability。
+
+
+
+### Extension loading closure
+
+该阶段后续实现已经完成以下收口：
+
+- Environment / Dagger / CodeGraph / Serena / SCM 均改为配置驱动的 Process Extension；
+- 删除中央 built-in Provider catalog；
+- Process Extension 支持通过双向 RPC 回调 Host Service；
+- Go-specific extension build/cache 从 Core 移到 `adapters/extensionloader`；
+- Core 只负责 executable 之后的 protocol / routing / lifecycle；
+- N -> N+1 -> N+2、CodeGraph/LSP、verify/package 已通过 CI。
+
+详见 `docs/runtime-lifecycle.md`。
 
 ### Agent routing
 

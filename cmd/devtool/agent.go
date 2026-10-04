@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	coreagent "github.com/thinkerqaq/devtool/core/agent"
+	"github.com/thinkerqaq/devtool/adapters/extensionloader"
 	"github.com/thinkerqaq/devtool/core/host"
-	"github.com/thinkerqaq/devtool/extensions"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
 
@@ -30,10 +30,11 @@ func runAgent(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected agent mcp arguments: %v", fs.Args())
 	}
 
-	h, err := host.OpenProject(ctx, "", extensions.Resolve)
+	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
 	if err != nil {
 		return err
 	}
+	defer h.Close()
 	session := projectAgentSession(h, strings.TrimSpace(*contextName))
 	return coreagent.NewGateway(h.Registry, session).Serve(ctx, os.Stdin, out)
 }
