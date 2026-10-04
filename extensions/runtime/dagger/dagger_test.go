@@ -19,6 +19,46 @@ func TestInvokeRejectsMissingFunction(t *testing.T) {
 	}
 }
 
+func TestInvokePassesOutputToDagger(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is unix-only")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dagger")
+	script := `#!/bin/sh
+found=0
+for arg in "$@"; do
+  if [ "$arg" = "--output=./dist" ]; then
+    found=1
+  fi
+done
+if [ "$found" -ne 1 ]; then
+  echo "missing output flag" >&2
+  exit 3
+fi
+echo '"ok"'
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &Extension{executable: path}
+	payload, err := json.Marshal(portable.Invocation{
+		Function: "package",
+		Output:   "./dist",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := e.Invoke(context.Background(), portable.MethodInvoke, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `"ok"` {
+		t.Fatalf("result = %s", raw)
+	}
+}
+
 func TestDoctorUsesConfiguredExecutable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is unix-only")
