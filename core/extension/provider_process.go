@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/thinkerqaq/devtool/core/project"
+	"github.com/thinkerqaq/devtool/core/registry"
 	"github.com/thinkerqaq/devtool/core/service"
 	"github.com/thinkerqaq/devtool/protocol"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
@@ -34,12 +35,12 @@ type processExtensionClient struct {
 	session *protocol.Session
 }
 
-func LoadProcessExtension(ctx context.Context, p project.Project, name, module, pkg string) (*ProcessExtension, error) {
+func LoadProcessExtension(ctx context.Context, p project.Project, name, module, pkg string, services *registry.Registry) (*ProcessExtension, error) {
 	executable, err := buildProcessExtension(ctx, p, name, module, pkg)
 	if err != nil {
 		return nil, err
 	}
-	client, err := startProcessExtensionClient(ctx, p.Root, executable)
+	client, err := startProcessExtensionClient(ctx, p.Root, executable, services)
 	if err != nil {
 		return nil, fmt.Errorf("start extension %q: %w", name, err)
 	}
@@ -155,7 +156,7 @@ func (p *ProcessExtension) CallTool(ctx context.Context, session agentsdk.Sessio
 	return result, nil
 }
 
-func startProcessExtensionClient(ctx context.Context, root, executable string) (*processExtensionClient, error) {
+func startProcessExtensionClient(ctx context.Context, root, executable string, services *registry.Registry) (*processExtensionClient, error) {
 	cmd := exec.CommandContext(ctx, executable)
 	cmd.Dir = root
 	stdin, err := cmd.StdinPipe()
@@ -175,7 +176,23 @@ func startProcessExtensionClient(ctx context.Context, root, executable string) (
 	return &processExtensionClient{
 		cmd:     cmd,
 		stdin:   stdin,
-		session: protocol.NewSession(stdout, stdin, nil),
+		session: protocol.NewSession(stdout, stdin, func(callCtx context.Context, envelope protocol.Envelope) (any, error) {
+			if envelope.Method != protocol.MethodServiceInvoke {
+				return nil, fmt.Errorf("unsupported extension callback method %q", envelope.Method)
+			}
+			if services == nil {
+				return nil, fmt.Errorf("host services are unavailable")
+			}
+			var request protocol.ServiceInvokeRequest
+			if err := json.Unmarshal(envelope.Payload, &request); err != nil {
+				return nil, err
+			}
+			invoker, ok := services.Service(request.Service)
+			if !ok {
+				return nil, fmt.Errorf("service %q is not registered", request.Service)
+			}
+			return invoker.Invoke(callCtx, request.Method, request.Payload)
+		}),
 	}, nil
 }
 
