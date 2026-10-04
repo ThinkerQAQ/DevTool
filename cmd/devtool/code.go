@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/thinkerqaq/devtool/adapters/extensionloader"
 	"github.com/thinkerqaq/devtool/core/host"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 )
@@ -18,7 +19,7 @@ func runCode(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("code requires subcommand: doctor, verify, graph, or lsp")
 	}
-	h, err := host.OpenProject(ctx, "")
+	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
 	if err != nil {
 		return err
 	}
