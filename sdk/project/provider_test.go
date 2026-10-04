@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"strings"
 	"testing"
 
@@ -27,35 +29,96 @@ func (fakeProvider) ProjectDescriptor() contract.ProjectDescriptor {
 	}
 }
 
-func (fakeProvider) Execute(_ context.Context, command string, _ map[string]any, emit func(protocol.Event)) error {
-	emit(protocol.Event{Kind: "log", Message: command})
-	return nil
+func (fakeProvider) Execute(ctx Context, command string, _ map[string]any) error {
+	return ctx.Emit("log", command)
 }
 
 func TestServeDescribe(t *testing.T) {
-	request, _ := json.Marshal(protocol.Envelope{ID: "1", Type: protocol.MessageRequest, Method: protocol.MethodDescribe})
-	var out bytes.Buffer
-	if err := serve(fakeProvider{}, strings.NewReader(string(request)+"\n"), &out); err != nil {
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+
+	go func() {
+		_ = serve(fakeProvider{}, right, right)
+	}()
+
+	client := protocol.NewSession(left, left, nil)
+	var response describePayload
+	if err := client.Call(context.Background(), protocol.MethodDescribe, nil, nil, &response); err != nil {
 		t.Fatal(err)
 	}
-	var response protocol.Envelope
-	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &response); err != nil {
+	if response.Extension.ID != "project.fake" {
+		t.Fatalf("extension id = %q", response.Extension.ID)
+	}
+	_ = left.Close()
+}
+
+func TestServeExecuteEmitsEvent(t *testing.T) {
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+
+	go func() {
+		_ = serve(fakeProvider{}, right, right)
+	}()
+
+	client := protocol.NewSession(left, left, nil)
+	var message string
+	var result map[string]bool
+	if err := client.Call(context.Background(), protocol.MethodExecute, protocol.ExecuteRequest{Command: "ping"}, func(event protocol.Event) {
+		message = event.Message
+	}, &result); err != nil {
 		t.Fatal(err)
 	}
-	if response.Type != protocol.MessageResponse || response.ReplyTo != "1" {
-		t.Fatalf("unexpected response: %+v", response)
+	if message != "ping" {
+		t.Fatalf("event = %q, want ping", message)
+	}
+	if !result["ok"] {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
-func TestServeExecuteEmitsEventAndResponse(t *testing.T) {
-	payload, _ := json.Marshal(protocol.ExecuteRequest{Command: "ping"})
-	request, _ := json.Marshal(protocol.Envelope{ID: "1", Type: protocol.MessageRequest, Method: protocol.MethodExecute, Payload: payload})
-	var out bytes.Buffer
-	if err := serve(fakeProvider{}, strings.NewReader(string(request)+"\n"), &out); err != nil {
+func TestContextInvokeService(t *testing.T) {
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+
+	_ = protocol.NewSession(left, left, func(_ context.Context, envelope protocol.Envelope) (any, error) {
+		if envelope.Method != protocol.MethodServiceInvoke {
+			return nil, io.EOF
+		}
+		var req protocol.ServiceInvokeRequest
+		if err := json.Unmarshal(envelope.Payload, &req); err != nil {
+			return nil, err
+		}
+		return map[string]string{"value": req.Service + ":" + req.Method}, nil
+	})
+	server := protocol.NewSession(right, right, nil)
+
+	ctx := Context{Context: context.Background(), session: server}
+	var response map[string]string
+	if err := ctx.InvokeService("portable-runtime", "doctor", struct{}{}, &response); err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("got %d protocol frames, want 2", len(lines))
+	if response["value"] != "portable-runtime:doctor" {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestProviderProtocolIsLineDelimitedJSON(t *testing.T) {
+	request, _ := json.Marshal(protocol.Envelope{ID: "1", Type: protocol.MessageRequest, Method: protocol.MethodDescribe})
+	var out bytes.Buffer
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		done <- serve(fakeProvider{}, reader, &out)
+	}()
+	_, _ = writer.Write(append(request, '\n'))
+	_ = writer.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(out.String(), "\n") {
+		t.Fatalf("protocol output is not line-delimited: %q", out.String())
 	}
 }

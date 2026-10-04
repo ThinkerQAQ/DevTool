@@ -1,10 +1,8 @@
 package project
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,10 +12,32 @@ import (
 	"github.com/thinkerqaq/devtool/protocol"
 )
 
+type Context struct {
+	context.Context
+	session *protocol.Session
+	replyTo string
+}
+
+func (c Context) Emit(kind, message string) error {
+	return c.session.Event(c.replyTo, protocol.Event{Kind: kind, Message: message})
+}
+
+func (c Context) InvokeService(service, method string, request, response any) error {
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	return c.session.Call(c.Context, protocol.MethodServiceInvoke, protocol.ServiceInvokeRequest{
+		Service: service,
+		Method:  method,
+		Payload: raw,
+	}, nil, response)
+}
+
 type Provider interface {
 	ExtensionDescriptor() extension.Descriptor
 	ProjectDescriptor() contract.ProjectDescriptor
-	Execute(context.Context, string, map[string]any, func(protocol.Event)) error
+	Execute(Context, string, map[string]any) error
 }
 
 type describePayload struct {
@@ -30,71 +50,31 @@ func Serve(provider Provider) error {
 }
 
 func serve(provider Provider, in io.Reader, out io.Writer) error {
-	scanner := bufio.NewScanner(in)
-	encoder := json.NewEncoder(out)
-
-	for scanner.Scan() {
-		var envelope protocol.Envelope
-		if err := json.Unmarshal(scanner.Bytes(), &envelope); err != nil {
-			return fmt.Errorf("decode provider request: %w", err)
-		}
-		if envelope.Type != protocol.MessageRequest {
-			return fmt.Errorf("provider accepts request messages only, got %q", envelope.Type)
-		}
-
+	var session *protocol.Session
+	session = protocol.NewSession(in, out, func(ctx context.Context, envelope protocol.Envelope) (any, error) {
 		switch envelope.Method {
 		case protocol.MethodDescribe:
-			payload := describePayload{
+			return describePayload{
 				Extension: provider.ExtensionDescriptor(),
 				Project:   provider.ProjectDescriptor(),
-			}
-			if err := reply(encoder, envelope.ID, protocol.MessageResponse, payload); err != nil {
-				return err
-			}
+			}, nil
 		case protocol.MethodExecute:
 			var request protocol.ExecuteRequest
 			if err := json.Unmarshal(envelope.Payload, &request); err != nil {
-				if replyErr := reply(encoder, envelope.ID, protocol.MessageError, map[string]string{"message": err.Error()}); replyErr != nil {
-					return replyErr
-				}
-				continue
+				return nil, err
 			}
-			emit := func(event protocol.Event) {
-				_ = reply(encoder, envelope.ID, protocol.MessageEvent, event)
+			providerContext := Context{
+				Context: ctx,
+				session: session,
+				replyTo: envelope.ID,
 			}
-			err := provider.Execute(context.Background(), request.Command, request.Args, emit)
-			if err != nil {
-				if replyErr := reply(encoder, envelope.ID, protocol.MessageError, map[string]string{"message": err.Error()}); replyErr != nil {
-					return replyErr
-				}
-				continue
+			if err := provider.Execute(providerContext, request.Command, request.Args); err != nil {
+				return nil, err
 			}
-			if err := reply(encoder, envelope.ID, protocol.MessageResponse, map[string]bool{"ok": true}); err != nil {
-				return err
-			}
+			return map[string]bool{"ok": true}, nil
 		default:
-			if err := reply(encoder, envelope.ID, protocol.MessageError, map[string]string{"message": "unknown provider method"}); err != nil {
-				return err
-			}
+			return nil, fmt.Errorf("unknown provider method %q", envelope.Method)
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func reply(encoder *json.Encoder, requestID string, kind protocol.MessageType, payload any) error {
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	if requestID == "" {
-		return errors.New("request id is required")
-	}
-	return encoder.Encode(protocol.Envelope{
-		ReplyTo: requestID,
-		Type:    kind,
-		Payload: raw,
 	})
+	return session.Wait()
 }

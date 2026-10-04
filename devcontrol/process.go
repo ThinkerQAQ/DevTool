@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-
-	"github.com/thinkerqaq/devtool/protocol"
 )
 
-func run(ctx context.Context, emit func(protocol.Event), name string, args ...string) error {
-	emit(protocol.Event{Kind: "log", Message: "$ " + name + " " + joinArgs(args)})
+type emitter func(kind, message string)
+
+func run(ctx context.Context, emit emitter, name string, args ...string) error {
+	emit("log", "$ "+name+" "+joinArgs(args))
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

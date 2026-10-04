@@ -1,6 +1,9 @@
 package extension
 
-import "github.com/thinkerqaq/devtool/core/contract"
+import (
+	"github.com/thinkerqaq/devtool/core/contract"
+	"github.com/thinkerqaq/devtool/core/service"
+)
 
 type Kind string
 
@@ -26,7 +29,7 @@ type Registrar interface {
 	RegisterView(contract.ViewDescriptor) error
 	RegisterFeature(contract.FeatureBinding) error
 	RegisterNavigation(contract.NavigationItem) error
-	ProvideService(name, extensionID string, value any) error
+	ProvideService(name, extensionID string, value service.Invoker) error
 }
 
 type Extension interface {

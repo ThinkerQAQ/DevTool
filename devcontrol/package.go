@@ -7,11 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-
-	"github.com/thinkerqaq/devtool/protocol"
 )
 
-func Package(ctx context.Context, emit func(protocol.Event)) error {
+func Package(ctx context.Context, emit emitter) error {
 	if err := Verify(ctx, emit); err != nil {
 		return err
 	}
@@ -27,7 +25,7 @@ func Package(ctx context.Context, emit func(protocol.Event)) error {
 	if err := copyFile(source, target); err != nil {
 		return err
 	}
-	emit(protocol.Event{Kind: "artifact", Message: "Packaged " + target})
+	emit("artifact", "Packaged "+target)
 	return nil
 }
 

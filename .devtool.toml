@@ -5,3 +5,9 @@ name = "DevTool"
 
 [extension.project]
 source = "./devcontrol/cmd/provider"
+
+[extension.runtime]
+source = "builtin:runtime.dagger"
+
+[service.portable-runtime]
+provider = "runtime.dagger"

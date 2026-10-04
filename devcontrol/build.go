@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-
-	"github.com/thinkerqaq/devtool/protocol"
 )
 
 func nextBinaryPath() string {
@@ -18,15 +16,15 @@ func nextBinaryPath() string {
 	return filepath.Join(".devtool", "out", name)
 }
 
-func Build(ctx context.Context, emit func(protocol.Event)) error {
+func Build(ctx context.Context, emit emitter) error {
 	output := nextBinaryPath()
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return err
 	}
-	emit(protocol.Event{Kind: "progress", Message: "Building DevTool N+1"})
+	emit("progress", "Building DevTool N+1")
 	if err := run(ctx, emit, "go", "build", "-o", output, "./cmd/devtool"); err != nil {
 		return err
 	}
-	emit(protocol.Event{Kind: "artifact", Message: fmt.Sprintf("Built %s", output)})
+	emit("artifact", fmt.Sprintf("Built %s", output))
 	return nil
 }

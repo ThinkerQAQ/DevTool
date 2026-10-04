@@ -18,8 +18,14 @@ jobs:
           go-version: '1.27.1'
           cache: true
       - run: go test ./...
+      - name: Install Dagger
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=1.0.0-beta.14 BIN_DIR=$HOME/.local/bin sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Inspect through project extension
         run: go run ./cmd/devtool project inspect --json
+      - name: Portable runtime doctor
+        run: go run ./cmd/devtool runtime.doctor
       - name: Self-host build
         run: go run ./cmd/devtool build
       - name: Self-host verify

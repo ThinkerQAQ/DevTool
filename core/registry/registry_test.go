@@ -1,9 +1,12 @@
 package registry
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/thinkerqaq/devtool/core/contract"
+	"github.com/thinkerqaq/devtool/core/service"
 )
 
 func TestRegistryBuildsDescriptor(t *testing.T) {
@@ -25,10 +28,13 @@ func TestRegistryBuildsDescriptor(t *testing.T) {
 
 func TestRegistryRejectsDuplicateService(t *testing.T) {
 	r := New()
-	if err := r.ProvideService("portable-runtime", "runtime.one", struct{}{}); err != nil {
+	invoker := service.Func(func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	if err := r.ProvideService("portable-runtime", "runtime.one", invoker); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.ProvideService("portable-runtime", "runtime.two", struct{}{}); err == nil {
+	if err := r.ProvideService("portable-runtime", "runtime.two", invoker); err == nil {
 		t.Fatal("ProvideService() expected duplicate provider error")
 	}
 }
