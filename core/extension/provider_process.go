@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/thinkerqaq/devtool/core/project"
 	"github.com/thinkerqaq/devtool/core/registry"
@@ -26,6 +27,9 @@ type processExtensionClient struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	session *protocol.Session
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func LoadProcessExtension(ctx context.Context, p project.Project, name, executable string, services *registry.Registry) (*ProcessExtension, error) {
@@ -40,16 +44,16 @@ func LoadProcessExtension(ctx context.Context, p project.Project, name, executab
 
 	var response protocol.ExtensionDescribeResponse
 	if err := client.call(ctx, protocol.MethodExtensionDescribe, nil, &response); err != nil {
-		client.close()
+		_ = client.close()
 		return nil, fmt.Errorf("describe extension %q: %w", name, err)
 	}
 	var descriptor extensioncontract.Descriptor
 	if err := json.Unmarshal(response.Extension, &descriptor); err != nil {
-		client.close()
+		_ = client.close()
 		return nil, fmt.Errorf("decode extension %q descriptor: %w", name, err)
 	}
 	if strings.TrimSpace(descriptor.ID) == "" {
-		client.close()
+		_ = client.close()
 		return nil, fmt.Errorf("extension %q returned empty id", name)
 	}
 	if descriptor.Kind == extensioncontract.KindProject {
@@ -70,9 +74,9 @@ func (p *ProcessExtension) Close() error {
 	if p.client == nil {
 		return nil
 	}
-	p.client.close()
+	err := p.client.close()
 	p.client = nil
-	return nil
+	return err
 }
 
 func (p *ProcessExtension) Register(reg extensioncontract.Registrar) error {
@@ -197,15 +201,28 @@ func (c *processExtensionClient) call(ctx context.Context, method string, payloa
 	return nil
 }
 
-func (c *processExtensionClient) close() {
+func (c *processExtensionClient) close() error {
 	if c == nil {
-		return
+		return nil
 	}
-	if c.stdin != nil {
-		_ = c.stdin.Close()
-	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-		_ = c.cmd.Wait()
-	}
+	c.closeOnce.Do(func() {
+		if c.stdin != nil {
+			_ = c.stdin.Close()
+		}
+		var sessionErr error
+		if c.session != nil {
+			sessionErr = c.session.Wait()
+		}
+		var processErr error
+		if c.cmd != nil {
+			processErr = c.cmd.Wait()
+		}
+		switch {
+		case sessionErr != nil && sessionErr != io.EOF:
+			c.closeErr = fmt.Errorf("extension process protocol: %w", sessionErr)
+		case processErr != nil:
+			c.closeErr = fmt.Errorf("extension process exited: %w", processErr)
+		}
+	})
+	return c.closeErr
 }
