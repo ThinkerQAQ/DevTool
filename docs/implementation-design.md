@@ -443,6 +443,8 @@ Invocation 描述：
 
 Dagger Adapter 内部负责映射到 Dagger Module/Function。
 
+`Invocation.Module` 使用相对于 `Invocation.Workspace` 的项目路径语义；`runtime.dagger` 负责将其解析为 Dagger CLI 可消费的绝对模块路径。Project Extension 不感知 Dagger CLI 的参数位置或 cwd 解析规则。
+
 ### 8.2 Project Dagger Module
 
 项目自己的 Portable 工程逻辑可以放项目 Dagger Module。
@@ -905,19 +907,17 @@ DevTool N
 DevTool Project Extension
     │
     ▼
-runtime.dagger / native / infra
+PortableRuntime Contract
     │
     ▼
-Build DevTool N+1
+runtime.dagger
+    │
+    ├── build N+1 artifact
+    ├── verify source + build N+1 + N+1 inspect itself
+    └── package verified artifact
     │
     ▼
-N+1 Verify N+1
-    │
-    ▼
-Package
-    │
-    ▼
-Install / Release
+N+1 can invoke the same Project Extension + Runtime Contract again
 ~~~
 
 ### Windows
