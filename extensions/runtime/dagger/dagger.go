@@ -87,7 +87,7 @@ func (e *Extension) invoke(ctx context.Context, request portable.Invocation) (js
 		return nil, fmt.Errorf("portable invocation function is required")
 	}
 
-	args := make([]string, 0, 8+len(request.Args))
+	args := make([]string, 0, 9+len(request.Args))
 	if request.Workspace != "" {
 		args = append(args, "-W", request.Workspace)
 	}
@@ -104,7 +104,11 @@ func (e *Extension) invoke(ctx context.Context, request portable.Invocation) (js
 	for _, key := range keys {
 		args = append(args, "--"+key+"="+request.Args[key])
 	}
-	args = append(args, "--json")
+	if request.Output != "" {
+		args = append(args, "--output="+request.Output)
+	} else {
+		args = append(args, "--json")
+	}
 
 	cmd := exec.CommandContext(ctx, e.executable, args...)
 	var stdout bytes.Buffer
