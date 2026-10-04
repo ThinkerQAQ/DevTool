@@ -74,6 +74,15 @@ func (p *ProcessExtension) Descriptor() extensioncontract.Descriptor {
 	return p.descriptor
 }
 
+func (p *ProcessExtension) Close() error {
+	if p.client == nil {
+		return nil
+	}
+	p.client.close()
+	p.client = nil
+	return nil
+}
+
 func (p *ProcessExtension) Register(reg extensioncontract.Registrar) error {
 	for _, configuredService := range p.descriptor.Provides {
 		serviceName := strings.TrimSpace(configuredService)
