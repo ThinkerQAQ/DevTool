@@ -12,6 +12,10 @@ type = "go"
 module = "./devcontrol"
 package = "./cmd/provider"
 
+[extension.environment]
+type = "builtin"
+source = "environment.docker"
+
 [extension.runtime]
 type = "builtin"
 source = "runtime.dagger"
@@ -28,6 +32,9 @@ source = "intelligence.lsp.serena"
 type = "go"
 module = "."
 package = "./extensions/scm/github/cmd/provider"
+
+[service.environment]
+provider = "environment.docker"
 
 [service.portable-runtime]
 provider = "runtime.dagger"
