@@ -9,7 +9,7 @@ import (
 
 func Resolve(source string) (extension.Extension, error) {
 	switch source {
-	case "builtin:runtime.dagger":
+	case "runtime.dagger":
 		return daggerruntime.New(), nil
 	default:
 		return nil, fmt.Errorf("unknown built-in extension source %q", source)

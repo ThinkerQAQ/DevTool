@@ -12,7 +12,12 @@ func TestLoad(t *testing.T) {
 [project]
 name = "Example"
 [extension.project]
-source = "./devcontrol"
+type = "go"
+module = "./devcontrol"
+package = "./cmd/provider"
+[extension.runtime]
+type = "builtin"
+source = "runtime.dagger"
 [service.portable-runtime]
 provider = "runtime.dagger"
 [ui]
@@ -28,7 +33,23 @@ features = ["jobs", "logs"]
 	if cfg.Project.Name != "Example" {
 		t.Fatalf("project name = %q", cfg.Project.Name)
 	}
+	if cfg.Extension["project"].Module != "./devcontrol" {
+		t.Fatalf("unexpected project extension: %+v", cfg.Extension["project"])
+	}
 	if cfg.Service["portable-runtime"].Provider != "runtime.dagger" {
 		t.Fatalf("unexpected service provider: %+v", cfg.Service)
+	}
+}
+
+func TestValidateRejectsGoExtensionWithoutPackage(t *testing.T) {
+	cfg := Config{
+		Version: CurrentVersion,
+		Project: Project{Name: "Example"},
+		Extension: map[string]Extension{
+			"project": {Type: "go", Module: "./devcontrol"},
+		},
+	}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("Validate() expected missing package error")
 	}
 }

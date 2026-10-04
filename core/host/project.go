@@ -31,6 +31,9 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 	if !ok {
 		return nil, fmt.Errorf("project extension is not configured")
 	}
+	if projectExtension.Type != "go" {
+		return nil, fmt.Errorf("project extension type %q is unsupported", projectExtension.Type)
+	}
 
 	reg := registry.New()
 	names := make([]string, 0, len(p.Config.Extension))
@@ -43,6 +46,9 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 
 	for _, name := range names {
 		configured := p.Config.Extension[name]
+		if configured.Type != "builtin" {
+			return nil, fmt.Errorf("extension %q type %q is unsupported by the host", name, configured.Type)
+		}
 		if resolve == nil {
 			return nil, fmt.Errorf("extension %q requires a resolver", name)
 		}
@@ -67,7 +73,8 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 
 	process := extension.ProjectProcess{
 		Project:  p,
-		Source:   projectExtension.Source,
+		Module:   projectExtension.Module,
+		Package:  projectExtension.Package,
 		Services: reg,
 	}
 	extensionDescriptor, projectDescriptor, err := process.Describe(ctx)

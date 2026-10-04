@@ -19,7 +19,8 @@ import (
 
 type ProjectProcess struct {
 	Project  project.Project
-	Source   string
+	Module   string
+	Package  string
 	Services *registry.Registry
 }
 
@@ -57,10 +58,24 @@ func (p ProjectProcess) Execute(ctx context.Context, command string, args map[st
 }
 
 func (p ProjectProcess) build(ctx context.Context) (string, error) {
-	source := strings.TrimSpace(p.Source)
-	if source == "" {
-		return "", fmt.Errorf("project extension source is required")
+	module := strings.TrimSpace(p.Module)
+	pkg := strings.TrimSpace(p.Package)
+	if module == "" {
+		return "", fmt.Errorf("project extension module is required")
 	}
+	if pkg == "" {
+		return "", fmt.Errorf("project extension package is required")
+	}
+
+	moduleDir := filepath.Join(p.Project.Root, filepath.FromSlash(module))
+	info, err := os.Stat(moduleDir)
+	if err != nil {
+		return "", fmt.Errorf("project extension module %q: %w", module, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("project extension module %q is not a directory", module)
+	}
+
 	cacheDir := filepath.Join(p.Project.Root, ".devtool", "cache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return "", err
@@ -71,8 +86,8 @@ func (p ProjectProcess) build(ctx context.Context) (string, error) {
 	}
 	output := filepath.Join(cacheDir, name)
 
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, source)
-	cmd.Dir = p.Project.Root
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, pkg)
+	cmd.Dir = moduleDir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
