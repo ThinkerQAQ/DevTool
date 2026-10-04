@@ -161,13 +161,7 @@ func closeExtensions(closers []io.Closer) error {
 }
 
 func (h *ProjectHost) Execute(ctx context.Context, command string, args []string, out io.Writer) error {
-	var descriptor *contract.CommandDescriptor
-	for i := range h.Descriptor.Commands {
-		if h.Descriptor.Commands[i].ID == command {
-			descriptor = &h.Descriptor.Commands[i]
-			break
-		}
-	}
+	descriptor := h.commandDescriptor(command)
 	if descriptor == nil {
 		return fmt.Errorf("unknown project command %q", command)
 	}
@@ -175,7 +169,30 @@ func (h *ProjectHost) Execute(ctx context.Context, command string, args []string
 		return fmt.Errorf("command %q does not accept arguments", command)
 	}
 	if len(descriptor.Parameters) != 0 {
-		return fmt.Errorf("typed command arguments are not implemented yet for command %q", command)
+		return fmt.Errorf("typed CLI arguments are not implemented yet for command %q", command)
 	}
-	return h.process.Execute(ctx, command, nil, out)
+	return h.ExecuteCommand(ctx, command, nil, out)
+}
+
+func (h *ProjectHost) ExecuteCommand(ctx context.Context, command string, args map[string]any, out io.Writer) error {
+	descriptor := h.commandDescriptor(command)
+	if descriptor == nil {
+		return fmt.Errorf("unknown project command %q", command)
+	}
+	if len(descriptor.Parameters) == 0 && len(args) != 0 {
+		return fmt.Errorf("command %q does not accept arguments", command)
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	return h.process.Execute(ctx, command, args, out)
+}
+
+func (h *ProjectHost) commandDescriptor(command string) *contract.CommandDescriptor {
+	for i := range h.Descriptor.Commands {
+		if h.Descriptor.Commands[i].ID == command {
+			return &h.Descriptor.Commands[i]
+		}
+	}
+	return nil
 }
