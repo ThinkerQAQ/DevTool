@@ -15,4 +15,18 @@ type Smoke {
       .withExec(["sh", "-c", "printf portable-invoke-ok"])
       .stdout
   }
+
+  pub packageFile: File! {
+    container
+      .from("alpine:3.22.1")
+      .withNewFile("/out/artifact.txt", "file-output-ok\n")
+      .file("/out/artifact.txt")
+  }
+
+  pub packageDirectory: Directory! {
+    container
+      .from("alpine:3.22.1")
+      .withNewFile("/out/artifact.txt", "directory-output-ok\n")
+      .directory("/out")
+  }
 }
