@@ -1,6 +1,6 @@
 # DevTool Runtime Lifecycle and Reuse
 
-Status: implementation in progress
+Status: Phase A implemented; Phase B environment boundary implemented
 
 ## 1. Why this change exists
 
@@ -95,18 +95,27 @@ Longer term, language-specific build knowledge should leave Core entirely and be
 
 ## 4. Minimal implementation for this phase
 
-### Phase A — implement now
+### Phase A — implemented
 
 - cache Project Extension build output;
 - retain a Go Process Extension process for the lifetime of the DevTool host;
 - reuse one development-environment container per project;
 - recreate that container only when the configured image changes;
-- continue reusing CodeGraph/Serena MCP clients through the existing MCP bridge.
+- continue reusing CodeGraph/Serena MCP clients through the existing MCP bridge;
+- bind reusable extension/MCP processes to the Project Host lifecycle and close them explicitly.
 
-### Phase B — only if measurements still justify it
+### Phase B — partially implemented
 
-- extract the development-environment backend behind an Environment service/extension contract;
-- remove remaining language-specific build logic from Core;
+Implemented:
+
+- extract development-environment execution behind the generic `environment` Service;
+- provide Docker as `environment.docker`;
+- make CodeGraph and Serena depend on the Environment service instead of Docker code;
+- validate declared Extension service requirements when opening a project.
+
+Still intentionally deferred:
+
+- remove remaining language-specific Project Extension build logic from Core;
 - remove the central built-in extension catalog in favor of generic configured loading.
 
 ### Phase C — not required now
