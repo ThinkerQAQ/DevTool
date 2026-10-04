@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
 	"github.com/thinkerqaq/devtool/core/service"
 	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/devenv"
+	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
@@ -30,14 +32,32 @@ func New() *Extension {
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
-		ID:       ExtensionID,
-		Kind:     extensioncontract.KindCodeIntelligence,
-		Provides: []string{codeintelligence.GraphServiceName},
+		ID:         ExtensionID,
+		Kind:       extensioncontract.KindCodeIntelligence,
+		Provides:   []string{codeintelligence.GraphServiceName},
+		AgentTools: true,
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
-	return reg.ProvideService(codeintelligence.GraphServiceName, ExtensionID, service.Func(e.Invoke))
+	if err := reg.ProvideService(codeintelligence.GraphServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
+		return err
+	}
+	return reg.ProvideAgentTools(ExtensionID, mcpbridge.New(e.agentMCPCommand))
+}
+
+func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Session) (*exec.Cmd, error) {
+	workspace := codeintelligence.Workspace{
+		Root:             session.ProjectRoot,
+		Workspaces:       session.Workspaces,
+		EnvironmentImage: session.EnvironmentImage,
+	}
+	args, err := graphBaseArgs(workspace, strings.TrimSpace(workspace.EnvironmentImage) != "")
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--profile", "graph", "--mcp")
+	return e.command(ctx, workspace, args...)
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {

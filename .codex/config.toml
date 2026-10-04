@@ -1,17 +1,11 @@
 #:schema https://developers.openai.com/codex/config-schema.json
 
-# DevTool is its own code-intelligence control plane. Stage 0 uses the Go
-# toolchain only to launch DevTool; CodeGraph and LSP stay behind DevTool.
-[mcp_servers.devtool_lsp]
+# DevTool is the single project-aware MCP control plane. Stage 0 uses the Go
+# toolchain only to launch DevTool itself; configured extensions dynamically
+# contribute agent tools through the DevTool registry.
+[mcp_servers.devtool]
 command = "go"
-args = ["run", "./cmd/devtool", "code", "lsp", "mcp", "--context", "codex"]
-required = true
-startup_timeout_sec = 300
-tool_timeout_sec = 120
-
-[mcp_servers.devtool_graph]
-command = "go"
-args = ["run", "./cmd/devtool", "code", "graph", "mcp"]
+args = ["run", "./cmd/devtool", "agent", "mcp", "--context", "codex"]
 required = true
 startup_timeout_sec = 300
 tool_timeout_sec = 120

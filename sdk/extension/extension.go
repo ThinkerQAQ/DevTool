@@ -3,6 +3,7 @@ package extension
 import (
 	"github.com/thinkerqaq/devtool/core/contract"
 	"github.com/thinkerqaq/devtool/core/service"
+	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
 
 type Kind string
@@ -18,10 +19,11 @@ const (
 )
 
 type Descriptor struct {
-	ID       string   `json:"id"`
-	Kind     Kind     `json:"kind"`
-	Provides []string `json:"provides,omitempty"`
-	Requires []string `json:"requires,omitempty"`
+	ID         string   `json:"id"`
+	Kind       Kind     `json:"kind"`
+	Provides   []string `json:"provides,omitempty"`
+	Requires   []string `json:"requires,omitempty"`
+	AgentTools bool     `json:"agent_tools,omitempty"`
 }
 
 type Registrar interface {
@@ -31,6 +33,7 @@ type Registrar interface {
 	RegisterFeature(contract.FeatureBinding) error
 	RegisterNavigation(contract.NavigationItem) error
 	ProvideService(name, extensionID string, value service.Invoker) error
+	ProvideAgentTools(extensionID string, provider agentsdk.ToolProvider) error
 }
 
 type Extension interface {
