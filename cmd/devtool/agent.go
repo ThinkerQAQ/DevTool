@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	coreagent "github.com/thinkerqaq/devtool/core/agent"
 	"github.com/thinkerqaq/devtool/adapters/extensionloader"
+	coreagent "github.com/thinkerqaq/devtool/core/agent"
 	"github.com/thinkerqaq/devtool/core/host"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
@@ -35,6 +35,15 @@ func runAgent(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	defer h.Close()
+
+	projectTools, err := coreagent.NewProjectCommandProvider(h.Descriptor, h.ExecuteCommand)
+	if err != nil {
+		return err
+	}
+	if err := h.Registry.ProvideAgentTools(h.Extension.ID, projectTools); err != nil {
+		return fmt.Errorf("register project command agent tools: %w", err)
+	}
+
 	session := projectAgentSession(h, strings.TrimSpace(*contextName))
 	return coreagent.NewGateway(h.Registry, session).Serve(ctx, os.Stdin, out)
 }
