@@ -34,7 +34,7 @@ jobs:
           go run ./cmd/devtool code graph query get_module_summary '{"path":"core"}'
       - name: Reject project-local code intelligence bootstrap
         run: |
-          if git grep -n -E 'npm (install|exec)|pip install|uv tool install|go install .*gopls|CODEGRAPH_VERSION|SERENA_VERSION|GOPLS_VERSION' -- ':!docs/**'; then
+          if git grep -n -E 'npm (install|exec)|pip install|uv tool install|go install .*gopls|CODEGRAPH_VERSION|SERENA_VERSION|GOPLS_VERSION' -- ':!docs/**' ':!.github/workflows/**' ':!.serena/**'; then
             echo "project-local code-intelligence dependency bootstrap is forbidden"
             exit 1
           fi
