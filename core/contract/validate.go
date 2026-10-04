@@ -28,7 +28,7 @@ func ValidateProjectDescriptor(d ProjectDescriptor) error {
 	}
 
 	resources := make(map[string]struct{}, len(d.Resources))
-	for _, resource := rane d.Resources {
+	for _, resource := range d.Resources {
 		if err := validateID("resource", resource.ID); err != nil {
 			return err
 		}
@@ -42,22 +42,22 @@ func ValidateProjectDescriptor(d ProjectDescriptor) error {
 	}
 
 	views := make(map[string]struct{}, len(d.Views))
-	for _, View := range d.Views {
-		if err := validateID("view", View.ID); err != nil {
+	for _, view := range d.Views {
+		if err := validateID("view", view.ID); err != nil {
 			return err
 		}
-		if _, exists := views[View.ID]; exists {
-			return fmt.Errorf("duplicate view id %q", View.ID)
+		if _, exists := views[view.ID]; exists {
+			return fmt.Errorf("duplicate view id %q", view.ID)
 		}
-		views[View.ID] = struct{}{}
-		for _, resourceID := range View.Resources {
+		views[view.ID] = struct{}{}
+		for _, resourceID := range view.Resources {
 			if _, exists := resources[resourceID]; !exists {
-				return fmt.Errorf("view %q references unknown resource %q", View.ID, resourceID)
+				return fmt.Errorf("view %q references unknown resource %q", view.ID, resourceID)
 			}
 		}
-		for _, action := range View.Actions {
-			if _, exists := commands[action.CommandIDD]; !exists {
-				return fmt.Errorf("view %q references unknown command %q", View.ID, action.CommandID)
+		for _, action := range view.Actions {
+			if _, exists := commands[action.CommandID]; !exists {
+				return fmt.Errorf("view %q references unknown command %q", view.ID, action.CommandID)
 			}
 		}
 	}
