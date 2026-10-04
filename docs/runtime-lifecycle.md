@@ -1,6 +1,6 @@
 # DevTool Runtime Lifecycle and Reuse
 
-Status: Phase A implemented; Phase B environment boundary implemented
+Status: Phase A + Phase B + extension-loader closure implemented and verified
 
 ## 1. Why this change exists
 
@@ -104,19 +104,17 @@ Longer term, language-specific build knowledge should leave Core entirely and be
 - continue reusing CodeGraph/Serena MCP clients through the existing MCP bridge;
 - bind reusable extension/MCP processes to the Project Host lifecycle and close them explicitly.
 
-### Phase B — partially implemented
-
-Implemented:
+### Phase B — implemented
 
 - extract development-environment execution behind the generic `environment` Service;
 - provide Docker as `environment.docker`;
 - make CodeGraph and Serena depend on the Environment service instead of Docker code;
-- validate declared Extension service requirements when opening a project.
-
-Still intentionally deferred:
-
-- remove remaining language-specific Project Extension build logic from Core;
-- remove the central built-in extension catalog in favor of generic configured loading.
+- validate declared Extension service requirements when opening a project;
+- run Environment, Dagger, CodeGraph, Serena and SCM as independently configured process extensions;
+- allow process extensions to call required Host services over the same bidirectional RPC session;
+- remove the central built-in provider-ID catalog;
+- move Go build/cache behavior into `adapters/extensionloader`;
+- make Core consume only resolved extension executables.
 
 ### Phase C — not required now
 
@@ -337,15 +335,15 @@ Profiling showed that the source edit itself was negligible. The architecture wa
 
 That is the intended engineering pattern for future work: **measure a real bottleneck, add the smallest reusable abstraction that removes its root cause, keep provider details outside Core.**
 
-## 13. Remaining closure work
+## 13. Closure work completed
 
-Two structural debts remain before the current extension model is considered closed:
+The two structural debts identified during the lifecycle review are now closed:
 
-### 13.1 Remove the central built-in extension catalog
+### 13.1 Central built-in extension catalog removed
 
-Current `extensions/catalog.go` requires DevTool source changes when a new built-in provider is added. This violates the configuration-driven extension principle.
+`extensions/catalog.go` has been removed. Capability providers are now self-contained process extensions selected by `.devtool.toml`; adding a provider no longer requires adding its ID to a central switch.
 
-Target:
+Current path:
 
 ```text
 .devtool.toml
@@ -353,13 +351,13 @@ Target:
    -> extension process/protocol
 ```
 
-The loader may understand a small set of transport/build mechanisms, but it must not enumerate provider IDs such as `environment.docker`, `runtime.dagger` or `intelligence.codegraph`.
+The loader understands build/transport mechanisms, not provider IDs such as `environment.docker`, `runtime.dagger` or `intelligence.codegraph`.
 
-### 13.2 Remove Go build knowledge from Core
+### 13.2 Go build knowledge removed from Core
 
-Core currently knows how to compile Go Project/Process extensions.
+Core no longer compiles Project/Process extensions. `adapters/extensionloader` resolves configured Go extensions into cached executables before Core starts them.
 
-Target:
+Implemented boundary:
 
 ```text
 Core
@@ -373,13 +371,15 @@ Core owns protocol/lifecycle. A configured loader owns language/build mechanics.
 
 ## 14. Acceptance criteria for the closure
 
-The current refactor is complete when:
+The current refactor has met the closure criteria:
 
-1. no central provider-ID switch is needed to add a provider;
-2. Core contains no `go build` invocation;
-3. project and normal extensions use the same configured artifact-resolution boundary;
-4. process extensions can call required host services over the generic protocol;
-5. CodeGraph/Serena remain independent of the concrete Environment backend;
-6. N -> N+1 -> N+2 self-hosting still passes;
-7. the full CodeGraph/LSP configured-environment path still passes;
-8. no global daemon is required to obtain the lifecycle reuse achieved in this phase.
+1. ✅ no central provider-ID switch is needed to add a provider;
+2. ✅ Core contains no `go build` invocation;
+3. ✅ project and normal extensions use the same configured executable-resolution boundary;
+4. ✅ process extensions can call required Host services over the generic protocol;
+5. ✅ CodeGraph/Serena remain independent of the concrete Environment backend;
+6. ✅ N -> N+1 -> N+2 self-hosting passes;
+7. ✅ the full CodeGraph/LSP configured-environment path passes;
+8. ✅ no global daemon is required to obtain the lifecycle reuse achieved in this phase.
+
+CI verification also covers Go tests, DevControl tests, real Dagger integration, project inspection, runtime doctor, self-host build, verify and package.
