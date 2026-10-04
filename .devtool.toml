@@ -4,4 +4,4 @@ version = 1
 name = "DevTool"
 
 [extension.project]
-source = "./devcontrol"
+source = "./devcontrol/cmd/provider"

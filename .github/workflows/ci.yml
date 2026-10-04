@@ -18,3 +18,11 @@ jobs:
           go-version: '1.27.1'
           cache: true
       - run: go test ./...
+      - name: Inspect through project extension
+        run: go run ./cmd/devtool project inspect --json
+      - name: Self-host build
+        run: go run ./cmd/devtool build
+      - name: Self-host verify
+        run: go run ./cmd/devtool verify
+      - name: Self-host package
+        run: go run ./cmd/devtool package
