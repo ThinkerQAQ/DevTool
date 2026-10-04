@@ -7,19 +7,20 @@ import (
 	"sort"
 
 	"github.com/thinkerqaq/devtool/core/contract"
-	"github.com/thinkerqaq/devtool/core/extension"
+	coreextension "github.com/thinkerqaq/devtool/core/extension"
 	"github.com/thinkerqaq/devtool/core/project"
 	"github.com/thinkerqaq/devtool/core/registry"
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
 
-type ExtensionResolver func(source string) (extension.Extension, error)
+type ExtensionResolver func(source string) (extensioncontract.Extension, error)
 
 type ProjectHost struct {
 	Project    project.Project
-	Extension  extension.Descriptor
+	Extension  extensioncontract.Descriptor
 	Descriptor contract.ProjectDescriptor
 	Registry   *registry.Registry
-	process    extension.ProjectProcess
+	process    coreextension.ProjectProcess
 }
 
 func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (*ProjectHost, error) {
@@ -30,6 +31,9 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 	projectExtension, ok := p.Config.Extension["project"]
 	if !ok {
 		return nil, fmt.Errorf("project extension is not configured")
+	}
+	if projectExtension.Type != "go" {
+		return nil, fmt.Errorf("project extension type %q is unsupported", projectExtension.Type)
 	}
 
 	reg := registry.New()
@@ -43,6 +47,9 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 
 	for _, name := range names {
 		configured := p.Config.Extension[name]
+		if configured.Type != "builtin" {
+			return nil, fmt.Errorf("extension %q type %q is unsupported by the host", name, configured.Type)
+		}
 		if resolve == nil {
 			return nil, fmt.Errorf("extension %q requires a resolver", name)
 		}
@@ -65,9 +72,10 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 		}
 	}
 
-	process := extension.ProjectProcess{
+	process := coreextension.ProjectProcess{
 		Project:  p,
-		Source:   projectExtension.Source,
+		Module:   projectExtension.Module,
+		Package:  projectExtension.Package,
 		Services: reg,
 	}
 	extensionDescriptor, projectDescriptor, err := process.Describe(ctx)

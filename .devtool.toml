@@ -4,10 +4,13 @@ version = 1
 name = "DevTool"
 
 [extension.project]
-source = "./devcontrol/cmd/provider"
+type = "go"
+module = "./devcontrol"
+package = "./cmd/provider"
 
 [extension.runtime]
-source = "builtin:runtime.dagger"
+type = "builtin"
+source = "runtime.dagger"
 
 [service.portable-runtime]
 provider = "runtime.dagger"

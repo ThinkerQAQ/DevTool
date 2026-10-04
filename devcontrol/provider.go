@@ -4,17 +4,17 @@ import (
 	"fmt"
 
 	"github.com/thinkerqaq/devtool/core/contract"
-	"github.com/thinkerqaq/devtool/core/extension"
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/sdk/portable"
 	"github.com/thinkerqaq/devtool/sdk/project"
 )
 
 type Provider struct{}
 
-func (Provider) ExtensionDescriptor() extension.Descriptor {
-	return extension.Descriptor{
+func (Provider) ExtensionDescriptor() extensioncontract.Descriptor {
+	return extensioncontract.Descriptor{
 		ID:   "project.devtool",
-		Kind: extension.KindProject,
+		Kind: extensioncontract.KindProject,
 	}
 }
 

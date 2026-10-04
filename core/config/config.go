@@ -15,7 +15,10 @@ type Project struct {
 }
 
 type Extension struct {
-	Source string `toml:"source" json:"source"`
+	Type    string `toml:"type" json:"type"`
+	Source  string `toml:"source" json:"source,omitempty"`
+	Module  string `toml:"module" json:"module,omitempty"`
+	Package string `toml:"package" json:"package,omitempty"`
 }
 
 type Service struct {
@@ -60,8 +63,20 @@ func Validate(cfg Config) error {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("extension name is required")
 		}
-		if strings.TrimSpace(ext.Source) == "" {
-			return fmt.Errorf("extension.%s.source is required", name)
+		switch ext.Type {
+		case "go":
+			if strings.TrimSpace(ext.Module) == "" {
+				return fmt.Errorf("extension.%s.module is required for go extension", name)
+			}
+			if strings.TrimSpace(ext.Package) == "" {
+				return fmt.Errorf("extension.%s.package is required for go extension", name)
+			}
+		case "builtin":
+			if strings.TrimSpace(ext.Source) == "" {
+				return fmt.Errorf("extension.%s.source is required for builtin extension", name)
+			}
+		default:
+			return fmt.Errorf("extension.%s.type %q is unsupported", name, ext.Type)
 		}
 	}
 	for name, service := range cfg.Service {

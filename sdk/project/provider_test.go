@@ -10,14 +10,14 @@ import (
 	"testing"
 
 	"github.com/thinkerqaq/devtool/core/contract"
-	"github.com/thinkerqaq/devtool/core/extension"
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/protocol"
 )
 
 type fakeProvider struct{}
 
-func (fakeProvider) ExtensionDescriptor() extension.Descriptor {
-	return extension.Descriptor{ID: "project.fake", Kind: extension.KindProject}
+func (fakeProvider) ExtensionDescriptor() extensioncontract.Descriptor {
+	return extensioncontract.Descriptor{ID: "project.fake", Kind: extensioncontract.KindProject}
 }
 
 func (fakeProvider) ProjectDescriptor() contract.ProjectDescriptor {

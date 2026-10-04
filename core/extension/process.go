@@ -15,34 +15,36 @@ import (
 	"github.com/thinkerqaq/devtool/core/project"
 	"github.com/thinkerqaq/devtool/core/registry"
 	"github.com/thinkerqaq/devtool/protocol"
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
 
 type ProjectProcess struct {
 	Project  project.Project
-	Source   string
+	Module   string
+	Package  string
 	Services *registry.Registry
 }
 
 type describePayload struct {
-	Extension Descriptor                 `json:"extension"`
-	Project   contract.ProjectDescriptor `json:"project"`
+	Extension extensioncontract.Descriptor `json:"extension"`
+	Project   contract.ProjectDescriptor   `json:"project"`
 }
 
-func (p ProjectProcess) Describe(ctx context.Context) (Descriptor, contract.ProjectDescriptor, error) {
+func (p ProjectProcess) Describe(ctx context.Context) (extensioncontract.Descriptor, contract.ProjectDescriptor, error) {
 	executable, err := p.build(ctx)
 	if err != nil {
-		return Descriptor{}, contract.ProjectDescriptor{}, err
+		return extensioncontract.Descriptor{}, contract.ProjectDescriptor{}, err
 	}
 
 	var payload describePayload
 	if err := p.invoke(ctx, executable, protocol.MethodDescribe, nil, io.Discard, &payload); err != nil {
-		return Descriptor{}, contract.ProjectDescriptor{}, err
+		return extensioncontract.Descriptor{}, contract.ProjectDescriptor{}, err
 	}
-	if payload.Extension.Kind != KindProject {
-		return Descriptor{}, contract.ProjectDescriptor{}, fmt.Errorf("extension %q has kind %q; expected %q", payload.Extension.ID, payload.Extension.Kind, KindProject)
+	if payload.Extension.Kind != extensioncontract.KindProject {
+		return extensioncontract.Descriptor{}, contract.ProjectDescriptor{}, fmt.Errorf("extension %q has kind %q; expected %q", payload.Extension.ID, payload.Extension.Kind, extensioncontract.KindProject)
 	}
 	if err := contract.ValidateProjectDescriptor(payload.Project); err != nil {
-		return Descriptor{}, contract.ProjectDescriptor{}, fmt.Errorf("validate project extension descriptor: %w", err)
+		return extensioncontract.Descriptor{}, contract.ProjectDescriptor{}, fmt.Errorf("validate project extension descriptor: %w", err)
 	}
 	return payload.Extension, payload.Project, nil
 }
@@ -57,10 +59,24 @@ func (p ProjectProcess) Execute(ctx context.Context, command string, args map[st
 }
 
 func (p ProjectProcess) build(ctx context.Context) (string, error) {
-	source := strings.TrimSpace(p.Source)
-	if source == "" {
-		return "", fmt.Errorf("project extension source is required")
+	module := strings.TrimSpace(p.Module)
+	pkg := strings.TrimSpace(p.Package)
+	if module == "" {
+		return "", fmt.Errorf("project extension module is required")
 	}
+	if pkg == "" {
+		return "", fmt.Errorf("project extension package is required")
+	}
+
+	moduleDir := filepath.Join(p.Project.Root, filepath.FromSlash(module))
+	info, err := os.Stat(moduleDir)
+	if err != nil {
+		return "", fmt.Errorf("project extension module %q: %w", module, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("project extension module %q is not a directory", module)
+	}
+
 	cacheDir := filepath.Join(p.Project.Root, ".devtool", "cache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return "", err
@@ -71,8 +87,8 @@ func (p ProjectProcess) build(ctx context.Context) (string, error) {
 	}
 	output := filepath.Join(cacheDir, name)
 
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, source)
-	cmd.Dir = p.Project.Root
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, pkg)
+	cmd.Dir = moduleDir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

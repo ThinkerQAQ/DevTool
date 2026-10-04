@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/thinkerqaq/devtool/core/contract"
-	"github.com/thinkerqaq/devtool/core/extension"
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/protocol"
 )
 
@@ -35,14 +35,14 @@ func (c Context) InvokeService(service, method string, request, response any) er
 }
 
 type Provider interface {
-	ExtensionDescriptor() extension.Descriptor
+	ExtensionDescriptor() extensioncontract.Descriptor
 	ProjectDescriptor() contract.ProjectDescriptor
 	Execute(Context, string, map[string]any) error
 }
 
 type describePayload struct {
-	Extension extension.Descriptor       `json:"extension"`
-	Project   contract.ProjectDescriptor `json:"project"`
+	Extension extensioncontract.Descriptor `json:"extension"`
+	Project   contract.ProjectDescriptor   `json:"project"`
 }
 
 func Serve(provider Provider) error {
