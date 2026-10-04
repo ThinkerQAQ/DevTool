@@ -4,20 +4,25 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/thinkerqaq/devtool/core/contract"
 	"github.com/thinkerqaq/devtool/core/extension"
 	"github.com/thinkerqaq/devtool/core/project"
+	"github.com/thinkerqaq/devtool/core/registry"
 )
 
+type ExtensionResolver func(source string) (extension.Extension, error)
+
 type ProjectHost struct {
-	Project   project.Project
-	Extension extension.Descriptor
+	Project    project.Project
+	Extension  extension.Descriptor
 	Descriptor contract.ProjectDescriptor
-	process   extension.ProjectProcess
+	Registry   *registry.Registry
+	process    extension.ProjectProcess
 }
 
-func OpenProject(ctx context.Context, start string) (*ProjectHost, error) {
+func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (*ProjectHost, error) {
 	p, err := project.Discover(start)
 	if err != nil {
 		return nil, err
@@ -26,9 +31,44 @@ func OpenProject(ctx context.Context, start string) (*ProjectHost, error) {
 	if !ok {
 		return nil, fmt.Errorf("project extension is not configured")
 	}
+
+	reg := registry.New()
+	names := make([]string, 0, len(p.Config.Extension))
+	for name := range p.Config.Extension {
+		if name != "project" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		configured := p.Config.Extension[name]
+		if resolve == nil {
+			return nil, fmt.Errorf("extension %q requires a resolver", name)
+		}
+		ext, err := resolve(configured.Source)
+		if err != nil {
+			return nil, fmt.Errorf("resolve extension %q: %w", name, err)
+		}
+		if err := ext.Register(reg); err != nil {
+			return nil, fmt.Errorf("register extension %q: %w", ext.Descriptor().ID, err)
+		}
+	}
+
+	for serviceName, configured := range p.Config.Service {
+		provider, ok := reg.ServiceProvider(serviceName)
+		if !ok {
+			return nil, fmt.Errorf("configured service %q has no registered provider", serviceName)
+		}
+		if provider != configured.Provider {
+			return nil, fmt.Errorf("service %q expected provider %q, got %q", serviceName, configured.Provider, provider)
+		}
+	}
+
 	process := extension.ProjectProcess{
-		Project: p,
-		Source:  projectExtension.Source,
+		Project:  p,
+		Source:   projectExtension.Source,
+		Services: reg,
 	}
 	extensionDescriptor, projectDescriptor, err := process.Describe(ctx)
 	if err != nil {
@@ -41,6 +81,7 @@ func OpenProject(ctx context.Context, start string) (*ProjectHost, error) {
 		Project:    p,
 		Extension:  extensionDescriptor,
 		Descriptor: projectDescriptor,
+		Registry:   reg,
 		process:    process,
 	}, nil
 }
