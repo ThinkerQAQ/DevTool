@@ -23,6 +23,7 @@ func TestInvokeRealDagger(t *testing.T) {
 	t.Run("value result", func(t *testing.T) {
 		request, err := json.Marshal(portable.Invocation{
 			Workspace: workspace,
+			Module:    ".dagger/modules/smoke",
 			Function:  "verify",
 		})
 		if err != nil {
@@ -47,6 +48,7 @@ func TestInvokeRealDagger(t *testing.T) {
 		output := filepath.Join(t.TempDir(), "artifact.txt")
 		request, err := json.Marshal(portable.Invocation{
 			Workspace: workspace,
+			Module:    ".dagger/modules/smoke",
 			Function:  "package-file",
 			Output:    output,
 		})
@@ -75,6 +77,7 @@ func TestInvokeRealDagger(t *testing.T) {
 		output := filepath.Join(t.TempDir(), "dist")
 		request, err := json.Marshal(portable.Invocation{
 			Workspace: workspace,
+			Module:    ".dagger/modules/smoke",
 			Function:  "package-directory",
 			Output:    output,
 		})
