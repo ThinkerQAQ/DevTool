@@ -21,8 +21,9 @@ type Session struct {
 	pending   map[string]chan Envelope
 	nextID    atomic.Uint64
 
-	handler RequestHandler
-	done    chan struct{}
+	handler  RequestHandler
+	handlers sync.WaitGroup
+	done     chan struct{}
 
 	errMu sync.Mutex
 	err   error
@@ -134,8 +135,6 @@ func (s *Session) Wait() error {
 }
 
 func (s *Session) readLoop(in io.Reader) {
-	defer close(s.done)
-
 	scanner := bufio.NewScanner(in)
 	for scanner.Scan() {
 		var envelope Envelope
@@ -149,7 +148,11 @@ func (s *Session) readLoop(in io.Reader) {
 				_ = s.replyError(envelope.ID, errors.New("rpc requests are not supported"))
 				continue
 			}
-			go s.handleRequest(envelope)
+			s.handlers.Add(1)
+			go func() {
+				defer s.handlers.Done()
+				s.handleRequest(envelope)
+			}()
 			continue
 		}
 
@@ -169,6 +172,8 @@ func (s *Session) readLoop(in io.Reader) {
 	if err := scanner.Err(); err != nil {
 		s.setError(err)
 	}
+	s.handlers.Wait()
+	close(s.done)
 }
 
 func (s *Session) handleRequest(request Envelope) {
