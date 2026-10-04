@@ -26,10 +26,20 @@ type Extension struct {
 	// is resolved through the configured Environment service.
 	executable string
 	services   extensioncontract.Registrar
+	bridge     *mcpbridge.Provider
 }
 
 func New() *Extension {
-	return &Extension{}
+	e := &Extension{}
+	e.bridge = mcpbridge.New(e.agentMCPCommand)
+	return e
+}
+
+func (e *Extension) Close() error {
+	if e.bridge == nil {
+		return nil
+	}
+	return e.bridge.Close()
 }
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
@@ -47,7 +57,10 @@ func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	if err := reg.ProvideService(codeintelligence.GraphServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
 		return err
 	}
-	return reg.ProvideAgentTools(ExtensionID, mcpbridge.New(e.agentMCPCommand))
+	if e.bridge == nil {
+		e.bridge = mcpbridge.New(e.agentMCPCommand)
+	}
+	return reg.ProvideAgentTools(ExtensionID, e.bridge)
 }
 
 func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Session) (*exec.Cmd, error) {
