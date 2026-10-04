@@ -69,9 +69,7 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		}
 		descriptor := ext.Descriptor()
 		descriptors = append(descriptors, descriptor)
-		if closer, ok := ext.(io.Closer); ok {
-			closers = append(closers, closer)
-		}
+		closers = append(closers, ext)
 		if err := ext.Register(reg); err != nil {
 			return nil, fmt.Errorf("register extension %q: %w", ext.Descriptor().ID, err)
 		}
