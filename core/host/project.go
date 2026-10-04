@@ -38,6 +38,7 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 	}
 
 	reg := registry.New()
+	var descriptors []extensioncontract.Descriptor
 	var closers []io.Closer
 	keepExtensions := false
 	defer func() {
@@ -75,11 +76,21 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 		default:
 			return nil, fmt.Errorf("extension %q type %q is unsupported by the host", name, configured.Type)
 		}
+		descriptor := ext.Descriptor()
+		descriptors = append(descriptors, descriptor)
 		if closer, ok := ext.(io.Closer); ok {
 			closers = append(closers, closer)
 		}
 		if err := ext.Register(reg); err != nil {
 			return nil, fmt.Errorf("register extension %q: %w", ext.Descriptor().ID, err)
+		}
+	}
+
+	for _, descriptor := range descriptors {
+		for _, required := range descriptor.Requires {
+			if _, ok := reg.Service(required); !ok {
+				return nil, fmt.Errorf("extension %q requires service %q, but no provider is registered", descriptor.ID, required)
+			}
 		}
 	}
 
@@ -105,6 +116,11 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 	}
 	if projectDescriptor.Identity.Name != p.Config.Project.Name {
 		return nil, fmt.Errorf("project extension identity %q does not match config project name %q", projectDescriptor.Identity.Name, p.Config.Project.Name)
+	}
+	for _, required := range extensionDescriptor.Requires {
+		if _, ok := reg.Service(required); !ok {
+			return nil, fmt.Errorf("project extension %q requires service %q, but no provider is registered", extensionDescriptor.ID, required)
+		}
 	}
 	h := &ProjectHost{
 		Project:    p,
