@@ -20,13 +20,33 @@ func TestInvokeRejectsMissingFunction(t *testing.T) {
 	}
 }
 
-func TestInvokePassesOutputToDagger(t *testing.T) {
+func TestInvokePassesWorkspaceRelativeModuleAndOutputToDagger(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is unix-only")
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dagger")
 	script := `#!/bin/sh
+if [ "$1" != "-W" ]; then
+  echo "workspace flag must precede api call" >&2
+  exit 2
+fi
+if [ "$3" != "api" ] || [ "$4" != "call" ]; then
+  echo "missing api call" >&2
+  exit 3
+fi
+if [ "$5" != "-m" ]; then
+  echo "module flag must belong to api call" >&2
+  exit 4
+fi
+if [ "$6" != "$2/.dagger/modules/example" ]; then
+  echo "module path was not resolved relative to workspace: $6" >&2
+  exit 5
+fi
+if [ "$7" != "package-artifact" ]; then
+  echo "unexpected function: $7" >&2
+  exit 6
+fi
 found_output=0
 found_json=0
 for arg in "$@"; do
@@ -39,21 +59,24 @@ for arg in "$@"; do
 done
 if [ "$found_output" -ne 1 ]; then
   echo "missing output flag" >&2
-  exit 3
+  exit 7
 fi
 if [ "$found_json" -ne 0 ]; then
   echo "output invocation must not request JSON" >&2
-  exit 4
+  exit 8
 fi
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
+	workspace := filepath.Join(dir, "workspace")
 	e := &Extension{executable: path}
 	payload, err := json.Marshal(portable.Invocation{
-		Function: "package-artifact",
-		Output:   "./dist",
+		Workspace: workspace,
+		Module:    ".dagger/modules/example",
+		Function:  "package-artifact",
+		Output:    "./dist",
 	})
 	if err != nil {
 		t.Fatal(err)
