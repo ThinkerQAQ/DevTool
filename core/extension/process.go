@@ -87,6 +87,18 @@ func (p ProjectProcess) build(ctx context.Context) (string, error) {
 	}
 	output := filepath.Join(cacheDir, name)
 
+	// The Project Extension may depend on Go code outside its own module
+	// directory (DevTool itself does), so use the project root as the
+	// conservative cache boundary. This avoids rebuilding for every
+	// Describe/Execute while still invalidating when project Go sources change.
+	rebuild, err := processExtensionNeedsBuild(p.Project.Root, output)
+	if err != nil {
+		return "", fmt.Errorf("check project extension build cache: %w", err)
+	}
+	if !rebuild {
+		return output, nil
+	}
+
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, pkg)
 	cmd.Dir = moduleDir
 	cmd.Stdout = os.Stderr
