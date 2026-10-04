@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/thinkerqaq/devtool/sdk/portable"
@@ -63,6 +64,31 @@ fi
 	}
 	if string(raw) != "null" {
 		t.Fatalf("result = %s, want null", raw)
+	}
+}
+
+func TestInvokePropagatesDaggerFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is unix-only")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dagger")
+	script := "#!/bin/sh\necho 'dagger exploded' >&2\nexit 7\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	e := &Extension{executable: path}
+	payload, err := json.Marshal(portable.Invocation{Function: "verify"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Invoke(context.Background(), portable.MethodInvoke, payload)
+	if err == nil {
+		t.Fatal("Invoke() expected Dagger failure")
+	}
+	if !strings.Contains(err.Error(), "dagger exploded") {
+		t.Fatalf("Invoke() error = %q, want Dagger stderr", err)
 	}
 }
 
