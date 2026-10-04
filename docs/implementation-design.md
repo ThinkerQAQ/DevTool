@@ -12,6 +12,7 @@ DevTool 的实现目标不是再造一个 CI Engine，也不是把现有各项�
 
 - Core 只负责 Discovery、Configuration、Registry、Protocol、Routing、Event、Policy Hook 和 UI Host。
 - Portable Execution 通过 Runtime Extension 接入，第一实现使用 Dagger。
+- CodeGraph / LSP 通过 Code Intelligence Extension 接入，Core 只负责路由。
 - ADB、Browser、Native Messaging、宿主机进程等通过 Native Extension 接入。
 - 项目自己的工程语义通过 Project Extension 提供。
 - GUI 通过统一 Project Descriptor 和 Feature Registry 渲染。
@@ -247,11 +248,11 @@ DevTool API
                                   │
                      Extension / Service Registry
                                   │
-          ┌───────────────────────┼───────────────────────┐
-          ▼                       ▼                       ▼
-   Project Extension       Runtime Extension        Native Extension
-          │                       │                       │
-   project semantics          Dagger             ADB / Browser / OS
+          ┌──────────────────┬──────────────────┬──────────────────┐
+          ▼                  ▼                  ▼                  ▼
+   Project Extension  Runtime Extension  Code Intelligence   Native Extension
+          │                  │             Extension               │
+   project semantics       Dagger        CodeGraph / LSP      ADB / Browser / OS
           │
           ├──────── Infrastructure Extension
           │
@@ -374,6 +375,8 @@ Extension 之间通过 Service Contract 解耦。
 
 ~~~text
 PortableRuntime
+CodeGraph
+LanguageServer
 ADB
 BrowserSession
 VCS
@@ -490,9 +493,80 @@ Project Build
 
 版本继续由 DevEnvironment 管理，不在 Dagger Module 复制一份。
 
+
 ---
 
-## 9. Native Extension
+## 9. Code Intelligence Extension
+
+Code Intelligence 是通用工程能力，不属于 Project Extension，也不进入 Core 实现。
+
+第一批实现：
+
+~~~text
+extensions/intelligence/
+├── codegraph/
+└── serena/
+~~~
+
+Service Contract：
+
+~~~text
+code-graph
+├── doctor
+├── mcp
+├── sync
+└── query
+
+code-lsp
+├── doctor
+├── verify
+└── mcp
+~~~
+
+职责边界：
+
+~~~text
+Agent / Human
+      │
+      ▼
+devtool code ...
+      │
+      ▼
+Core Router
+      │
+      ├── code-graph -> intelligence.codegraph -> CodeGraph
+      └── code-lsp   -> intelligence.lsp.serena -> Serena -> gopls / Kotlin LSP
+~~~
+
+Core 不引用 CodeGraph、Serena、gopls 或 Kotlin language server 类型。
+
+项目只配置 workspace composition：
+
+~~~toml
+[service.code-graph]
+provider = "intelligence.codegraph"
+
+[service.code-lsp]
+provider = "intelligence.lsp.serena"
+
+[code]
+workspaces = [".", "./devcontrol"]
+~~~
+
+工具链由 DevEnvironment 提供。DevTool 负责 discovery、workspace/branch 上下文、生命周期、路由和 doctor；项目仓库不再各自下载或固定 CodeGraph / Serena 二进制。
+
+DevTool 为每个 worktree 自动创建 `.devtool/cache/devenv-home`，并挂载为 DevEnvironment 的 `/tmp/devenv-home`。这样 CodeGraph 的 graph DB、Serena/语言服务运行态可以跨短生命周期容器复用，同时仍然保持项目/worktree 隔离；不需要 Agent 手工安装、创建缓存目录或直接启动依赖。
+
+Agent 使用规则：
+
+- definition / references / diagnostics / rename 等 compiler-grade 语义优先走 LSP。
+- callers / callees / dependency topology / impact analysis 等结构问题优先走 CodeGraph。
+- 源码修改后，如果图查询用于正确性结论，必须重新执行 one-shot devtool code graph query，确保读取当前 worktree。
+- devtool code verify 同时验证 CodeGraph 当前图和 LSP workspace health。
+
+DevTool 自己必须通过同一 devtool code 路径完成 dogfood。
+
+## 10. Native Extension
 
 Native Extension 负责不能自然容器化的宿主能力。
 
@@ -530,7 +604,7 @@ native.browser
 
 ---
 
-## 10. Infrastructure Extension
+## 11. Infrastructure Extension
 
 第一批实际需要时再实现：
 
@@ -556,7 +630,7 @@ DeploymentTarget
 
 ---
 
-## 11. 配置与 Wiring
+## 12. 配置与 Wiring
 
 项目根：
 
@@ -600,7 +674,7 @@ features = ["environment", "settings", "jobs", "logs"]
 
 ---
 
-## 12. Project Extension
+## 13. Project Extension
 
 Project Extension 是项目工程语义唯一事实来源。
 
@@ -634,7 +708,7 @@ BlogCTL / IDFlow / GoTiny / DOWNKIT 同理。
 
 ---
 
-## 13. Command / Resource / Event Contract
+## 14. Command / Resource / Event Contract
 
 ### Command
 
@@ -685,7 +759,7 @@ result
 
 ---
 
-## 14. Control Surface
+## 15. Control Surface
 
 Project Descriptor：
 
@@ -730,7 +804,7 @@ ProjectDescriptor
 
 ---
 
-## 15. UI 实现
+## 16. UI 实现
 
 第一版技术栈：
 
@@ -805,7 +879,7 @@ Event 使用 SSE。
 
 ---
 
-## 16. Feature Renderer Registry
+## 17. Feature Renderer Registry
 
 复杂控制面通过 Feature Renderer：
 
@@ -828,7 +902,7 @@ ui.browser-capture
 
 ---
 
-## 17. Browser Extension 边界
+## 18. Browser Extension 边界
 
 ### IDFlow
 
@@ -874,7 +948,7 @@ Browser Extension 保留媒体检测和页面上下文。
 
 ---
 
-## 18. Self-hosting
+## 19. Self-hosting
 
 Self-hosting 是实现方案的硬约束。
 
@@ -955,7 +1029,7 @@ minimal installer/bootstrap replaces binary
 
 ---
 
-## 19. Provider / Extension 进程边界
+## 20. Provider / Extension 进程边界
 
 第一阶段 Project Extension 可以采用独立 executable，以获得：
 
@@ -1007,7 +1081,7 @@ stdout 只允许协议 frame；日志走 stderr 或 Event。
 
 ---
 
-## 20. 安全与 Policy
+## 21. 安全与 Policy
 
 Command 必须标记：
 
@@ -1043,7 +1117,7 @@ Local UI：
 
 ---
 
-## 21. Contract Validation
+## 22. Contract Validation
 
 加载项目后先验证：
 
@@ -1066,7 +1140,7 @@ fail closed
 
 ---
 
-## 22. 测试要求
+## 23. 测试要求
 
 ### Core
 
@@ -1131,7 +1205,7 @@ N+1 verifies itself
 
 ---
 
-## 23. 架构约束
+## 24. 架构约束
 
 后续 PR 必须满足：
 
@@ -1150,7 +1224,7 @@ N+1 verifies itself
 
 ---
 
-## 24. 最终调用链
+## 25. 最终调用链
 
 ~~~text
 Human / Agent / CI / GUI
@@ -1186,7 +1260,7 @@ Infrastructure Extension
 
 ---
 
-## 25. 调研参考
+## 26. 调研参考
 
 本方案中的外部产品边界主要参考以下成熟实现：
 

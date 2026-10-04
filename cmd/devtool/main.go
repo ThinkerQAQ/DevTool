@@ -33,6 +33,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return runProject(ctx, args[1:], out)
 	case "config":
 		return runConfig(args[1:], out)
+	case "code":
+		return runCode(ctx, args[1:], out)
 	default:
 		h, err := host.OpenProject(ctx, "", extensions.Resolve)
 		if err != nil {
@@ -116,6 +118,12 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "  devtool project inspect [--json]")
 	fmt.Fprintln(out, "  devtool config path")
 	fmt.Fprintln(out, "  devtool config validate")
+	fmt.Fprintln(out, "  devtool code doctor")
+	fmt.Fprintln(out, "  devtool code verify")
+	fmt.Fprintln(out, "  devtool code graph mcp")
+	fmt.Fprintln(out, "  devtool code graph sync")
+	fmt.Fprintln(out, "  devtool code graph query <tool> [json-args]")
+	fmt.Fprintln(out, "  devtool code lsp mcp [--context agent|codex|claude-code]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Project commands are discovered from the configured Project Extension.")
 }

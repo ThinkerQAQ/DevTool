@@ -52,7 +52,7 @@ DevTool Core
 ~~~text
 DevTool Self-host
     ↓
-GoTiny Portable Runtime
+DevTool Code Intelligence dogfood
     ↓
 PhotoWaypoint Portable + Native
     ↓
@@ -339,17 +339,7 @@ Dagger build image 优先复用：
 
 DevTool 自身先通过普通 Project Extension 调用 `portable-runtime -> runtime.dagger` 完成 build / verify / package，证明控制面本身不享受 Runtime 特例。
 
-随后 GoTiny 作为第一个外部真实验证项目。
-
-GoTiny Project Extension 只定义：
-
-~~~text
-build
-verify
-package
-~~~
-
-Portable 实现全部走 runtime.dagger。
+GoTiny 保留为最小 Portable Contract fixture；下一阶段直接进入 PhotoWaypoint，使用真实的 Go + Android + gomobile + service/integration 链路验证 Runtime 边界。
 
 ### 验收
 
@@ -372,9 +362,94 @@ GoTiny 项目中删除新的工程入口之外的 devtool 编排逻辑。
 if dagger unavailable -> old go run path
 ~~~
 
+
 ---
 
-# Phase 3 — PhotoWaypoint Portable Migration
+# Phase 3 — Code Intelligence Extension
+
+## 目标
+
+先让 DevTool 自己成为 CodeGraph + LSP 的第一 dogfood 项目，之后再用这套能力迁移 PhotoWaypoint。
+
+### 新增
+
+~~~text
+sdk/codeintelligence/
+extensions/intelligence/codegraph/
+extensions/intelligence/serena/
+.serena/project.yml
+.codex/config.toml
+~~~
+
+### Contract
+
+~~~text
+code-graph
+  doctor
+  mcp
+  sync
+  query
+
+code-lsp
+  doctor
+  verify
+  mcp
+~~~
+
+### Toolchain ownership
+
+CodeGraph、Serena、gopls、Kotlin language server 由 DevEnvironment 提供。
+
+DevTool：
+
+- 不下载这些工具；
+- 不在项目代码里固定工具版本；
+- 只发现 executable、绑定当前 project/worktree、路由请求并验证 health；
+- 允许环境通过标准 PATH 或显式 executable override 提供实现。
+
+### Agent routing
+
+~~~text
+semantic/compiler-grade -> devtool code lsp mcp
+structural graph         -> devtool code graph mcp
+post-edit strong check   -> devtool code graph query ...
+health                   -> devtool code verify
+~~~
+
+DevTool 自己的 Stage 0 允许使用 Go toolchain 启动 cmd/devtool，但所有 CodeGraph/LSP 行为仍必须穿过 DevTool Service Contract。
+
+### 验收
+
+必须真实执行：
+
+~~~text
+devtool code doctor
+devtool code verify
+devtool code graph query ...
+devtool code lsp mcp
+~~~
+
+其中 verify 必须同时覆盖：
+
+- 当前 worktree CodeGraph 重建/同步；
+- Serena project health-check；
+- gopls/LSP workspace 可用性。
+
+### Merge Gate
+
+禁止：
+
+~~~text
+Core -> CodeGraph SDK
+Core -> gopls
+Project -> npm install CodeGraph
+Project -> uv install Serena
+if code intelligence unavailable -> legacy project devtool
+~~~
+
+Code Intelligence provider 必须可由配置替换。
+
+# Phase 4 — PhotoWaypoint Portable Migration
 
 ## 目标
 
@@ -452,7 +527,7 @@ Runtime 返回：
 
 ---
 
-# Phase 4 — Native Extension + PhotoWaypoint Cutover
+# Phase 5 — Native Extension + PhotoWaypoint Cutover
 
 ## 目标
 
@@ -540,7 +615,7 @@ PhotoWaypoint 主分支只保留：
 
 ---
 
-# Phase 5 — Control Surface Contract
+# Phase 6 — Control Surface Contract
 
 ## 目标
 
@@ -611,7 +686,7 @@ DevTool 自身也必须通过 Descriptor 渲染。
 
 ---
 
-# Phase 6 — DevTool Web UI
+# Phase 7 — DevTool Web UI
 
 ## 目标
 
@@ -663,7 +738,7 @@ Go Host：
 
 ---
 
-# Phase 7 — BlogCTL Migration
+# Phase 8 — BlogCTL Migration
 
 ## 目标
 
@@ -712,7 +787,7 @@ Blog build/test/Astro/Node/Go 工程执行迁入 Runtime Extension。
 
 ---
 
-# Phase 8 — IDFlow Migration
+# Phase 9 — IDFlow Migration
 
 ## 目标
 
@@ -763,7 +838,7 @@ Browser Extension 不再维护第二套 Scheduler/Settings/Jobs 管理 UI。
 
 ---
 
-# Phase 9 — DOWNKIT Migration
+# Phase 10 — DOWNKIT Migration
 
 ## 目标
 
@@ -807,7 +882,7 @@ Browser Extension 不再维护第二套 Scheduler/Settings/Jobs 管理 UI。
 
 ---
 
-# Phase 10 — Infrastructure Extension
+# Phase 11 — Infrastructure Extension
 
 ## 目标
 
