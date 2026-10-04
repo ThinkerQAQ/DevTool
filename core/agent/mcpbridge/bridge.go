@@ -28,6 +28,18 @@ func New(factory CommandFactory) *Provider {
 	return &Provider{factory: factory}
 }
 
+func (p *Provider) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.client == nil {
+		return nil
+	}
+	err := p.client.close()
+	p.client = nil
+	p.sessionID = ""
+	return err
+}
+
 func (p *Provider) ListTools(ctx context.Context, session agentsdk.Session) ([]agentsdk.Tool, error) {
 	c, err := p.ensureClient(ctx, session)
 	if err != nil {
