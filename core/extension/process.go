@@ -136,18 +136,21 @@ func (p ProjectProcess) invoke(ctx context.Context, executable, method string, p
 			fmt.Fprintln(out, event.Message)
 		}
 	}, result)
+
+	// Closing stdin tells the provider there will be no more requests. Drain its
+	// stdout protocol stream before cmd.Wait closes the StdoutPipe.
 	_ = stdin.Close()
-	processErr := cmd.Wait()
 	sessionErr := session.Wait()
+	processErr := cmd.Wait()
 
 	if callErr != nil {
 		return fmt.Errorf("project extension: %w", callErr)
 	}
-	if processErr != nil {
-		return fmt.Errorf("project extension process: %w", processErr)
-	}
 	if sessionErr != nil {
 		return fmt.Errorf("project extension protocol: %w", sessionErr)
+	}
+	if processErr != nil {
+		return fmt.Errorf("project extension process: %w", processErr)
 	}
 	return nil
 }
