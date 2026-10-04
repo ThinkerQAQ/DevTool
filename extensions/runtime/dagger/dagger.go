@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/thinkerqaq/devtool/core/extension"
 	"github.com/thinkerqaq/devtool/core/service"
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/sdk/portable"
 )
 
@@ -24,15 +24,15 @@ func New() *Extension {
 	return &Extension{executable: "dagger"}
 }
 
-func (e *Extension) Descriptor() extension.Descriptor {
-	return extension.Descriptor{
+func (e *Extension) Descriptor() extensioncontract.Descriptor {
+	return extensioncontract.Descriptor{
 		ID:       ExtensionID,
-		Kind:     extension.KindRuntime,
+		Kind:     extensioncontract.KindRuntime,
 		Provides: []string{portable.ServiceName},
 	}
 }
 
-func (e *Extension) Register(reg extension.Registrar) error {
+func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	return reg.ProvideService(portable.ServiceName, ExtensionID, service.Func(e.Invoke))
 }
 

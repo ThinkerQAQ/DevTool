@@ -3,11 +3,11 @@ package extensions
 import (
 	"fmt"
 
-	"github.com/thinkerqaq/devtool/core/extension"
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	daggerruntime "github.com/thinkerqaq/devtool/extensions/runtime/dagger"
 )
 
-func Resolve(source string) (extension.Extension, error) {
+func Resolve(source string) (extensioncontract.Extension, error) {
 	switch source {
 	case "runtime.dagger":
 		return daggerruntime.New(), nil

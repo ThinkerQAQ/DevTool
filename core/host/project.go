@@ -7,19 +7,20 @@ import (
 	"sort"
 
 	"github.com/thinkerqaq/devtool/core/contract"
-	"github.com/thinkerqaq/devtool/core/extension"
+	coreextension "github.com/thinkerqaq/devtool/core/extension"
 	"github.com/thinkerqaq/devtool/core/project"
 	"github.com/thinkerqaq/devtool/core/registry"
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
 
-type ExtensionResolver func(source string) (extension.Extension, error)
+type ExtensionResolver func(source string) (extensioncontract.Extension, error)
 
 type ProjectHost struct {
 	Project    project.Project
-	Extension  extension.Descriptor
+	Extension  extensioncontract.Descriptor
 	Descriptor contract.ProjectDescriptor
 	Registry   *registry.Registry
-	process    extension.ProjectProcess
+	process    coreextension.ProjectProcess
 }
 
 func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (*ProjectHost, error) {
@@ -71,7 +72,7 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 		}
 	}
 
-	process := extension.ProjectProcess{
+	process := coreextension.ProjectProcess{
 		Project:  p,
 		Module:   projectExtension.Module,
 		Package:  projectExtension.Package,
