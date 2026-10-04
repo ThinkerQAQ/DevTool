@@ -202,3 +202,184 @@ different agents
 A project declares the environment and extensions once. Local agents and remote agents consume the same contracts instead of inventing ad-hoc shell commands and fallbacks.
 
 The architecture is valuable only while Core remains small and execution backends remain replaceable.
+
+
+## 8. Why this is no longer only a thin wrapper
+
+The first useful version of DevTool really was a thin shell:
+
+```text
+Agent
+  -> DevTool
+  -> CodeGraph / LSP / Dagger / Git
+```
+
+That model remains the right mental starting point. The extra architecture appeared only after real constraints were observed:
+
+1. local and remote agents must consume the same project capabilities;
+2. CodeGraph and language servers have useful long-lived state;
+3. project tooling must not recreate containers for every small operation;
+4. SCM publishing must have one configured path rather than agent-defined fallbacks;
+5. a provider must be replaceable without modifying Core;
+6. DevTool itself must use the same contracts it exposes to other projects.
+
+Once these constraints exist, a wrapper that directly shells out to hard-coded tools is no longer sufficient. The smallest useful design becomes a capability router with lifecycle reuse.
+
+The important constraint is that DevTool must stop at that boundary. It should not grow into a general infrastructure orchestrator.
+
+## 9. Minimality rule
+
+The target is **minimal Core + replaceable extensions**, not maximum abstraction.
+
+Core should contain only the mechanics that every provider needs:
+
+- project/config discovery;
+- capability/service registry;
+- extension protocol and routing;
+- lifecycle ownership and cleanup;
+- policy/side-effect boundary required by the control plane.
+
+Core should not contain product/provider knowledge such as:
+
+- Docker container semantics;
+- Kubernetes scheduling;
+- GitHub API behavior;
+- Dagger invocation rules;
+- CodeGraph arguments;
+- Serena/LSP implementation details;
+- Go-specific extension build rules.
+
+A useful test is:
+
+> Adding a new provider for an existing capability should normally require only the provider implementation and configuration. It should not require editing a central switch in Core.
+
+A second test is:
+
+> Replacing Docker with Podman/Kubernetes/remote execution should not require changes to CodeGraph, Serena or Agent Gateway.
+
+## 10. What we deliberately do not build
+
+This phase does not add:
+
+- a global always-on DevTool daemon;
+- plugin marketplace/distribution infrastructure;
+- hot reload;
+- cluster scheduling;
+- autoscaling;
+- service discovery;
+- overlay networking;
+- pod restart policy;
+- multi-node orchestration.
+
+Those are separate problems. If one becomes a measured bottleneck, it can be added through a provider or a later lifecycle layer.
+
+This keeps the implementation proportional to the real problem that triggered the work: repeated process/container cold starts and ad-hoc agent execution paths.
+
+## 11. DevTool and Kubernetes are complementary
+
+The boundary is intentionally explicit:
+
+```text
+Agent / project semantics
+        |
+        v
++----------------------------+
+| DevTool                    |
+| capability + provider      |
+| routing + policy + wiring  |
++----------------------------+
+        |
+        v
+Environment capability
+        |
+   +----+----------+----------------+
+   |               |                |
+ Docker          Podman        Kubernetes/remote
+```
+
+Kubernetes can be an excellent implementation of the environment/execution layer. It does not replace the project capability model above it.
+
+If DevTool begins implementing Kubernetes responsibilities such as scheduling, networking or cluster recovery, that is a design error: those responsibilities should remain below the Environment/Runtime provider boundary.
+
+## 12. Project value and interview-level technical story
+
+The project value is not the number of wrapped CLIs. The value is making heterogeneous developer capabilities deterministic and reusable across agents.
+
+The evolution is:
+
+```text
+thin CLI wrapper
+    -> project contract
+    -> extension/provider boundary
+    -> configuration wiring
+    -> Agent Gateway
+    -> CodeGraph + LSP
+    -> SCM publishing
+    -> self-hosting
+    -> process/MCP/container lifecycle reuse
+    -> environment backend abstraction
+```
+
+Each step came from a concrete failure mode rather than speculative platform design.
+
+A representative example is the slow remote edit/publish path:
+
+```text
+small source edit
+  -> repeated remote calls
+  -> repeated provider startup
+  -> repeated Go build
+  -> docker run --rm
+  -> tool startup
+```
+
+Profiling showed that the source edit itself was negligible. The architecture was paying setup cost around the operation. The resulting change was therefore to fix lifecycle ownership and provider boundaries instead of optimizing the file edit.
+
+That is the intended engineering pattern for future work: **measure a real bottleneck, add the smallest reusable abstraction that removes its root cause, keep provider details outside Core.**
+
+## 13. Remaining closure work
+
+Two structural debts remain before the current extension model is considered closed:
+
+### 13.1 Remove the central built-in extension catalog
+
+Current `extensions/catalog.go` requires DevTool source changes when a new built-in provider is added. This violates the configuration-driven extension principle.
+
+Target:
+
+```text
+.devtool.toml
+   -> generic extension loader
+   -> extension process/protocol
+```
+
+The loader may understand a small set of transport/build mechanisms, but it must not enumerate provider IDs such as `environment.docker`, `runtime.dagger` or `intelligence.codegraph`.
+
+### 13.2 Remove Go build knowledge from Core
+
+Core currently knows how to compile Go Project/Process extensions.
+
+Target:
+
+```text
+Core
+  -> asks for an extension executable/artifact
+
+configured loader/build adapter
+  -> resolves/builds the executable
+```
+
+Core owns protocol/lifecycle. A configured loader owns language/build mechanics.
+
+## 14. Acceptance criteria for the closure
+
+The current refactor is complete when:
+
+1. no central provider-ID switch is needed to add a provider;
+2. Core contains no `go build` invocation;
+3. project and normal extensions use the same configured artifact-resolution boundary;
+4. process extensions can call required host services over the generic protocol;
+5. CodeGraph/Serena remain independent of the concrete Environment backend;
+6. N -> N+1 -> N+2 self-hosting still passes;
+7. the full CodeGraph/LSP configured-environment path still passes;
+8. no global daemon is required to obtain the lifecycle reuse achieved in this phase.
