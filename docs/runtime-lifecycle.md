@@ -451,3 +451,73 @@ initialize
 ```
 
 This specifically protects against the request-context/long-lived-process regression that the CLI-only tests could not detect.
+
+
+## 16. Project Commands as Agent Tools
+
+The next dogfood pass exposed a control-surface gap: the Agent Gateway exposed CodeGraph, Serena/LSP and SCM tools, but the project's own declared engineering commands were only reachable through the CLI.
+
+That meant an agent could inspect, edit and publish code but could not use the same gateway to invoke the project's authoritative `build`, `verify`, `package` or other Project Extension commands.
+
+The implemented path is generic:
+
+```text
+ProjectDescriptor.Commands
+          |
+          v
+ProjectCommandProvider
+          |
+          v
+Agent Gateway MCP tools
+          |
+          v
+ProjectHost.ExecuteCommand
+          |
+          v
+Project Extension
+```
+
+No DevTool-specific command IDs are hard-coded. Every project command is exposed with the normalized name:
+
+```text
+project_<normalized-command-id>
+```
+
+Examples:
+
+```text
+build          -> project_build
+verify         -> project_verify
+runtime.doctor -> project_runtime_doctor
+device.full    -> project_device_full
+```
+
+`FieldDescriptor` parameters are converted into MCP JSON Schema, so project command descriptors remain the single source of truth for CLI/UI/Agent command surfaces.
+
+`SideEffect` metadata is currently projected into MCP annotations:
+
+- `read` -> `readOnlyHint=true`;
+- `destructive` -> `destructiveHint=true`;
+- write/deploy remain non-read-only and non-destructive unless a stricter policy layer classifies them.
+
+Approval/policy enforcement is intentionally a separate concern. This change exposes the metadata without embedding a new policy engine into Core.
+
+Dogfood verification on DevTool itself proved:
+
+```text
+Agent MCP
+  -> project_runtime_doctor
+  -> Project Extension
+  -> portable-runtime
+  -> Dagger
+  -> READY
+
+Agent MCP
+  -> project_build
+  -> Project Extension
+  -> Dagger build-artifact
+  -> .devtool/out/devtool-next
+  -> N+1 project inspect succeeds
+```
+
+The same dogfood pass also found a Docker cold-start compatibility bug: Docker may report a missing container as lowercase `error: no such object`. Environment discovery now treats container-not-found messages case-insensitively, so a cleared workspace container is recreated instead of failing Agent Gateway startup.
