@@ -25,6 +25,13 @@ type ProcessExtension struct {
 	project    project.Project
 	executable string
 	descriptor extensioncontract.Descriptor
+	client     *processExtensionClient
+}
+
+type processExtensionClient struct {
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	session *protocol.Session
 }
 
 func LoadProcessExtension(ctx context.Context, p project.Project, name, module, pkg string) (*ProcessExtension, error) {
@@ -32,21 +39,35 @@ func LoadProcessExtension(ctx context.Context, p project.Project, name, module, 
 	if err != nil {
 		return nil, err
 	}
+	client, err := startProcessExtensionClient(ctx, p.Root, executable)
+	if err != nil {
+		return nil, fmt.Errorf("start extension %q: %w", name, err)
+	}
+
 	var response protocol.ExtensionDescribeResponse
-	if err := callProcessExtension(ctx, p.Root, executable, protocol.MethodExtensionDescribe, nil, &response); err != nil {
+	if err := client.call(ctx, protocol.MethodExtensionDescribe, nil, &response); err != nil {
+		client.close()
 		return nil, fmt.Errorf("describe extension %q: %w", name, err)
 	}
 	var descriptor extensioncontract.Descriptor
 	if err := json.Unmarshal(response.Extension, &descriptor); err != nil {
+		client.close()
 		return nil, fmt.Errorf("decode extension %q descriptor: %w", name, err)
 	}
 	if strings.TrimSpace(descriptor.ID) == "" {
+		client.close()
 		return nil, fmt.Errorf("extension %q returned empty id", name)
 	}
 	if descriptor.Kind == extensioncontract.KindProject {
+		client.close()
 		return nil, fmt.Errorf("extension %q returned project kind; project extension is loaded separately", descriptor.ID)
 	}
-	return &ProcessExtension{project: p, executable: executable, descriptor: descriptor}, nil
+	return &ProcessExtension{
+		project:    p,
+		executable: executable,
+		descriptor: descriptor,
+		client:     client,
+	}, nil
 }
 
 func (p *ProcessExtension) Descriptor() extensioncontract.Descriptor {
@@ -77,7 +98,7 @@ func (p *ProcessExtension) Register(reg extensioncontract.Registrar) error {
 func (p *ProcessExtension) invokeService(ctx context.Context, serviceName, method string, payload json.RawMessage) (json.RawMessage, error) {
 	request := protocol.ExtensionInvokeRequest{Service: serviceName, Method: method, Payload: payload}
 	var result json.RawMessage
-	if err := callProcessExtension(ctx, p.project.Root, p.executable, protocol.MethodExtensionInvoke, request, &result); err != nil {
+	if err := p.client.call(ctx, protocol.MethodExtensionInvoke, request, &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -89,7 +110,7 @@ func (p *ProcessExtension) ListTools(ctx context.Context, session agentsdk.Sessi
 		return nil, err
 	}
 	var response protocol.AgentToolsListResponse
-	if err := callProcessExtension(ctx, p.project.Root, p.executable, protocol.MethodAgentToolsList, protocol.AgentToolsListRequest{Session: rawSession}, &response); err != nil {
+	if err := p.client.call(ctx, protocol.MethodAgentToolsList, protocol.AgentToolsListRequest{Session: rawSession}, &response); err != nil {
 		return nil, err
 	}
 	tools := make([]agentsdk.Tool, 0, len(response.Tools))
@@ -119,10 +140,57 @@ func (p *ProcessExtension) CallTool(ctx context.Context, session agentsdk.Sessio
 		Arguments: args,
 	}
 	var result json.RawMessage
-	if err := callProcessExtension(ctx, p.project.Root, p.executable, protocol.MethodAgentToolCall, request, &result); err != nil {
+	if err := p.client.call(ctx, protocol.MethodAgentToolCall, request, &result); err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+func startProcessExtensionClient(ctx context.Context, root, executable string) (*processExtensionClient, error) {
+	cmd := exec.CommandContext(ctx, executable)
+	cmd.Dir = root
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return nil, err
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		return nil, err
+	}
+	return &processExtensionClient{
+		cmd:     cmd,
+		stdin:   stdin,
+		session: protocol.NewSession(stdout, stdin, nil),
+	}, nil
+}
+
+func (c *processExtensionClient) call(ctx context.Context, method string, payload any, result any) error {
+	if c == nil || c.session == nil {
+		return fmt.Errorf("extension process is unavailable")
+	}
+	if err := c.session.Call(ctx, method, payload, nil, result); err != nil {
+		return fmt.Errorf("extension process: %w", err)
+	}
+	return nil
+}
+
+func (c *processExtensionClient) close() {
+	if c == nil {
+		return
+	}
+	if c.stdin != nil {
+		_ = c.stdin.Close()
+	}
+	if c.cmd != nil && c.cmd.Process != nil {
+		_ = c.cmd.Process.Kill()
+		_ = c.cmd.Wait()
+	}
 }
 
 func buildProcessExtension(ctx context.Context, p project.Project, name, module, pkg string) (string, error) {
@@ -222,38 +290,4 @@ func sanitizeExtensionName(name string) string {
 		}
 		return '-'
 	}, name)
-}
-
-func callProcessExtension(ctx context.Context, root, executable, method string, payload any, result any) error {
-	cmd := exec.CommandContext(ctx, executable)
-	cmd.Dir = root
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	session := protocol.NewSession(stdout, stdin, nil)
-	callErr := session.Call(ctx, method, payload, nil, result)
-	_ = stdin.Close()
-	sessionErr := session.Wait()
-	processErr := cmd.Wait()
-
-	if callErr != nil {
-		return fmt.Errorf("extension process: %w", callErr)
-	}
-	if sessionErr != nil && sessionErr != io.EOF {
-		return fmt.Errorf("extension process protocol: %w", sessionErr)
-	}
-	if processErr != nil {
-		return fmt.Errorf("extension process exited: %w", processErr)
-	}
-	return nil
 }
