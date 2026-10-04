@@ -16,8 +16,9 @@ type = "go"
 module = "./devcontrol"
 package = "./cmd/provider"
 [extension.runtime]
-type = "builtin"
-source = "runtime.dagger"
+type = "go"
+module = "."
+package = "./extensions/runtime/dagger/cmd/provider"
 [service.portable-runtime]
 provider = "runtime.dagger"
 [ui]
@@ -41,16 +42,16 @@ features = ["jobs", "logs"]
 	}
 }
 
-func TestValidateRejectsGoExtensionWithoutPackage(t *testing.T) {
+func TestValidateRequiresExtensionType(t *testing.T) {
 	cfg := Config{
 		Version: CurrentVersion,
 		Project: Project{Name: "Example"},
 		Extension: map[string]Extension{
-			"project": {Type: "go", Module: "./devcontrol"},
+			"project": {},
 		},
 	}
 	if err := Validate(cfg); err == nil {
-		t.Fatal("Validate() expected missing package error")
+		t.Fatal("Validate() expected missing extension type error")
 	}
 }
 

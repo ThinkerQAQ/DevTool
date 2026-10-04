@@ -8,6 +8,7 @@ import (
 
 	"github.com/thinkerqaq/devtool/core/contract"
 	"github.com/thinkerqaq/devtool/core/service"
+	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
 
 type serviceEntry struct {
@@ -15,24 +16,31 @@ type serviceEntry struct {
 	value       service.Invoker
 }
 
+type AgentToolProviderEntry struct {
+	ExtensionID string
+	Provider    agentsdk.ToolProvider
+}
+
 type Registry struct {
-	mu         sync.RWMutex
-	commands   map[string]contract.CommandDescriptor
-	resources  map[string]contract.ResourceDescriptor
-	views      map[string]contract.ViewDescriptor
-	features   map[string]contract.FeatureBinding
-	navigation map[string]contract.NavigationItem
-	services   map[string]serviceEntry
+	mu             sync.RWMutex
+	commands       map[string]contract.CommandDescriptor
+	resources      map[string]contract.ResourceDescriptor
+	views          map[string]contract.ViewDescriptor
+	features       map[string]contract.FeatureBinding
+	navigation     map[string]contract.NavigationItem
+	services       map[string]serviceEntry
+	agentProviders map[string]agentsdk.ToolProvider
 }
 
 func New() *Registry {
 	return &Registry{
-		commands:   map[string]contract.CommandDescriptor{},
-		resources:  map[string]contract.ResourceDescriptor{},
-		views:      map[string]contract.ViewDescriptor{},
-		features:   map[string]contract.FeatureBinding{},
-		navigation: map[string]contract.NavigationItem{},
-		services:   map[string]serviceEntry{},
+		commands:       map[string]contract.CommandDescriptor{},
+		resources:      map[string]contract.ResourceDescriptor{},
+		views:          map[string]contract.ViewDescriptor{},
+		features:       map[string]contract.FeatureBinding{},
+		navigation:     map[string]contract.NavigationItem{},
+		services:       map[string]serviceEntry{},
+		agentProviders: map[string]agentsdk.ToolProvider{},
 	}
 }
 
@@ -103,6 +111,38 @@ func (r *Registry) ServiceProvider(name string) (string, bool) {
 	defer r.mu.RUnlock()
 	entry, ok := r.services[name]
 	return entry.extensionID, ok
+}
+
+func (r *Registry) ProvideAgentTools(extensionID string, provider agentsdk.ToolProvider) error {
+	extensionID = strings.TrimSpace(extensionID)
+	if extensionID == "" {
+		return fmt.Errorf("agent tool provider requires extension id")
+	}
+	if provider == nil {
+		return fmt.Errorf("agent tool provider %q cannot be nil", extensionID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.agentProviders[extensionID]; exists {
+		return fmt.Errorf("agent tool provider %q is already registered", extensionID)
+	}
+	r.agentProviders[extensionID] = provider
+	return nil
+}
+
+func (r *Registry) AgentToolProviders() []AgentToolProviderEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := make([]string, 0, len(r.agentProviders))
+	for id := range r.agentProviders {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	entries := make([]AgentToolProviderEntry, 0, len(ids))
+	for _, id := range ids {
+		entries = append(entries, AgentToolProviderEntry{ExtensionID: id, Provider: r.agentProviders[id]})
+	}
+	return entries
 }
 
 func (r *Registry) ProjectDescriptor(identity contract.ProjectIdentity) contract.ProjectDescriptor {
