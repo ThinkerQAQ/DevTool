@@ -20,13 +20,20 @@ type Envelope struct {
 }
 
 const (
-	MethodDescribe = "provider.describe"
-	MethodExecute  = "provider.execute"
+	MethodDescribe      = "provider.describe"
+	MethodExecute       = "provider.execute"
+	MethodServiceInvoke = "service.invoke"
 )
 
 type ExecuteRequest struct {
 	Command string         `json:"command"`
 	Args    map[string]any `json:"args,omitempty"`
+}
+
+type ServiceInvokeRequest struct {
+	Service string          `json:"service"`
+	Method  string          `json:"method"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 type Event struct {
