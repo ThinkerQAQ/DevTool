@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,17 +10,18 @@ import (
 	"os"
 
 	"github.com/thinkerqaq/devtool/core/config"
+	"github.com/thinkerqaq/devtool/core/host"
 	"github.com/thinkerqaq/devtool/core/project"
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
+	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "devtool:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string, out io.Writer) error {
+func run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
 		printUsage(out)
 		return nil
@@ -27,15 +29,19 @@ func run(args []string, out io.Writer) error {
 
 	switch args[0] {
 	case "project":
-		return runProject(args[1:], out)
+		return runProject(ctx, args[1:], out)
 	case "config":
 		return runConfig(args[1:], out)
 	default:
-		return fmt.Errorf("unknown command %q", args[0])
+		h, err := host.OpenProject(ctx, "")
+		if err != nil {
+			return err
+		}
+		return h.Execute(ctx, args[0], args[1:], out)
 	}
 }
 
-func runProject(args []string, out io.Writer) error {
+func runProject(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] != "inspect" {
 		return errors.New("project requires subcommand: inspect")
 	}
@@ -49,25 +55,27 @@ func runProject(args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
 
-	p, err := project.Discover("")
+	h, err := host.OpenProject(ctx, "")
 	if err != nil {
 		return err
 	}
 	if *jsonOutput {
 		return json.NewEncoder(out).Encode(map[string]any{
-			"name":       p.Config.Project.Name,
-			"root":       p.Root,
-			"config":     p.ConfigPath,
-			"extensions": p.Config.Extension,
-			"services":   p.Config.Service,
-			"ui":         p.Config.UI,
+			"name":       h.Project.Config.Project.Name,
+			"root":       h.Project.Root,
+			"config":     h.Project.ConfigPath,
+			"extension":  h.Extension,
+			"descriptor": h.Descriptor,
+			"services":   h.Project.Config.Service,
+			"ui":         h.Project.Config.UI,
 		})
 	}
-	fmt.Fprintf(out, "Project: %s\n", p.Config.Project.Name)
-	fmt.Fprintf(out, "Root: %s\n", p.Root)
-	fmt.Fprintf(out, "Config: %s\n", p.ConfigPath)
-	fmt.Fprintf(out, "Extensions: %d\n", len(p.Config.Extension))
-	fmt.Fprintf(out, "Services: %d\n", len(p.Config.Service))
+	fmt.Fprintf(out, "Project: %s\n", h.Project.Config.Project.Name)
+	fmt.Fprintf(out, "Root: %s\n", h.Project.Root)
+	fmt.Fprintf(out, "Config: %s\n", h.Project.ConfigPath)
+	fmt.Fprintf(out, "Project Extension: %s\n", h.Extension.ID)
+	fmt.Fprintf(out, "Commands: %d\n", len(h.Descriptor.Commands))
+	fmt.Fprintf(out, "Resources: %d\n", len(h.Descriptor.Resources))
 	return nil
 }
 
@@ -103,8 +111,10 @@ func runConfig(args []string, out io.Writer) error {
 func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "DevTool")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Commands:")
+	fmt.Fprintln(out, "Core Commands:")
 	fmt.Fprintln(out, "  devtool project inspect [--json]")
 	fmt.Fprintln(out, "  devtool config path")
 	fmt.Fprintln(out, "  devtool config validate")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Project commands are discovered from the configured Project Extension.")
 }
