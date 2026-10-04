@@ -5,14 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
-	"time"
-	"unicode"
 
 	"github.com/thinkerqaq/devtool/core/project"
 	"github.com/thinkerqaq/devtool/core/registry"
@@ -35,10 +30,10 @@ type processExtensionClient struct {
 	session *protocol.Session
 }
 
-func LoadProcessExtension(ctx context.Context, p project.Project, name, module, pkg string, services *registry.Registry) (*ProcessExtension, error) {
-	executable, err := buildProcessExtension(ctx, p, name, module, pkg)
-	if err != nil {
-		return nil, err
+func LoadProcessExtension(ctx context.Context, p project.Project, name, executable string, services *registry.Registry) (*ProcessExtension, error) {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return nil, fmt.Errorf("extension %q executable is required", name)
 	}
 	client, err := startProcessExtensionClient(ctx, p.Root, executable, services)
 	if err != nil {
@@ -174,8 +169,8 @@ func startProcessExtensionClient(ctx context.Context, root, executable string, s
 		return nil, err
 	}
 	return &processExtensionClient{
-		cmd:     cmd,
-		stdin:   stdin,
+		cmd:   cmd,
+		stdin: stdin,
 		session: protocol.NewSession(stdout, stdin, func(callCtx context.Context, envelope protocol.Envelope) (any, error) {
 			if envelope.Method != protocol.MethodServiceInvoke {
 				return nil, fmt.Errorf("unsupported extension callback method %q", envelope.Method)
@@ -217,103 +212,4 @@ func (c *processExtensionClient) close() {
 		_ = c.cmd.Process.Kill()
 		_ = c.cmd.Wait()
 	}
-}
-
-func buildProcessExtension(ctx context.Context, p project.Project, name, module, pkg string) (string, error) {
-	module = strings.TrimSpace(module)
-	pkg = strings.TrimSpace(pkg)
-	if module == "" {
-		return "", fmt.Errorf("extension.%s.module is required", name)
-	}
-	if pkg == "" {
-		return "", fmt.Errorf("extension.%s.package is required", name)
-	}
-	moduleDir := filepath.Join(p.Root, filepath.FromSlash(module))
-	info, err := os.Stat(moduleDir)
-	if err != nil {
-		return "", fmt.Errorf("extension %q module %q: %w", name, module, err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("extension %q module %q is not a directory", name, module)
-	}
-	cacheDir := filepath.Join(p.Root, ".devtool", "cache", "extensions")
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return "", err
-	}
-	outputName := sanitizeExtensionName(name)
-	if runtime.GOOS == "windows" {
-		outputName += ".exe"
-	}
-	output := filepath.Join(cacheDir, outputName)
-	rebuild, err := processExtensionNeedsBuild(moduleDir, output)
-	if err != nil {
-		return "", err
-	}
-	if !rebuild {
-		return output, nil
-	}
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, pkg)
-	cmd.Dir = moduleDir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("build extension %q: %w", name, err)
-	}
-	return output, nil
-}
-
-func processExtensionNeedsBuild(moduleDir, output string) (bool, error) {
-	outputInfo, err := os.Stat(output)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return true, nil
-		}
-		return false, err
-	}
-	outputTime := outputInfo.ModTime()
-	rebuild := false
-	err = filepath.WalkDir(moduleDir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			switch entry.Name() {
-			case ".git", ".devtool", "node_modules":
-				if path != moduleDir {
-					return fs.SkipDir
-				}
-			}
-			return nil
-		}
-		name := entry.Name()
-		if filepath.Ext(name) != ".go" && name != "go.mod" && name != "go.sum" {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.ModTime().After(outputTime.Add(time.Millisecond)) {
-			rebuild = true
-			return fs.SkipAll
-		}
-		return nil
-	})
-	if err != nil && err != fs.SkipAll {
-		return false, err
-	}
-	return rebuild, nil
-}
-
-func sanitizeExtensionName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "extension-provider"
-	}
-	return strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, name)
 }
