@@ -1,0 +1,89 @@
+"""
+Self-hosting portable engineering controls for DevTool.
+"""
+type DevTool {
+  """
+  DevTool source from the current workspace, excluding host-local output.
+  """
+  pub source: Directory!
+
+  new(ws: Workspace!) {
+    self.source = ws.directory("/", exclude: [
+      ".git",
+      ".devtool",
+    ])
+    self
+  }
+
+  """
+  Reusable Go build environment.
+  """
+  let goBase: Container! {
+    container
+      .from("golang:1.27.1-bookworm")
+      .withDirectory("/src", source)
+      .withWorkdir("/src")
+      .withMountedCache("/go/pkg/mod", cacheVolume("devtool-go-mod"))
+      .withMountedCache("/root/.cache/go-build", cacheVolume("devtool-go-build"))
+  }
+
+  """
+  Verify DevTool source and prove a freshly built N+1 can discover itself.
+  """
+  let verified: Container! {
+    goBase
+      .withExec(["go", "test", "./..."])
+      .withExec(["go", "-C", "devcontrol", "test", "./..."])
+      .withExec(["go", "build", "-trimpath", "-o", "/tmp/devtool-next", "./cmd/devtool"])
+      .withExec(["/tmp/devtool-next", "project", "inspect", "--json"])
+  }
+
+  """
+  Build the next DevTool binary for the requested host target.
+  """
+  pub buildArtifact(
+    targetOs: String! = "linux",
+    targetArch: String! = "amd64",
+  ): File! {
+    goBase
+      .withEnvVariable("CGO_ENABLED", "0")
+      .withEnvVariable("GOOS", targetOs)
+      .withEnvVariable("GOARCH", targetArch)
+      .withExec([
+        "go", "build",
+        "-trimpath",
+        "-o", "/out/devtool-next",
+        "./cmd/devtool",
+      ])
+      .file("/out/devtool-next")
+  }
+
+  """
+  Run the complete self-host verification gate.
+  """
+  pub verify: Void @check {
+    verified.sync
+    null
+  }
+
+  """
+  Package a verified DevTool binary for the requested host target.
+  """
+  pub packageArtifact(
+    targetOs: String! = "linux",
+    targetArch: String! = "amd64",
+  ): File! {
+    verified
+      .withEnvVariable("CGO_ENABLED", "0")
+      .withEnvVariable("GOOS", targetOs)
+      .withEnvVariable("GOARCH", targetArch)
+      .withExec([
+        "go", "build",
+        "-trimpath",
+        "-ldflags=-s -w",
+        "-o", "/out/devtool",
+        "./cmd/devtool",
+      ])
+      .file("/out/devtool")
+  }
+}
