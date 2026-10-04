@@ -38,6 +38,7 @@ jobs:
           {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
           {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
           {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"codegraph_get_module_summary","arguments":{"path":"core"}}}
+          {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project_runtime_doctor","arguments":{}}}
           EOF
           python - <<'PY'
           import json
@@ -52,7 +53,7 @@ jobs:
                   if "id" in message:
                       messages[message["id"]] = message
 
-          for request_id in (1, 2, 3):
+          for request_id in (1, 2, 3, 4):
               assert request_id in messages, f"missing MCP response {request_id}: {messages}"
               assert "error" not in messages[request_id], messages[request_id]
 
@@ -61,9 +62,20 @@ jobs:
           assert "scm_publish" in names, names
           assert any(name.startswith("codegraph_") for name in names), names
           assert "find_symbol" in names, names
+          for project_tool in (
+              "project_build",
+              "project_verify",
+              "project_package",
+              "project_runtime_doctor",
+          ):
+              assert project_tool in names, names
 
           call = messages[3]["result"]
           assert call.get("isError") is not True, call
+
+          doctor = messages[4]["result"]
+          assert doctor.get("isError") is not True, doctor
+          assert "runtime.dagger READY" in doctor["content"][0]["text"], doctor
           PY
       - name: Reject project-local code intelligence bootstrap
         run: |
