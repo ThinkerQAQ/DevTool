@@ -23,6 +23,7 @@ func runCode(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	defer h.Close()
 	workspace := projectCodeWorkspace(h)
 
 	switch args[0] {
