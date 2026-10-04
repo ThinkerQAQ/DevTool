@@ -1,18 +1,27 @@
 # DevTool 产品方案（PRD）
 
-## 1. 产品定义
+## 1. 一句话定义
 
-DevTool 是一个**自举式、可插拔、配置驱动的工程控制面（Engineering Control Plane）**。
+> **DevTool 是一个极简、可扩展、配置驱动、可自举的工程控制面：Core 只负责发现、装配、路由、协议和呈现，所有项目能力通过 Extension 接入。**
 
-它为 Human、Local Agent、Cloud Agent、CI/CD 和可选 GUI 提供同一套项目工程能力入口，把开发、代码分析、验证、构建、运行、制品、部署、环境诊断和工程控制面统一到一套协议与实现中。
+DevTool 面向 Human、Local Agent、Cloud Agent、CI/CD 和统一 GUI。目标是让不同项目共享同一套工程控制面，而不再分别维护 CLI、UI、Agent Tool、CI Workflow 和本机控制逻辑。
 
-一句话定义：
+核心原则固定为：
 
-> **Project Provider 定义“这个项目怎么开发”，DevTool Host 提供“工程能力怎么执行”，Infrastructure Provider 决定“在什么基础设施上执行”，Control Surface 决定“这些能力如何被 CLI / GUI / Agent 呈现”。**
+> **极简内核 + 可扩展 + 配置化 + 可自举。**
 
-DevTool 不是 PhotoWaypoint 专用 CLI，也不是新的脚本框架，更不是通用 IDE。
+其中：
 
-首批目标项目：
+- **极简内核**：Core 只保留稳定且跨项目的机制，不承载项目领域逻辑。
+- **可扩展**：Portable Runtime、Native Capability、Infrastructure、Project Control、Policy、UI Feature 都通过 Extension 接入。
+- **配置化**：配置只负责发现、选择、组合和 wiring；行为与工程编排必须写正式代码，不把 TOML/YAML 变成新的脚本语言。
+- **可自举**：DevTool 必须能够使用 DevTool 自己完成开发、验证、构建、打包和发布。
+
+---
+
+## 2. 产品目标
+
+DevTool 需要同时支持：
 
 - PhotoWaypoint
 - BlogCTL
@@ -20,644 +29,612 @@ DevTool 不是 PhotoWaypoint 专用 CLI，也不是新的脚本框架，更不�
 - GoTiny
 - DOWNKIT
 - DevTool 自身
+- 后续个人项目
+- 后续企业内网项目
 
-未来应能进入企业内网环境，而无需修改项目本身的工程语义。
+统一入口：
 
----
+~~~text
+Human
+Agent
+CI
+GUI
+   │
+   ▼
+DevTool
+   │
+   ├── Build / Test / Package
+   ├── Code Intelligence
+   ├── Services / Jobs / Logs
+   ├── Device / Browser / Native OS
+   ├── Artifact / Deploy
+   └── Settings / Environment
+~~~
 
-## 2. 本轮设计的代码 Review 基线
-
-本方案不是从抽象概念直接推导，而是基于现有项目代码重新 Review 后收敛。
-
-### 2.1 PhotoWaypoint
-
-Review 的核心代码：
-
-- `go/cmd/devtool/main.go`
-- `go/cmd/devtool/common.go`
-- `go/cmd/devtool/code*.go`
-- `go/cmd/devtool/device.go`
-- `go/cmd/devtool/gear.go`
-- `android/.../settings/SettingsModel.kt`
-- `android/.../settings/SettingsRenderer.kt`
-- `android/.../settings/PhotoWaypointSettingsCatalog.kt`
-- `ScenePlanUiExtension.kt`
-- `SceneResultUiExtension.kt`
-- `ScenePlanRegistry.kt`
-
-已经验证的模式：
-
-1. 当前 DevTool 同时包含通用 Runtime、通用 Capability 和 PhotoWaypoint 项目编排，确实需要拆层。
-2. `SettingNode -> SettingsRenderer` 已证明“类型化描述 + 通用 Renderer”可以工作。
-3. `Scene*UiRegistry` 已证明“稳定主干 + Registry + Extension”适合可插拔 UI。
-4. Device / Gear / Beta 等复杂流程必须留在 Project Provider，不能配置成脚本或塞进 DevTool Core。
-
-### 2.2 BlogCTL
-
-Review 的核心代码：
-
-- `tools/blogctl/bridge/control.go`
-- `toolDescriptor / toolConfigView / toolHealth / toolAction`
-- `extension/popup/environment.js`
-- `extension/popup/tasks.js`
-- `extension/popup/task-ui-state.js`
-- `extension/popup/popup.js`
-- `extension/popup/popup.html`
-
-已经验证的模式：
-
-1. BlogCTL 已经实际实现了 `Descriptor -> Schema -> 动态表单/状态/Action`。
-2. Environment 页面证明配置化 UI 可以显著减少项目专属前端逻辑。
-3. Tasks 页面证明 Job / Progress / Logs / Retry / Pause / Resume 是可复用控制面 Feature。
-4. Publishing / Indexing 等复杂页面也证明：纯通用表单 Schema 无法优雅覆盖全部 UI，需要 Feature Renderer，而不是无限扩张 UI DSL。
-
-### 2.3 IDFlow
-
-当前主分支尚未包含最新产品 UI，本次以当前开放的 **PR #8 `refactor/extension-ui-20261004`** 为 UI Review 基线。
-
-Review 的核心代码：
-
-- `extension/popup.html`
-- `extension/src/popup/popup.ts`
-- `extension/src/popup/tabs.ts`
-- `extension/src/popup/bridge.ts`
-- `go/bridge/server.go`
-- `go/bridge/settings.go`
-- `go/bridge/environment.go`
-
-已经验证的模式：
-
-1. AI Chat / Workflow / Scheduler / Capture / Settings 是清晰的产品级控制面信息架构。
-2. 目前 Tab、DOM selector、Bridge endpoint 和表单仍大量硬编码，无法直接复用到其他项目。
-3. Chat、Browser Capture 这类复杂交互应该成为独立 Feature Renderer。
-4. Scheduler、Settings、Environment 则明显具备跨项目复用价值。
-
-因此，DevTool UI 的目标不是把这三套 UI 代码搬进来，而是抽取三套代码中已经证明可行的模式。
+同一工程能力只允许有一份正式实现。
 
 ---
 
-## 3. 要解决的问题
+## 3. 真实代码 Review 基线
 
-### 3.1 工程入口碎片化
+本 PRD 基于现有项目代码重新收敛，而不是从抽象概念直接设计。
 
-同一个项目常同时存在：
+### 3.1 PhotoWaypoint
 
-- PowerShell
-- Bash
-- Makefile
-- npm scripts
-- Go helper
-- Gradle task
-- Docker Compose
-- CI YAML
-- Agent Prompt
+已重点 Review：
 
-同一工程动作被重复定义，最终会漂移。
+- go/cmd/devtool/main.go
+- common.go
+- build.go
+- device.go
+- services.go
+- postgres.go
+- code*.go
+- Android Settings Model / Renderer
+- Scene Plan / Result UI Registry
+- DevEnvironment Base / Android 镜像
 
-目标：
+确认：
 
-```text
-Human ───────┐
-Agent ───────┼──> DevTool ──> Project Provider
-CI ──────────┤
-GUI ─────────┘
-```
+1. 当前 PhotoWaypoint DevTool 混合了通用 Runtime、工程 Capability 和项目编排，最需要拆层。
+2. Go、gomobile、Gradle、PostgreSQL、provider-gateway、recheck 等大量逻辑属于 Portable Execution。
+3. ADB、USB 真机、adb reverse、安装 APK、logcat 属于 Host Native。
+4. Settings Model/Renderer 已验证“结构化描述 + 通用 Renderer”可行。
+5. Scene UI Registry 已验证“稳定主干 + Registry + Extension”可行。
 
-工程编排只保留一份事实来源。
+### 3.2 BlogCTL
 
----
+已重点 Review：
 
-### 3.2 通用能力和项目逻辑混杂
+- toolDescriptor
+- toolConfigView
+- toolHealth
+- toolAction
+- Environment 动态工具卡
+- Tasks / Logs
+- Publishing / Indexing
+- Browser Extension / Native Bridge
 
-以 PhotoWaypoint 为例：
+确认：
 
-通用能力：
+1. BlogCTL 已经有成熟的 Descriptor-driven UI 雏形。
+2. Settings / Environment / Jobs / Logs 具有明显通用性。
+3. Publishing / Indexing 的复杂度说明不能把所有 UI 都硬塞进通用 Form DSL。
+4. Browser cookie/session/native publishing 仍属于 Browser/Native Domain。
 
-- Process / Filesystem / Network
-- Git
-- CodeGraph / LSP / Serena
-- Docker / PostgreSQL
-- Android / ADB / Gradle
+### 3.3 IDFlow
 
-项目逻辑：
+UI Review 基线为当前新 UI 分支/PR 中的：
 
-- Device full/runtime
-- Gear
-- Beta
-- License
-- provider/recheck 编排
-- PhotoWaypoint 部署语义
-
-DevTool 必须让两者分离。
-
----
-
-### 3.3 CLI、GUI、Agent 各写一套控制逻辑
-
-理想模型不是：
-
-```text
-CLI implementation
-GUI implementation
-Agent tool implementation
-CI implementation
-```
-
-而是：
-
-```text
-             Project Provider
-                    |
-          Project / Command Descriptor
-                    |
-      +-------------+-------------+
-      |             |             |
-     CLI           GUI          Agent
-```
-
-一份 Command/Parameter 契约，被不同 Renderer 使用。
-
----
-
-### 3.4 UI 无法跨项目复用
-
-PhotoWaypoint、BlogCTL、IDFlow 的控制面完全不同。
-
-因此 DevTool 不应该硬编码：
-
-```text
-PhotoWaypointPage
-BlogCTLPage
-IDFlowPage
-```
-
-而应该提供：
-
-> **Control Surface Protocol**
-
-项目声明：
-
-- Navigation
-- View
-- Resource
-- Action
-- Event
-
-DevTool UI 负责渲染。
-
----
-
-### 3.5 个人环境和企业内网不一致
-
-个人环境可能使用：
-
-- GitHub
-- GitHub Actions
-- GHCR
-- Railway
-- 公网 package registry
-
-企业环境可能使用：
-
-- GitLab / Gerrit
-- Jenkins / GitLab CI / Tekton
-- Harbor
-- Kubernetes / Internal PaaS
-- Nexus / Artifactory
-- 企业 Secrets / SSO / Proxy
-
-Project Provider 不应该感知这些具体实现。
-
----
-
-## 4. 核心产品原则
-
-### 4.1 极简主干
-
-DevTool Core 只保留稳定、跨项目的最小能力：
-
-- Project Discovery
-- Provider Lifecycle
-- Protocol
-- Runtime
-- Capability Registry
-- Policy
-- Control Surface
-- Structured Event
-- Artifact / Evidence
-
-项目领域不进入 Core。
-
----
-
-### 4.2 可插拔
-
-三个独立可插拔维度：
-
-```text
-Project Provider
-    项目怎么开发
-
-Capability
-    通用工程动作怎么执行
-
-Infrastructure Provider
-    具体基础设施怎么实现
-```
-
-UI 另有：
-
-```text
-Feature Renderer Registry
-    复杂控制面怎么显示
-```
-
----
-
-### 4.3 配置化，但不创造新的脚本 DSL
-
-“配置化”指：
-
-- Project Descriptor
-- Command Descriptor
-- Resource Descriptor
-- Control Surface Descriptor
-- Settings Schema
-
-这些都是**结构化数据**。
-
-`.devtool.toml` 只负责发现 Provider 和少量静态元数据。
-
-禁止把 TOML 变成：
-
-```toml
-build = "go build ..."
-verify = "./verify.ps1"
-deploy = "npm run deploy"
-```
-
-工程编排必须由正式代码实现。
-
----
-
-### 4.4 控制面代码化，不脚本化
-
-项目工程控制面使用 Project Provider 实现。
-
-PowerShell/Bash/Make/npm scripts 可以作为第三方生态工具的内部实现细节，但不再作为项目工程流程的 Single Source of Truth。
-
----
-
-### 4.5 UI 采用两级模型
-
-第一版只提供：
-
-#### Level 1：通用 Schema
-
-覆盖高频、稳定 UI：
-
-- Status
-- KeyValue
-- List
-- Table
-- Progress
-- Log
-- Form
-- Action
+- AI Chat
+- Workflow
+- Schedule
+- Capture
 - Settings
-- Environment
+- Browser Bridge
 
-#### Level 2：内置 Feature Renderer
+确认：
 
-覆盖复杂但具有复用价值的交互：
+1. 信息架构清晰，但当前 Tab、DOM、Bridge Endpoint 仍大量项目硬编码。
+2. Scheduler / Settings / Jobs 适合通用化。
+3. Chat / Browser Capture 需要 Feature Renderer。
+4. Chrome activeTab/debugger/scripting/tabs 等能力只能留在 Browser Extension。
+
+### 3.4 GoTiny / DOWNKIT
+
+GoTiny 是纯 Go Runtime/Library 项目，适合验证最小 Portable Runtime 接入。
+
+DOWNKIT 同时具备：
+
+- Go build/package
+- Browser Extension
+- Native Messaging
+- Windows/Linux/macOS 本机 sidecar
+
+适合验证 Portable 与 Native 分界。
+
+---
+
+## 4. 市面方案调研后的产品决策
+
+### 4.1 Dagger：作为可替换 Portable Runtime Extension
+
+Dagger 已经提供：
+
+- typed Module / Function
+- Container / File / Directory
+- Service
+- Secret
+- Cache
+- Artifact
+- Module dependency
+- Local / CI 同构执行
+
+它与 DevTool 的 Portable Execution 高度重叠。
+
+产品决策：
+
+> **不复制 Dagger 源码，不 fork Dagger，不让 Dagger API 泄漏进 DevTool Core。**
+
+DevTool 只通过 Runtime Contract 和 Adapter 使用 Dagger。
+
+未来 Dagger 不满足要求时，只替换 Runtime Extension，不修改：
+
+- DevTool Core
+- Project Extension
+- Control Surface
+- Native Extension
+- Infrastructure Extension
+
+### 4.2 Backstage：借鉴 Plugin / Extension Point，不直接作为本地 DevTool
+
+Backstage 已证明：
+
+- App 负责 wiring
+- Plugin 提供功能
+- Extension 组成 UI
+- Utility API 解耦实现
+- Route 可以通过间接引用解耦
+
+DevTool 借鉴其 Extension 思想，但不直接引入整套 Backstage，因为 DevTool 的核心场景是：
+
+- localhost
+- 当前 workspace
+- ADB
+- Browser Extension
+- Native Process
+- Local Agent
+
+### 4.3 JSON Forms：只负责 Schema Form
+
+JSON Forms 的 Schema + Renderer Registry 模式适合：
+
+- Command 参数
+- Settings
+- Config
+
+但不承担：
 
 - Jobs
-- Logs
-- Scheduler
-- Workflow
 - Chat
+- Workflow
+- Device Dashboard
 - Browser Capture
-- Environment / Settings
 
-第一版**不开放项目任意注入 JavaScript/React bundle**。
+复杂 UI 使用 DevTool Feature Renderer。
 
-如果未来确实出现无法由 Schema + 内置 Feature 表达的场景，再设计隔离的 Custom Renderer。
+### 4.4 其他产品
+
+Devbox、Score、Humanitec、Port 等在可复现环境、部署抽象、企业控制面方面有可借鉴点，但当前不作为 DevTool 第一阶段硬依赖。
+
+原则：
+
+> **已有成熟基础设施就通过 Extension 接入；DevTool 不重造已有且非差异化的执行引擎。**
 
 ---
 
-### 4.6 CLI / GUI / Agent 共用同一契约
+## 5. 产品架构原则
+
+### 5.1 Core 必须极简
+
+Core 只负责：
+
+~~~text
+Project Discovery
+Configuration
+Extension Discovery
+Extension Lifecycle
+Registry
+Service Routing
+Command / Resource / Event Contract
+Control Surface Contract
+Policy Hook
+UI Host
+Self-host Bootstrap Boundary
+~~~
+
+Core 不包含：
+
+- PhotoWaypoint Device
+- Blog Publishing
+- IDFlow Capture
+- Dagger Container API
+- GitHub API
+- ADB 项目流程
+- 企业内部平台逻辑
+- 项目专属 React 页面
+
+### 5.2 所有能力通过 Extension 接入
+
+统一扩展模型：
+
+~~~text
+DevTool Extension
+├── Project Extension
+├── Runtime Extension
+├── Native Extension
+├── Infrastructure Extension
+├── Policy Extension
+└── UI Feature Extension
+~~~
+
+#### Project Extension
+
+定义：
+
+> 当前项目有哪些 Command、Resource、Control Surface，以及项目级编排。
+
+#### Runtime Extension
+
+定义：
+
+> 可移植工程执行能力由谁实现。
+
+第一实现：
+
+~~~text
+runtime.dagger
+~~~
+
+#### Native Extension
+
+定义：
+
+> 宿主机、物理设备、浏览器等无法自然容器化的能力。
 
 例如：
 
-```text
-Command: device.full
-Parameters:
-  serial: device
-  skipTests: boolean
-```
+~~~text
+native.adb
+native.browser
+native.process
+native.filesystem
+~~~
 
-可以同时生成：
+#### Infrastructure Extension
 
-CLI：
+例如：
 
-```text
-devtool device full --serial xxx --skip-tests
-```
+~~~text
+vcs.github
+registry.ghcr
+deploy.railway
+~~~
 
-GUI：
+未来可替换为：
 
-```text
-Device [ xxx ▼ ]
-☐ Skip tests
-[完整构建并安装]
-```
+~~~text
+vcs.gitlab
+registry.harbor
+deploy.kubernetes
+~~~
 
-Agent：
+#### UI Feature Extension
 
-```json
-{
-  "tool": "device.full",
-  "arguments": {
-    "serial": "xxx",
-    "skipTests": true
-  }
-}
-```
+定义复杂控制面 Renderer：
 
----
-
-### 4.7 Build Once, Promote Many
-
-同一个 artifact：
-
-```text
-Build
-  |
-  v
-artifact@source-sha
-  |
-  +--> DEV
-  +--> STAGING
-  +--> PROD
-```
-
-环境晋级不重新构建。
+~~~text
+ui.jobs
+ui.logs
+ui.scheduler
+ui.workflow
+ui.chat
+ui.browser-capture
+~~~
 
 ---
 
-### 4.8 Self-hosting
+## 6. 配置化原则
 
-DevTool 必须能够开发 DevTool 自己：
+配置只负责：
 
-```text
-DevTool N
-  -> build N+1
-  -> N+1 verify itself
-  -> install / publish
-```
+~~~text
+发现
+选择
+组合
+实例化
+wiring
+~~~
 
-Self-hosting 是架构正确性的长期验证。
+项目行为仍写正式代码。
+
+示意：
+
+~~~toml
+version = 1
+
+[project]
+name = "PhotoWaypoint"
+
+[extensions.project]
+source = "./go/devcontrol"
+
+[services.portable-runtime]
+provider = "runtime.dagger"
+
+[services.adb]
+provider = "native.adb"
+
+[services.vcs]
+provider = "vcs.github"
+
+[ui]
+features = ["environment", "jobs", "logs", "settings"]
+~~~
+
+禁止：
+
+~~~toml
+build = "go build ..."
+verify = "./verify.ps1"
+deploy = "npm run deploy"
+~~~
+
+DevTool 不创建新的脚本 DSL。
 
 ---
 
-## 5. Control Surface 产品模型
+## 7. Portable 与 Native 的边界
 
-Control Surface 只保留五个核心概念：
+~~~text
+                    Project Extension
+                          │
+                    DevTool Contract
+                          │
+             ┌────────────┴────────────┐
+             ▼                         ▼
+      Portable Runtime            Native Runtime
+             │                         │
+      Runtime Extension           Native Extension
+             │                         │
+           Dagger                ADB / Browser / OS
+~~~
 
-```text
+### Portable
+
+优先进入 Runtime Extension：
+
+- Go build/test
+- Node/TypeScript build/test
+- Gradle build
+- gomobile build
+- PostgreSQL integration
+- Service lifecycle
+- package
+- artifact
+- cache
+- secret injection
+- CI execution
+
+### Native
+
+保留在 Native Extension：
+
+- USB / ADB
+- adb reverse/install/logcat
+- real Chrome/Edge session
+- Browser debugger/cookies/tabs
+- Native Messaging
+- Windows Registry
+- 系统编辑器
+- 本机进程/设备集成
+
+---
+
+## 8. 统一 Control Surface
+
+DevTool UI 是所有项目的完整工程控制中心。
+
+核心模型只保留：
+
+~~~text
 Navigation
 View
 Resource
 Action
 Event
-```
+~~~
 
-### Navigation
+Project Extension 返回 Project Descriptor：
 
-定义当前项目有哪些控制面入口。
+~~~text
+ProjectDescriptor
+├── Commands
+├── Resources
+├── Navigation
+├── Views
+└── FeatureBindings
+~~~
 
-例如 IDFlow：
+DevTool UI 不允许出现：
 
-```text
-AI Chat
-Workflow
-Schedule
-Capture
-Settings
-```
+~~~text
+PhotoWaypointPage
+BlogCTLPage
+IDFlowPage
+~~~
 
-### View
-
-定义页面如何组织 Resource 和 Action。
-
-### Resource
-
-只读状态模型，例如：
-
-- environment
-- devices
-- jobs
-- workflows
-- publications
-- artifacts
-
-### Action
-
-对一个 Command 的 UI 引用。
-
-Action 自己不实现业务逻辑。
-
-### Event
-
-描述运行中的：
-
-- progress
-- log
-- warning
-- error
-- artifact
-- evidence
-- resource.changed
-- result
+项目通过 Descriptor 和 Feature Binding 获得 UI。
 
 ---
 
-## 6. 内置 Feature
+## 9. UI 产品边界
 
-### 6.1 Environment / Settings
+### 9.1 DevTool UI
 
-来源于 BlogCTL 动态工具卡和 PhotoWaypoint Settings 模型。
+负责完整控制中心：
 
-应支持：
+- Environment
+- Settings
+- Jobs
+- Logs
+- Scheduler
+- Build / Verify
+- Services
+- Artifact
+- Deploy
+- Code Intelligence
+- Workflow / Chat 等可选 Feature
 
-- required / optional
-- health
-- version
-- path
-- description
-- configurable fields
-- secret configured state
-- actions
-- searchable settings
+### 9.2 Browser Extension
 
-### 6.2 Jobs
+Browser Extension 只保留浏览器上下文能力和必要 Quick UI。
 
-来源于 BlogCTL Tasks 和 PhotoWaypoint 长流程。
+IDFlow 示例：
 
-标准能力：
+~~~text
+Extension
+├── Current Tab
+├── Capture
+├── Browser Session
+└── Quick Action
 
-- queued / running / paused / completed / failed
-- progress
-- logs
-- retry
-- pause
-- resume
-- cancel
-- details
-- artifacts
+DevTool UI
+├── Workflow
+├── Scheduler
+├── Jobs
+├── Logs
+└── Settings
+~~~
 
-### 6.3 Scheduler
+BlogCTL / DOWNKIT 同理。
 
-来源于 IDFlow Scheduled Tasks。
+原则：
 
-标准能力：
-
-- once
-- interval
-- daily
-- enable/disable
-- next run
-- create/edit/delete
-
-### 6.4 Logs
-
-统一结构化日志和过滤。
-
-### 6.5 Chat / Workflow / Browser Capture
-
-这些是复杂 Feature，不进入最小 Primitive。
-
-由可选内置 Feature Renderer 提供。
+> **必须发生在浏览器里的能力留 Extension；完整控制面统一进入 DevTool UI。**
 
 ---
 
-## 7. 与 DevEnvironment 的关系
+## 10. UI 技术方向
 
-```text
-DevEnvironment
-    |
-    | provides executable/toolchain
-    v
-DevTool Capability
-    |
-    v
-Project Provider
-    |
-    +--> CLI
-    +--> GUI
-    +--> Agent
-    +--> CI
-```
+第一版：
 
-DevEnvironment 回答：
+~~~text
+Go Host
+  +
+React + TypeScript SPA
+  +
+TanStack Query
+  +
+JSON Forms
+  +
+DevTool Feature Registry
+  +
+SSE Events
+~~~
 
-> 环境里有什么？
+Browser Extension 继续保持轻量 TypeScript/JavaScript，不要求为了统一技术栈迁 React。
 
-DevTool 回答：
+第一阶段不引入：
 
-> 当前项目如何组合这些能力？
-
----
-
-## 8. 企业内网适配
-
-Infrastructure Provider 提供抽象：
-
-- VCS
-- Registry
-- Packages
-- Secrets
-- Network
-- Deployment
-- Identity
-- Observability
-
-Policy 负责：
-
-- 公网访问限制
-- Package Source 限制
-- Production Approval
-- Secret policy
-- Artifact scan
-- Branch policy
-- Log redaction
-
-增加 Enterprise Infrastructure Provider 不应要求修改 Project Provider。
+- Backstage Runtime
+- Tauri
+- Electron
+- 任意项目 JS Plugin
+- 万能 UI DSL
 
 ---
 
-## 9. 非目标
+## 11. Self-hosting 是一级能力
 
-当前阶段不做：
+DevTool 必须把自己视为一个普通项目。
+
+~~~text
+DevTool N
+   │
+   ▼
+DevTool Project Extension
+   │
+   ▼
+Runtime / Native / Infrastructure Extension
+   │
+   ▼
+Build DevTool N+1
+   │
+   ▼
+N+1 Verify N+1
+   │
+   ▼
+Package / Install / Release
+~~~
+
+Core 不允许出现大量：
+
+~~~text
+if project == DevTool
+~~~
+
+式特殊逻辑。
+
+Self-hosting 的意义是持续证明：
+
+1. Project Extension 契约足够通用。
+2. Runtime Extension 能服务控制面自身。
+3. Build / Verify / Package / Release 没有依赖外部隐藏脚本。
+4. DevTool 的开发者、Agent 和 CI 真正使用同一个 DevTool。
+
+如果 DevTool 自己无法通过 DevTool 开发，当前架构视为未完成。
+
+---
+
+## 12. 非目标
+
+当前不做：
 
 - 通用 IDE
-- 替代 Git / Docker / Kubernetes / CI
-- 将产品业务 UI 全部迁进 DevTool
-- 用 TOML/YAML 定义可执行工作流
-- Go 原生 `plugin` 动态加载
-- 项目任意注入 JS/CSS/React 到 DevTool UI
-- 一开始实现“万能 UI DSL”
-- 一开始适配具体公司的私有平台
+- 第二个 Dagger
+- 第二个 Kubernetes
+- 第二个 Backstage
+- YAML/TOML Workflow Engine
+- 项目专属 UI 框架
+- 任意前端 Bundle 注入
+- 历史兼容层
+- Legacy Config 迁移器
+- 旧 CLI Alias
+- 新旧控制面长期双轨运行
 
 ---
 
-## 10. 第一阶段成功标准
+## 13. 第一阶段成功标准
 
-1. DevTool 可以 self-host。
-2. Project Provider 可以通过稳定协议调用 Host Capability。
-3. PhotoWaypoint 的通用 DevTool 逻辑可以迁入 DevTool，Device/Gear 等项目逻辑保留在 Provider。
-4. Local / Agent / CI 使用相同 Command。
-5. Command Parameter Schema 可以同时被 CLI、GUI、Agent 使用。
-6. DevTool GUI 能由 Project Descriptor 自动生成 Navigation。
-7. BlogCTL 的 tool descriptor 模式可由通用 Environment/Settings Renderer 表达。
-8. BlogCTL 的任务模型可由通用 Jobs Feature 表达主要行为。
-9. IDFlow 的 Settings/Scheduler 可由通用 Feature 表达，Chat/Capture 可通过内置 Feature Renderer 表达。
-10. 第一阶段无需项目编写 DevTool 专属前端代码。
-11. 项目不能通过任意 JS 注入扩展 DevTool UI。
-12. DevTool 接口不硬编码 GitHub / GHCR / Railway。
-13. Personal Infrastructure 可运行。
-14. 架构允许未来接入 Enterprise Infrastructure，而无需改项目工程语义。
+1. Core 不依赖任何项目和 Dagger API。
+2. Extension 可以注册 Service / Command / Resource / Feature。
+3. Project Extension 可以调用抽象 Service，而不知道具体实现。
+4. runtime.dagger 可以被替换，不影响 Core Contract。
+5. PhotoWaypoint Portable Build 可由 Dagger 执行，ADB 由 Native Extension 执行。
+6. GoTiny 可以使用最小 Project Extension。
+7. BlogCTL Settings/Jobs/Logs 可以由通用 Control Surface 表达。
+8. IDFlow Scheduler/Settings 可以通用化，Capture 保留 Browser Extension。
+9. DevTool UI 不包含项目命名空间和项目专属页面代码。
+10. DevTool 可以完整 self-host：build / verify / package / install / release。
+11. 最终主分支不存在旧 DevTool 兼容逻辑。
+12. 所有迁移后的项目只保留新架构入口。
 
 ---
 
-## 11. 最终产品形态
+## 14. 最终产品形态
 
-```text
-                    Project Provider
-                           |
-        +------------------+------------------+
-        |                  |                  |
-     Commands           Resources       Control Surface
-        |                  |                  |
-        +------------------+------------------+
-                           |
-                       DevTool Host
-                           |
-        +------------------+------------------+
-        |                  |                  |
-       CLI                GUI               Agent
-        |                  |                  |
-        +------------------+------------------+
-                           |
-                         Policy
-                           |
-                      Capability
-                           |
-                Infrastructure Provider
-                           |
-             Personal / Enterprise
-```
+~~~text
+                       Human / Agent / CI / GUI
+                                 │
+                                 ▼
+                          DevTool Core
+                极简 Discovery / Registry / Router
+                                 │
+                  ┌──────────────┼──────────────┐
+                  ▼              ▼              ▼
+             Project Ext    Runtime Ext     Native Ext
+                  │              │              │
+                  │           Dagger        ADB/Browser
+                  │
+                  ├──────── Infrastructure Ext
+                  │
+                  └──────── UI Feature Ext
+                                 │
+                                 ▼
+                         Control Surface
+~~~
 
-DevTool 的长期核心是：
+长期约束：
 
-> **一个项目工程模型，多种控制面 Renderer；一个极简主干，能力按需插拔。**
+> **Core 越小越稳定；能力全部通过清晰 Contract 扩展；配置只做 wiring；项目不依赖具体实现；DevTool 必须持续用自己开发自己。**
