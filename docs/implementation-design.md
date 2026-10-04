@@ -1378,3 +1378,42 @@ Environment、Dagger、CodeGraph、Serena、SCM 都以独立 Process Extension �
 这保持了“极简 Core + 可插拔 + 配置化”的边界，同时没有引入全局 daemon、插件市场或集群调度器。
 
 完整生命周期、性能动机与 Kubernetes 边界见 docs/runtime-lifecycle.md。
+
+
+---
+
+## 19. Project Command Agent Adapter
+
+Project Extension commands are automatically projected into the Agent Gateway instead of requiring a second agent-specific implementation.
+
+~~~text
+Project Extension
+  -> ProjectDescriptor.Commands
+  -> ProjectCommandProvider
+  -> Agent Tool Registry
+  -> MCP tools/list + tools/call
+~~~
+
+The adapter is generic and lives in the Agent layer. It does not know DevTool, PhotoWaypoint, BlogCTL or any project-specific command ID.
+
+Mapping rules:
+
+- tool name: `project_<normalized command id>`;
+- title/description: copied from `CommandDescriptor`;
+- input schema: derived from `FieldDescriptor`;
+- required fields: preserved;
+- select/multi-select options: exposed as JSON Schema enum values;
+- side-effect metadata: exposed through MCP read-only/destructive annotations.
+
+Invocation uses the same long-lived Project Extension process as CLI execution:
+
+~~~text
+Agent tools/call
+  -> ProjectHost.ExecuteCommand(structured args)
+  -> ProjectProcess.Execute
+  -> Project Extension
+~~~
+
+CLI execution remains a thin compatibility surface for positional command invocation; structured Agent execution passes typed argument maps directly.
+
+This preserves one authoritative project-command implementation across Human CLI, Agent MCP and future UI surfaces.
