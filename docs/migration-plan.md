@@ -284,7 +284,7 @@ devtool verify
 devtool package
 ~~~
 
-并验证新 binary 可以独立运行。
+并验证新 binary 可以独立运行，并能通过同一 Project Extension + portable-runtime 再构建 N+2；N+2 必须能重新 inspect 自己。
 
 ### Merge Gate
 

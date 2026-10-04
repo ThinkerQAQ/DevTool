@@ -918,6 +918,9 @@ runtime.dagger
     │
     ▼
 N+1 can invoke the same Project Extension + Runtime Contract again
+    │
+    ▼
+N+1 -> build -> N+2, then N+2 inspects itself
 ~~~
 
 ### Windows
