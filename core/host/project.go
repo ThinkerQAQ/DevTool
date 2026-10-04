@@ -13,8 +13,6 @@ import (
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
 
-type ExtensionResolver func(source string) (extensioncontract.Extension, error)
-
 type ProjectHost struct {
 	Project    project.Project
 	Extension  extensioncontract.Descriptor
@@ -24,7 +22,7 @@ type ProjectHost struct {
 	closers    []io.Closer
 }
 
-func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (*ProjectHost, error) {
+func OpenProject(ctx context.Context, start string) (*ProjectHost, error) {
 	p, err := project.Discover(start)
 	if err != nil {
 		return nil, err
@@ -58,23 +56,12 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 
 	for _, name := range names {
 		configured := p.Config.Extension[name]
-		var ext extensioncontract.Extension
-		switch configured.Type {
-		case "builtin":
-			if resolve == nil {
-				return nil, fmt.Errorf("extension %q requires a resolver", name)
-			}
-			ext, err = resolve(configured.Source)
-			if err != nil {
-				return nil, fmt.Errorf("resolve extension %q: %w", name, err)
-			}
-		case "go":
-			ext, err = coreextension.LoadProcessExtension(ctx, p, name, configured.Module, configured.Package)
-			if err != nil {
-				return nil, fmt.Errorf("load extension %q: %w", name, err)
-			}
-		default:
-			return nil, fmt.Errorf("extension %q type %q is unsupported by the host", name, configured.Type)
+		if configured.Type != "go" {
+			return nil, fmt.Errorf("extension %q type %q is unsupported by the process host", name, configured.Type)
+		}
+		ext, err := coreextension.LoadProcessExtension(ctx, p, name, configured.Module, configured.Package, reg)
+		if err != nil {
+			return nil, fmt.Errorf("load extension %q: %w", name, err)
 		}
 		descriptor := ext.Descriptor()
 		descriptors = append(descriptors, descriptor)
