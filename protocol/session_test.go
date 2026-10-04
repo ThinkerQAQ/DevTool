@@ -3,9 +3,11 @@ package protocol
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"testing"
+	"time"
 )
 
 func TestSessionSupportsNestedCalls(t *testing.T) {
@@ -40,6 +42,65 @@ func TestSessionSupportsNestedCalls(t *testing.T) {
 	}
 	if result.Value != "nested-ok" {
 		t.Fatalf("value = %q, want nested-ok", result.Value)
+	}
+}
+
+func TestSessionPropagatesCancellationThroughNestedCalls(t *testing.T) {
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+
+	innerStarted := make(chan struct{})
+	innerCanceled := make(chan struct{})
+
+	var server *Session
+	server = NewSession(right, right, func(ctx context.Context, request Envelope) (any, error) {
+		if request.Method != "outer" {
+			return nil, io.EOF
+		}
+		if err := server.Call(ctx, "inner", nil, nil, nil); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+
+	client := NewSession(left, left, func(ctx context.Context, request Envelope) (any, error) {
+		if request.Method != "inner" {
+			return nil, io.EOF
+		}
+		close(innerStarted)
+		<-ctx.Done()
+		close(innerCanceled)
+		return nil, ctx.Err()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.Call(ctx, "outer", nil, nil, nil)
+	}()
+
+	select {
+	case <-innerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("nested request did not start")
+	}
+
+	cancel()
+
+	select {
+	case <-innerCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancellation did not reach nested request")
+	}
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Call() error = %v, want context canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("outer call did not return after cancellation")
 	}
 }
 

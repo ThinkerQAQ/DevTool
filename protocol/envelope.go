@@ -9,6 +9,7 @@ const (
 	MessageResponse MessageType = "response"
 	MessageEvent    MessageType = "event"
 	MessageError    MessageType = "error"
+	MessageCancel   MessageType = "cancel"
 )
 
 type Envelope struct {
