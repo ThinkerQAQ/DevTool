@@ -1179,3 +1179,72 @@ Infrastructure Extension
 ~~~
 
 长期目标不是让 DevTool 越来越大，而是让 Core 越来越稳定，让变化全部发生在可替换 Extension 中。
+
+
+---
+
+## 25. 调研参考
+
+本方案中的外部产品边界主要参考以下成熟实现：
+
+### Dagger
+
+用于验证“Portable Runtime 不应由 DevTool 自己重新实现”的判断。
+
+- https://docs.dagger.io/
+- https://docs.dagger.io/reference/sdks/go/
+- https://docs.dagger.io/reference/modules/
+- https://docs.dagger.io/using/services/
+- https://docs.dagger.io/reference/api/host/
+
+重点借鉴：
+
+- typed Module / Function
+- Service
+- Secret
+- Cache
+- Artifact
+- Module dependency
+- Local / CI 同构执行
+
+### Backstage
+
+用于验证“极简 App Shell + Plugin / Extension Point + Registry”的 UI/平台扩展模式。
+
+- https://backstage.io/docs/frontend-system/architecture/
+- https://backstage.io/docs/frontend-system/architecture/plugins/
+- https://backstage.io/docs/overview/architecture-overview/
+
+重点借鉴：
+
+- Plugin / Extension
+- Extension Point
+- App wiring
+- Utility API
+- indirect routing
+
+DevTool 不直接引入 Backstage Runtime。
+
+### JSON Forms
+
+用于验证 Settings / Command Parameters 的 Schema-driven Form 模式。
+
+- https://jsonforms.io/docs/architecture
+
+只借鉴和复用 Form Renderer，不把整个 Control Surface 建成 JSON Forms DSL。
+
+### TanStack Query
+
+用于 DevTool Web UI 的 Server State 管理。
+
+- https://tanstack.com/query/latest/docs/framework/react/overview
+
+Resource 更新通过 Event/SSE 驱动 query invalidation，而不是每个 Feature 自己维护一套 polling/loading/error 状态。
+
+### React
+
+DevTool 完整 Control Surface 使用 React + TypeScript；Browser Extension 保持轻量 TS/JS。
+
+- https://react.dev/
+
+外部产品只作为 Extension 实现或设计参考，任何第三方产品都不能成为 DevTool Core 的不可替换依赖。
