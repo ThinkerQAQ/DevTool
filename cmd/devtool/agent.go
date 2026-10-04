@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	coreagent "github.com/thinkerqaq/devtool/core/agent"
+	"github.com/thinkerqaq/devtool/adapters/extensionloader"
 	"github.com/thinkerqaq/devtool/core/host"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
@@ -29,7 +30,7 @@ func runAgent(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected agent mcp arguments: %v", fs.Args())
 	}
 
-	h, err := host.OpenProject(ctx, "")
+	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
 	if err != nil {
 		return err
 	}
