@@ -34,6 +34,7 @@ func runAgent(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	defer h.Close()
 	session := projectAgentSession(h, strings.TrimSpace(*contextName))
 	return coreagent.NewGateway(h.Registry, session).Serve(ctx, os.Stdin, out)
 }
