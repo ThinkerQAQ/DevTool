@@ -22,7 +22,6 @@ func TestInvokeRealDagger(t *testing.T) {
 
 	request, err := json.Marshal(portable.Invocation{
 		Workspace: workspace,
-		Module:    "./.dagger/modules/smoke",
 		Function:  "verify",
 	})
 	if err != nil {
