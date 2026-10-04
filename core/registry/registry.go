@@ -1,0 +1,134 @@
+package registry
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/thinkerqaq/devtool/core/contract"
+)
+
+type serviceEntry struct {
+	extensionID string
+	value       any
+}
+
+type Registry struct {
+	mu         sync.RWMutex
+	commands   map[string]contract.CommandDescriptor
+	resources  map[string]contract.ResourceDescriptor
+	views      map[string]contract.ViewDescriptor
+	features   map[string]contract.FeatureBinding
+	navigation map[string]contract.NavigationItem
+	services   map[string]serviceEntry
+}
+
+func New() *Registry {
+	return &Registry{
+		commands:   map[string]contract.CommandDescriptor{},
+		resources:  map[string]contract.ResourceDescriptor{},
+		views:      map[string]contract.ViewDescriptor{},
+		features:   map[string]contract.FeatureBinding{},
+		navigation: map[string]contract.NavigationItem{},
+		services:   map[string]serviceEntry{},
+	}
+}
+
+func (r *Registry) RegisterCommand(desc contract.CommandDescriptor) error {
+	return putUnique(&r.mu, r.commands, desc.ID, desc, "command")
+}
+
+func (r *Registry) RegisterResource(desc contract.ResourceDescriptor) error {
+	return putUnique(&r.mu, r.resources, desc.ID, desc, "resource")
+}
+
+func (r *Registry) RegisterView(desc contract.ViewDescriptor) error {
+	return putUnique(&r.mu, r.views, desc.ID, desc, "view")
+}
+
+func (r *Registry) RegisterFeature(desc contract.FeatureBinding) error {
+	return putUnique(&r.mu, r.features, desc.ID, desc, "feature binding")
+}
+
+func (r *Registry) RegisterNavigation(desc contract.NavigationItem) error {
+	return putUnique(&r.mu, r.navigation, desc.ID, desc, "navigation item")
+}
+
+func putUnique[T any](mu *sync.RWMutex, values map[string]T, id string, value T, kind string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("%s id is required", kind)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if _, exists := values[id]; exists {
+		return fmt.Errorf("%s %q is already registered", kind, id)
+	}
+	values[id] = value
+	return nil
+}
+
+func (r *Registry) ProvideService(name, extensionID string, value any) error {
+	name = strings.TrimSpace(name)
+	extensionID = strings.TrimSpace(extensionID)
+	if name == "" {
+		return fmt.Errorf("service name is required")
+	}
+	if extensionID == "" {
+		return fmt.Errorf("service %q requires provider extension id", name)
+	}
+	if value == nil {
+		return fmt.Errorf("service %q cannot register a nil implementation", name)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, exists := r.services[name]; exists {
+		return fmt.Errorf("service %q is already provided by extension %q", name, existing.extensionID)
+	}
+	r.services[name] = serviceEntry{extensionID: extensionID, value: value}
+	return nil
+}
+
+func (r *Registry) Service(name string) (any, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.services[name]
+	return entry.value, ok
+}
+
+func (r *Registry) ServiceProvider(name string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.services[name]
+	return entry.extensionID, ok
+}
+
+func (r *Registry) ProjectDescriptor(identity contract.ProjectIdentity) contract.ProjectDescriptor {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	d := contract.ProjectDescriptor{Identity: identity}
+	for _, value := range r.commands {
+		d.Commands = append(d.Commands, value)
+	}
+	for _, value := range r.resources {
+		d.Resources = append(d.Resources, value)
+	}
+	for _, value := range r.views {
+		d.Views = append(d.Views, value)
+	}
+	for _, value := range r.features {
+		d.Features = append(d.Features, value)
+	}
+	for _, value := range r.navigation {
+		d.Navigation = append(d.Navigation, value)
+	}
+
+	sort.Slice(d.Commands, func(i, j int) bool { return d.Commands[i].ID < d.Commands[j].ID })
+	sort.Slice(d.Resources, func(i, j int) bool { return d.Resources[i].ID < d.Resources[j].ID })
+	sort.Slice(d.Views, func(i, j int) bool { return d.Views[i].ID < d.Views[j].ID })
+	sort.Slice(d.Features, func(i, j int) bool { return d.Features[i].ID < d.Features[j].ID })
+	sort.Slice(d.Navigation, func(i, j int) bool { return d.Navigation[i].ID < d.Navigation[j].ID })
+	return d
+}
