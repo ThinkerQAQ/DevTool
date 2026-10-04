@@ -13,20 +13,24 @@ module = "./devcontrol"
 package = "./cmd/provider"
 
 [extension.environment]
-type = "builtin"
-source = "environment.docker"
+type = "go"
+module = "."
+package = "./extensions/environment/docker/cmd/provider"
 
 [extension.runtime]
-type = "builtin"
-source = "runtime.dagger"
+type = "go"
+module = "."
+package = "./extensions/runtime/dagger/cmd/provider"
 
 [extension.codegraph]
-type = "builtin"
-source = "intelligence.codegraph"
+type = "go"
+module = "."
+package = "./extensions/intelligence/codegraph/cmd/provider"
 
 [extension.lsp]
-type = "builtin"
-source = "intelligence.lsp.serena"
+type = "go"
+module = "."
+package = "./extensions/intelligence/serena/cmd/provider"
 
 [extension.scm]
 type = "go"
