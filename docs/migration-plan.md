@@ -252,11 +252,15 @@ DevTool N
     ↓
 load DevTool Project Extension
     ↓
+portable-runtime
+    ↓
+runtime.dagger
+    ↓
 build N+1
     ↓
 N+1 inspect itself
     ↓
-N+1 verify itself
+N+1 continues through the same portable-runtime contract
 ~~~
 
 ### Windows
@@ -331,7 +335,11 @@ Dagger build image 优先复用：
 
 避免再维护第二份 Go/Node/Java/Android SDK 版本。
 
-### 第一个真实验证项目：GoTiny
+### Runtime dogfooding 顺序
+
+DevTool 自身先通过普通 Project Extension 调用 `portable-runtime -> runtime.dagger` 完成 build / verify / package，证明控制面本身不享受 Runtime 特例。
+
+随后 GoTiny 作为第一个外部真实验证项目。
 
 GoTiny Project Extension 只定义：
 
