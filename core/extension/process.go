@@ -1,7 +1,6 @@
 package extension
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,16 +13,18 @@ import (
 
 	"github.com/thinkerqaq/devtool/core/contract"
 	"github.com/thinkerqaq/devtool/core/project"
+	"github.com/thinkerqaq/devtool/core/registry"
 	"github.com/thinkerqaq/devtool/protocol"
 )
 
 type ProjectProcess struct {
-	Project project.Project
-	Source  string
+	Project  project.Project
+	Source   string
+	Services *registry.Registry
 }
 
 type describePayload struct {
-	Extension Descriptor                  `json:"extension"`
+	Extension Descriptor                 `json:"extension"`
 	Project   contract.ProjectDescriptor `json:"project"`
 }
 
@@ -96,73 +97,41 @@ func (p ProjectProcess) invoke(ctx context.Context, executable, method string, p
 		return err
 	}
 
-	requestID := "1"
-	var raw json.RawMessage
-	if payload != nil {
-		raw, err = json.Marshal(payload)
-		if err != nil {
-			_ = cmd.Process.Kill()
-			return err
+	session := protocol.NewSession(stdout, stdin, func(callCtx context.Context, envelope protocol.Envelope) (any, error) {
+		if envelope.Method != protocol.MethodServiceInvoke {
+			return nil, fmt.Errorf("unsupported host rpc method %q", envelope.Method)
 		}
-	}
-	if err := json.NewEncoder(stdin).Encode(protocol.Envelope{
-		ID:      requestID,
-		Type:    protocol.MessageRequest,
-		Method:  method,
-		Payload: raw,
-	}); err != nil {
-		_ = cmd.Process.Kill()
-		return err
-	}
-	_ = stdin.Close()
+		if p.Services == nil {
+			return nil, fmt.Errorf("host services are unavailable")
+		}
+		var request protocol.ServiceInvokeRequest
+		if err := json.Unmarshal(envelope.Payload, &request); err != nil {
+			return nil, err
+		}
+		invoker, ok := p.Services.Service(request.Service)
+		if !ok {
+			return nil, fmt.Errorf("service %q is not registered", request.Service)
+		}
+		return invoker.Invoke(callCtx, request.Method, request.Payload)
+	})
 
-	scanner := bufio.NewScanner(stdout)
-	gotResponse := false
-	for scanner.Scan() {
-		var envelope protocol.Envelope
-		if err := json.Unmarshal(scanner.Bytes(), &envelope); err != nil {
-			_ = cmd.Process.Kill()
-			return fmt.Errorf("project extension emitted invalid protocol frame: %w", err)
+	callErr := session.Call(ctx, method, payload, func(event protocol.Event) {
+		if out != nil {
+			fmt.Fprintln(out, event.Message)
 		}
-		if envelope.ReplyTo != requestID {
-			continue
-		}
-		switch envelope.Type {
-		case protocol.MessageEvent:
-			var event protocol.Event
-			if err := json.Unmarshal(envelope.Payload, &event); err != nil {
-				return err
-			}
-			if out != nil {
-				fmt.Fprintln(out, event.Message)
-			}
-		case protocol.MessageError:
-			var failure struct {
-				Message string `json:"message"`
-			}
-			if err := json.Unmarshal(envelope.Payload, &failure); err != nil {
-				return err
-			}
-			_ = cmd.Wait()
-			return fmt.Errorf("project extension: %s", failure.Message)
-		case protocol.MessageResponse:
-			gotResponse = true
-			if result != nil {
-				if err := json.Unmarshal(envelope.Payload, result); err != nil {
-					return err
-				}
-			}
-		}
+	}, result)
+	_ = stdin.Close()
+	processErr := cmd.Wait()
+	sessionErr := session.Wait()
+
+	if callErr != nil {
+		return fmt.Errorf("project extension: %w", callErr)
 	}
-	if err := scanner.Err(); err != nil {
-		_ = cmd.Process.Kill()
-		return err
+	if processErr != nil {
+		return fmt.Errorf("project extension process: %w", processErr)
 	}
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("project extension process: %w", err)
-	}
-	if !gotResponse {
-		return fmt.Errorf("project extension exited without a response")
+	if sessionErr != nil {
+		return fmt.Errorf("project extension protocol: %w", sessionErr)
 	}
 	return nil
 }

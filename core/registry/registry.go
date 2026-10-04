@@ -7,11 +7,12 @@ import (
 	"sync"
 
 	"github.com/thinkerqaq/devtool/core/contract"
+	"github.com/thinkerqaq/devtool/core/service"
 )
 
 type serviceEntry struct {
 	extensionID string
-	value       any
+	value       service.Invoker
 }
 
 type Registry struct {
@@ -68,7 +69,7 @@ func putUnique[T any](mu *sync.RWMutex, values map[string]T, id string, value T,
 	return nil
 }
 
-func (r *Registry) ProvideService(name, extensionID string, value any) error {
+func (r *Registry) ProvideService(name, extensionID string, value service.Invoker) error {
 	name = strings.TrimSpace(name)
 	extensionID = strings.TrimSpace(extensionID)
 	if name == "" {
@@ -90,7 +91,7 @@ func (r *Registry) ProvideService(name, extensionID string, value any) error {
 	return nil
 }
 
-func (r *Registry) Service(name string) (any, bool) {
+func (r *Registry) Service(name string) (service.Invoker, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	entry, ok := r.services[name]

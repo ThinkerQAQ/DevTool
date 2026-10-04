@@ -13,17 +13,16 @@ func TestSessionSupportsNestedCalls(t *testing.T) {
 	defer left.Close()
 	defer right.Close()
 
-	server := NewSession(right, right, func(ctx context.Context, request Envelope) (any, error) {
-		switch request.Method {
-		case "outer":
-			var response string
-			if err := serverCall(ctx, request, &response); err != nil {
-				return nil, err
-			}
-			return map[string]string{"value": response}, nil
-		default:
+	var server *Session
+	server = NewSession(right, right, func(ctx context.Context, request Envelope) (any, error) {
+		if request.Method != "outer" {
 			return nil, io.EOF
 		}
+		var inner string
+		if err := server.Call(ctx, "inner", map[string]string{"value": "request"}, nil, &inner); err != nil {
+			return nil, err
+		}
+		return map[string]string{"value": inner}, nil
 	})
 
 	client := NewSession(left, left, func(_ context.Context, request Envelope) (any, error) {
@@ -42,15 +41,6 @@ func TestSessionSupportsNestedCalls(t *testing.T) {
 	if result.Value != "nested-ok" {
 		t.Fatalf("value = %q, want nested-ok", result.Value)
 	}
-
-	_ = client
-	_ = server
-}
-
-func serverCall(ctx context.Context, request Envelope, response *string) error {
-	_ = request
-	// The test uses a helper session passed through the payload-free connection below.
-	return nil
 }
 
 func TestSessionCallAndEvent(t *testing.T) {

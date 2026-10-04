@@ -1,12 +1,11 @@
 package devcontrol
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/thinkerqaq/devtool/core/contract"
 	"github.com/thinkerqaq/devtool/core/extension"
-	"github.com/thinkerqaq/devtool/protocol"
+	"github.com/thinkerqaq/devtool/sdk/project"
 )
 
 type Provider struct{}
@@ -47,14 +46,17 @@ func (Provider) ProjectDescriptor() contract.ProjectDescriptor {
 	}
 }
 
-func (Provider) Execute(ctx context.Context, command string, _ map[string]any, emit func(protocol.Event)) error {
+func (Provider) Execute(ctx project.Context, command string, _ map[string]any) error {
+	emit := func(kind, message string) {
+		_ = ctx.Emit(kind, message)
+	}
 	switch command {
 	case "build":
-		return Build(ctx, emit)
+		return Build(ctx.Context, emit)
 	case "verify":
-		return Verify(ctx, emit)
+		return Verify(ctx.Context, emit)
 	case "package":
-		return Package(ctx, emit)
+		return Package(ctx.Context, emit)
 	default:
 		return fmt.Errorf("unknown DevTool project command %q", command)
 	}
