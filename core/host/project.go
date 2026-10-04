@@ -21,6 +21,7 @@ type ProjectHost struct {
 	Descriptor contract.ProjectDescriptor
 	Registry   *registry.Registry
 	process    coreextension.ProjectProcess
+	closers    []io.Closer
 }
 
 func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (*ProjectHost, error) {
@@ -37,6 +38,15 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 	}
 
 	reg := registry.New()
+	var closers []io.Closer
+	keepExtensions := false
+	defer func() {
+		if keepExtensions {
+			return
+		}
+		closeExtensions(closers)
+	}()
+
 	names := make([]string, 0, len(p.Config.Extension))
 	for name := range p.Config.Extension {
 		if name != "project" {
@@ -64,6 +74,9 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 			}
 		default:
 			return nil, fmt.Errorf("extension %q type %q is unsupported by the host", name, configured.Type)
+		}
+		if closer, ok := ext.(io.Closer); ok {
+			closers = append(closers, closer)
 		}
 		if err := ext.Register(reg); err != nil {
 			return nil, fmt.Errorf("register extension %q: %w", ext.Descriptor().ID, err)
@@ -93,13 +106,35 @@ func OpenProject(ctx context.Context, start string, resolve ExtensionResolver) (
 	if projectDescriptor.Identity.Name != p.Config.Project.Name {
 		return nil, fmt.Errorf("project extension identity %q does not match config project name %q", projectDescriptor.Identity.Name, p.Config.Project.Name)
 	}
-	return &ProjectHost{
+	h := &ProjectHost{
 		Project:    p,
 		Extension:  extensionDescriptor,
 		Descriptor: projectDescriptor,
 		Registry:   reg,
 		process:    process,
-	}, nil
+		closers:    closers,
+	}
+	keepExtensions = true
+	return h, nil
+}
+
+func (h *ProjectHost) Close() error {
+	if h == nil {
+		return nil
+	}
+	err := closeExtensions(h.closers)
+	h.closers = nil
+	return err
+}
+
+func closeExtensions(closers []io.Closer) error {
+	var firstErr error
+	for i := len(closers) - 1; i >= 0; i-- {
+		if err := closers[i].Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (h *ProjectHost) Execute(ctx context.Context, command string, args []string, out io.Writer) error {
