@@ -1,0 +1,18 @@
+"""
+Portable runtime integration fixture.
+"""
+type Smoke {
+  pub source: Directory!
+
+  new(ws: Workspace!) {
+    self.source = ws.directory("/")
+    self
+  }
+
+  pub verify: String! {
+    container
+      .from("alpine:3.22.1")
+      .withExec(["sh", "-c", "printf portable-invoke-ok"])
+      .stdout
+  }
+}
