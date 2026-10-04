@@ -6,12 +6,15 @@ import (
 	"io"
 	"sort"
 
+	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/contract"
 	coreextension "github.com/thinkerqaq/devtool/core/extension"
 	"github.com/thinkerqaq/devtool/core/project"
 	"github.com/thinkerqaq/devtool/core/registry"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
+
+type ExecutableResolver func(context.Context, project.Project, string, config.Extension) (string, error)
 
 type ProjectHost struct {
 	Project    project.Project
@@ -22,7 +25,7 @@ type ProjectHost struct {
 	closers    []io.Closer
 }
 
-func OpenProject(ctx context.Context, start string) (*ProjectHost, error) {
+func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) (*ProjectHost, error) {
 	p, err := project.Discover(start)
 	if err != nil {
 		return nil, err
@@ -31,8 +34,8 @@ func OpenProject(ctx context.Context, start string) (*ProjectHost, error) {
 	if !ok {
 		return nil, fmt.Errorf("project extension is not configured")
 	}
-	if projectExtension.Type != "go" {
-		return nil, fmt.Errorf("project extension type %q is unsupported", projectExtension.Type)
+	if resolve == nil {
+		return nil, fmt.Errorf("extension executable resolver is required")
 	}
 
 	reg := registry.New()
@@ -56,10 +59,11 @@ func OpenProject(ctx context.Context, start string) (*ProjectHost, error) {
 
 	for _, name := range names {
 		configured := p.Config.Extension[name]
-		if configured.Type != "go" {
-			return nil, fmt.Errorf("extension %q type %q is unsupported by the process host", name, configured.Type)
+		executable, err := resolve(ctx, p, name, configured)
+		if err != nil {
+			return nil, fmt.Errorf("resolve extension %q executable: %w", name, err)
 		}
-		ext, err := coreextension.LoadProcessExtension(ctx, p, name, configured.Module, configured.Package, reg)
+		ext, err := coreextension.LoadProcessExtension(ctx, p, name, executable, reg)
 		if err != nil {
 			return nil, fmt.Errorf("load extension %q: %w", name, err)
 		}
@@ -91,11 +95,14 @@ func OpenProject(ctx context.Context, start string) (*ProjectHost, error) {
 		}
 	}
 
+	projectExecutable, err := resolve(ctx, p, "project", projectExtension)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project extension executable: %w", err)
+	}
 	process := coreextension.ProjectProcess{
-		Project:  p,
-		Module:   projectExtension.Module,
-		Package:  projectExtension.Package,
-		Services: reg,
+		Project:    p,
+		Executable: projectExecutable,
+		Services:   reg,
 	}
 	extensionDescriptor, projectDescriptor, err := process.Describe(ctx)
 	if err != nil {
