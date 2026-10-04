@@ -78,20 +78,14 @@ func Validate(cfg Config) error {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("extension name is required")
 		}
-		switch ext.Type {
-		case "go":
-			if strings.TrimSpace(ext.Module) == "" {
-				return fmt.Errorf("extension.%s.module is required for go extension", name)
-			}
-			if strings.TrimSpace(ext.Package) == "" {
-				return fmt.Errorf("extension.%s.package is required for go extension", name)
-			}
-		case "builtin":
-			if strings.TrimSpace(ext.Source) == "" {
-				return fmt.Errorf("extension.%s.source is required for builtin extension", name)
-			}
-		default:
-			return fmt.Errorf("extension.%s.type %q is unsupported", name, ext.Type)
+		if ext.Type != "go" {
+			return fmt.Errorf("extension.%s.type %q is unsupported; configured extensions must use a process-backed loader", name, ext.Type)
+		}
+		if strings.TrimSpace(ext.Module) == "" {
+			return fmt.Errorf("extension.%s.module is required for go extension", name)
+		}
+		if strings.TrimSpace(ext.Package) == "" {
+			return fmt.Errorf("extension.%s.package is required for go extension", name)
 		}
 	}
 	for name, service := range cfg.Service {
