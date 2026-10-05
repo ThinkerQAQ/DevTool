@@ -20,7 +20,6 @@ const (
 type Workspace struct {
 	Root             string   `json:"root"`
 	Workspaces       []string `json:"workspaces,omitempty"`
-	EnvironmentImage string   `json:"environment_image,omitempty"`
 }
 
 type IndexedQuery struct {
