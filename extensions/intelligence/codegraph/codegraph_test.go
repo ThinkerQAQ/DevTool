@@ -126,3 +126,46 @@ func writeFixture(t *testing.T, script string) string {
 	}
 	return path
 }
+
+
+func TestSearchMapsToSymbolSearch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is unix-only")
+	}
+	path := writeFixture(t, `#!/bin/sh
+found_tool=0
+found_args=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --run-tool)
+      shift
+      [ "$1" = "codegraph_symbol_search" ] && found_tool=1
+      ;;
+    --tool-args)
+      shift
+      [ "$1" = '{"compact":true,"limit":7,"query":"Registry"}' ] && found_args=1
+      ;;
+  esac
+  shift
+done
+[ "$found_tool" -eq 1 ] || exit 6
+[ "$found_args" -eq 1 ] || exit 7
+printf '{"results":[]}'
+`)
+	e := &Extension{executable: path}
+	payload, err := json.Marshal(codeintelligence.SearchRequest{
+		Workspace: codeintelligence.Workspace{Root: t.TempDir()},
+		Query: "Registry",
+		Limit: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := e.Invoke(context.Background(), codeintelligence.MethodSearch, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(raw)) != `{"results":[]}` {
+		t.Fatalf("result = %s", raw)
+	}
+}
