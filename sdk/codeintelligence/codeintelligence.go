@@ -19,7 +19,7 @@ type Workspace struct {
 	EnvironmentImage string   `json:"environment_image,omitempty"`
 }
 
-type GraphQuery struct {
+type IndexedQuery struct {
 	Workspace
 	Tool string          `json:"tool"`
 	Args json.RawMessage `json:"args,omitempty"`
