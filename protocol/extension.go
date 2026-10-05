@@ -3,14 +3,19 @@ package protocol
 import "encoding/json"
 
 const (
-	MethodExtensionDescribe = "extension.describe"
-	MethodExtensionInvoke   = "extension.invoke"
-	MethodAgentToolsList    = "agent.tools.list"
-	MethodAgentToolCall     = "agent.tools.call"
+	MethodExtensionDescribe  = "extension.describe"
+	MethodExtensionConfigure = "extension.configure"
+	MethodExtensionInvoke    = "extension.invoke"
+	MethodAgentToolsList     = "agent.tools.list"
+	MethodAgentToolCall      = "agent.tools.call"
 )
 
 type ExtensionDescribeResponse struct {
 	Extension json.RawMessage `json:"extension"`
+}
+
+type ExtensionConfigureRequest struct {
+	Settings map[string]any `json:"settings,omitempty"`
 }
 
 type ExtensionInvokeRequest struct {
