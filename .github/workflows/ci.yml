@@ -59,6 +59,8 @@ jobs:
           names = {tool["name"] for tool in tools}
           assert "scm_publish" in names, names
           assert "code_context" in names, names
+          assert "project_build" in names, names
+          assert "project_verify" in names, names
           assert not any(name in {"code_search", "code_symbols", "code_references", "code_diagnostics"} for name in names), names
           assert not any(name.startswith("codegraph_") for name in names), names
           assert not any(name.startswith("sourcegraph_") for name in names), names
