@@ -59,3 +59,12 @@ provider = "scm.github"
 
 [code]
 workspaces = ["."]
+
+
+[profile.railway.extension.environment]
+type = "go"
+module = "."
+package = "./extensions/environment/local/cmd/provider"
+
+[profile.railway.service.environment]
+provider = "environment.local"
