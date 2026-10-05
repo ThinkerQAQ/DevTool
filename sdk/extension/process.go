@@ -8,7 +8,7 @@ import (
 	"os"
 
 	contract "github.com/thinkerqaq/devtool/sdk/contract"
-	"github.com/thinkerqaq/devtool/core/service"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 	"github.com/thinkerqaq/devtool/protocol"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
