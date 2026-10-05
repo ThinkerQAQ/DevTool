@@ -101,7 +101,7 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		}
 		return e.runTool(ctx, request, "codegraph_reindex_workspace", json.RawMessage(`{"force":false}`))
 	case codeintelligence.MethodQuery:
-		var request codeintelligence.GraphQuery
+		var request codeintelligence.IndexedQuery
 		if err := json.Unmarshal(payload, &request); err != nil {
 			return nil, fmt.Errorf("decode CodeGraph query request: %w", err)
 		}
