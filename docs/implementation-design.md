@@ -683,12 +683,16 @@ version = 1
 name = "PhotoWaypoint"
 
 [extension.project]
-type = "go"
+loader = "go"
+
+[extension.project.loader_config]
 module = "./go/devcontrol"
 package = "./cmd/provider"
 
 [extension.environment]
-type = "go"
+loader = "go"
+
+[extension.environment.loader_config]
 module = "."
 package = "./extensions/environment/docker/cmd/provider"
 
