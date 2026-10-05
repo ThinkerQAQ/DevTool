@@ -63,7 +63,7 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		if err != nil {
 			return nil, fmt.Errorf("resolve extension %q executable: %w", name, err)
 		}
-		ext, err := coreextension.LoadProcessExtension(ctx, p, name, executable, reg)
+		ext, err := coreextension.LoadProcessExtension(ctx, p, name, executable, configured.Settings, reg)
 		if err != nil {
 			return nil, fmt.Errorf("load extension %q: %w", name, err)
 		}
