@@ -508,71 +508,91 @@ Environment 是可替换 Service。未来可以增加 Podman/Kubernetes/Remote P
 
 Code Intelligence 是通用工程能力，不属于 Project Extension，也不进入 Core 实现。
 
-第一批实现：
+内部 Service 分成两个稳定维度：
 
 ~~~text
-extensions/intelligence/
-├── codegraph/
-└── serena/
+code-realtime
+  -> Serena / gopls
+  -> future realtime semantic provider
+
+code-indexed
+  -> CodeGraph
+  -> Sourcegraph
+  -> future indexed provider
 ~~~
 
-Service Contract：
+Provider Contract 可以保持细粒度，例如：
 
 ~~~text
-code-graph
-├── doctor
-├── mcp
-├── sync
-└── query
+indexed:
+  search
+  sync
+  doctor
 
-code-lsp
-├── doctor
-├── verify
-└── mcp
+realtime:
+  symbols
+  references
+  diagnostics
+  doctor
+  verify
 ~~~
 
-职责边界：
+这些是 Extension 之间的内部 Contract，不直接等价为 Agent Tool。
+
+Agent-facing Code Capability 当前只暴露工程意图：
 
 ~~~text
-Agent / Human
-      │
-      ▼
-devtool code ...
-      │
-      ▼
-Core Router
-      │
-      ├── code-graph -> intelligence.codegraph -> CodeGraph
-      └── code-lsp   -> intelligence.lsp.serena -> Serena -> gopls / Kotlin LSP
+code_context
 ~~~
 
-Core 不引用 CodeGraph、Serena、gopls 或 Kotlin language server 类型。
+调用链：
 
-项目只配置 workspace composition：
+~~~text
+Cloud / Local Agent
+       │
+       ▼
+   code_context
+       │
+       ├── selected code-indexed provider
+       │      └── search / indexed context
+       │
+       └── selected code-realtime provider
+              ├── symbol context
+              ├── references
+              └── diagnostics
+~~~
+
+硬约束：
+
+1. Provider 新增一个方法，不得因此自动新增 Agent Tool。
+2. Provider 原生 MCP tools 不直接暴露给 Agent。
+3. Agent Capability 必须增加工程语义或组合价值，不能只是改名代理底层 API。
+4. Provider 可通过配置替换，对 Agent-facing Capability contract 无影响。
+5. LSP/Realtime 以当前 working tree 为事实来源；Indexed Provider 负责索引、结构与跨文件/跨仓理解。
+
+当前配置：
 
 ~~~toml
-[service.code-graph]
+[service.code-indexed]
 provider = "intelligence.codegraph"
 
-[service.code-lsp]
+[service.code-realtime]
 provider = "intelligence.lsp.serena"
 
-[code]
-workspaces = [".", "./devcontrol"]
+[profile.sourcegraph.service.code-indexed]
+provider = "intelligence.sourcegraph"
 ~~~
 
-工具链由 DevEnvironment 提供。DevTool 负责 discovery、workspace/branch 上下文、生命周期、路由和 doctor；项目仓库不再各自下载或固定 CodeGraph / Serena 二进制。
+CodeGraph/Serena 需要执行工具时只调用抽象 `environment` Service。Environment 的实现配置由 Provider 自己持有，例如 Docker image 位于：
 
-Environment Provider 为每个 project/worktree 维护一个可复用的开发容器，并将 `.devtool/cache/devenv-home` 挂载为 `/tmp/devenv-home`。CodeGraph graph DB、Serena/语言服务运行态与工具缓存可以持续复用，同时保持 project/worktree 隔离；Agent 不需要手工安装、创建缓存目录或直接启动依赖。
+~~~toml
+[extension.environment.settings]
+image = "..."
+~~~
 
-Agent 使用规则：
+Code Intelligence、Agent Session 和 Environment Command Contract 都不携带 Docker image。
 
-- definition / references / diagnostics / rename 等 compiler-grade 语义优先走 LSP。
-- callers / callees / dependency topology / impact analysis 等结构问题优先走 CodeGraph。
-- 源码修改后，如果图查询用于正确性结论，必须重新执行 one-shot devtool code graph query，确保读取当前 worktree。
-- devtool code verify 同时验证 CodeGraph 当前图和 LSP workspace health。
-
-DevTool 自己必须通过同一 devtool code 路径完成 dogfood。
+DevTool 自己必须继续通过同一套 Code Intelligence/Capability 路径 dogfood。
 
 ## 10. Native Extension
 
