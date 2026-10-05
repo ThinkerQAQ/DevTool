@@ -32,7 +32,7 @@ type describePayload struct {
 	Project   contract.ProjectDescriptor   `json:"project"`
 }
 
-func StartProjectProcess(ctx context.Context, p project.Project, executable string, services *registry.Registry) (*ProjectProcess, error) {
+func StartProjectProcess(ctx context.Context, p project.Project, executable string, settings map[string]any, services *registry.Registry) (*ProjectProcess, error) {
 	executable = strings.TrimSpace(executable)
 	if executable == "" {
 		return nil, fmt.Errorf("project extension executable is required")
@@ -77,6 +77,10 @@ func StartProjectProcess(ctx context.Context, p project.Project, executable stri
 		}
 		return invoker.Invoke(callCtx, request.Method, request.Payload)
 	})
+	if err := process.call(ctx, protocol.MethodExtensionConfigure, protocol.ExtensionConfigureRequest{Settings: settings}, io.Discard, nil); err != nil {
+		_ = process.Close()
+		return nil, fmt.Errorf("configure project extension: %w", err)
+	}
 	return process, nil
 }
 
