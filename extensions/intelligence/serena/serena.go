@@ -59,7 +59,6 @@ func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Sessio
 	workspace := codeintelligence.Workspace{
 		Root:             session.ProjectRoot,
 		Workspaces:       session.Workspaces,
-		EnvironmentImage: session.EnvironmentImage,
 	}
 	contextName := strings.TrimSpace(session.Context)
 	if contextName == "" {
@@ -235,7 +234,6 @@ func sessionForWorkspace(workspace codeintelligence.Workspace) agentsdk.Session 
 	return agentsdk.Session{
 		ProjectRoot:      workspace.Root,
 		Workspaces:       append([]string(nil), workspace.Workspaces...),
-		EnvironmentImage: workspace.EnvironmentImage,
 		Context:          "agent",
 	}
 }
