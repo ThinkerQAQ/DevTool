@@ -55,6 +55,21 @@ func TestWorkspaceExecReusesNamedContainer(t *testing.T) {
 	}
 }
 
+func TestContainerNotFoundMessageIsCaseInsensitive(t *testing.T) {
+	for _, message := range []string{
+		"Error: No such object: devtool-devenv-deadbeef",
+		"error: no such object: devtool-devenv-deadbeef",
+		"Error response from daemon: No such container: devtool-devenv-deadbeef",
+	} {
+		if !isContainerNotFoundMessage(message) {
+			t.Fatalf("expected container-not-found message to match: %q", message)
+		}
+	}
+	if isContainerNotFoundMessage("permission denied") {
+		t.Fatal("unexpected container-not-found match for unrelated error")
+	}
+}
+
 func TestWorkspaceContainerNameIsProjectScoped(t *testing.T) {
 	first := workspaceContainerName(filepath.Join(t.TempDir(), "a"))
 	second := workspaceContainerName(filepath.Join(t.TempDir(), "b"))
