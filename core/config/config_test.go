@@ -60,10 +60,51 @@ func TestValidateRequiresConfiguredEnvironmentForCodeIntelligence(t *testing.T) 
 		Version: CurrentVersion,
 		Project: Project{Name: "Example"},
 		Service: map[string]Service{
-			"code-graph": {Provider: "intelligence.codegraph"},
+			"code-indexed": {Provider: "intelligence.codegraph"},
 		},
 	}
 	if err := Validate(cfg); err == nil {
 		t.Fatal("Validate() expected missing dev.environment.image error")
+	}
+}
+
+
+func TestApplyProfileOverridesExtensionAndService(t *testing.T) {
+	cfg := Config{
+		Version: CurrentVersion,
+		Project: Project{Name: "Example"},
+		Extension: map[string]Extension{
+			"environment": {Type: "go", Package: "./extensions/environment/docker/cmd/provider"},
+		},
+		Service: map[string]Service{
+			"environment": {Provider: "environment.docker"},
+		},
+		Profile: map[string]Profile{
+			"railway": {
+				Extension: map[string]Extension{
+					"environment": {Type: "go", Package: "./extensions/environment/local/cmd/provider"},
+				},
+				Service: map[string]Service{
+					"environment": {Provider: "environment.local"},
+				},
+			},
+		},
+	}
+	got, err := ApplyProfile(cfg, "railway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Extension["environment"].Package != "./extensions/environment/local/cmd/provider" {
+		t.Fatalf("extension override = %+v", got.Extension["environment"])
+	}
+	if got.Service["environment"].Provider != "environment.local" {
+		t.Fatalf("service override = %+v", got.Service["environment"])
+	}
+}
+
+func TestApplyProfileRejectsUnknownProfile(t *testing.T) {
+	cfg := Config{Profile: map[string]Profile{}}
+	if _, err := ApplyProfile(cfg, "missing"); err == nil {
+		t.Fatal("ApplyProfile() expected unknown profile error")
 	}
 }
