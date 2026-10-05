@@ -94,11 +94,14 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if strings.TrimSpace(request.Symbol) == "" {
 			return nil, fmt.Errorf("realtime symbol is required")
 		}
-		args, err := json.Marshal(map[string]any{
+		toolArgs := map[string]any{
 			"name_path_pattern": request.Symbol,
-			"relative_path":     strings.TrimSpace(request.Path),
 			"include_body":      request.IncludeBody,
-		})
+		}
+		if path := strings.TrimSpace(request.Path); path != "" {
+			toolArgs["relative_path"] = path
+		}
+		args, err := json.Marshal(toolArgs)
 		if err != nil {
 			return nil, err
 		}
