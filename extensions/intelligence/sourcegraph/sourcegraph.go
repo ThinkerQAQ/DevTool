@@ -81,7 +81,7 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if e.remote == nil {
 			return nil, fmt.Errorf("Sourcegraph MCP is not configured; set SOURCEGRAPH_MCP_URL")
 		}
-		var request codeintelligence.GraphQuery
+		var request codeintelligence.IndexedQuery
 		if err := json.Unmarshal(payload, &request); err != nil {
 			return nil, fmt.Errorf("decode Sourcegraph query request: %w", err)
 		}
