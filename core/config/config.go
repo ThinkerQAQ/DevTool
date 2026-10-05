@@ -128,12 +128,6 @@ func Validate(cfg Config) error {
 			return fmt.Errorf("service.%s.provider is required", name)
 		}
 	}
-	if _, ok := cfg.Service["code-indexed"]; ok && strings.TrimSpace(cfg.Dev.Environment.Image) == "" {
-		return fmt.Errorf("dev.environment.image is required when code-indexed service is configured")
-	}
-	if _, ok := cfg.Service["code-realtime"]; ok && strings.TrimSpace(cfg.Dev.Environment.Image) == "" {
-		return fmt.Errorf("dev.environment.image is required when code-realtime service is configured")
-	}
 	for index, workspace := range cfg.Code.Workspaces {
 		if strings.TrimSpace(workspace) == "" {
 			return fmt.Errorf("code.workspaces[%d] cannot be empty", index)
