@@ -9,6 +9,8 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 type RequestHandler func(context.Context, Envelope) (any, error)
@@ -70,6 +72,7 @@ func (s *Session) Call(ctx context.Context, method string, payload any, onEvent 
 		Type:    MessageRequest,
 		Method:  method,
 		Payload: raw,
+		Trace:   devtooltrace.CarrierFromContext(ctx),
 	}); err != nil {
 		return err
 	}
@@ -162,7 +165,7 @@ func (s *Session) readLoop(in io.Reader) {
 				_ = s.replyError(envelope.ID, errors.New("rpc requests are not supported"))
 				continue
 			}
-			requestCtx, cancel := context.WithCancel(context.Background())
+			requestCtx, cancel := context.WithCancel(devtooltrace.ContextWithCarrier(context.Background(), envelope.Trace))
 			s.registerActive(envelope.ID, cancel)
 			s.handlers.Add(1)
 			go func(request Envelope) {
