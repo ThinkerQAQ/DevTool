@@ -1,19 +1,17 @@
 package devcontrol
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/thinkerqaq/devtool/core/contract"
+	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
-	"github.com/thinkerqaq/devtool/sdk/portable"
 	"github.com/thinkerqaq/devtool/sdk/project"
 )
-
-const portableModule = "./.dagger/modules/devtool"
 
 type Provider struct{}
 
@@ -21,7 +19,7 @@ func (Provider) ExtensionDescriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
 		ID:       "project.devtool",
 		Kind:     extensioncontract.KindProject,
-		Requires: []string{portable.ServiceName},
+		Requires: []string{environmentcontract.ServiceName},
 	}
 }
 
@@ -29,10 +27,9 @@ func (Provider) ProjectDescriptor() contract.ProjectDescriptor {
 	return contract.ProjectDescriptor{
 		Identity: contract.ProjectIdentity{Name: "DevTool"},
 		Commands: []contract.CommandDescriptor{
-			{ID: "build", Title: "Build", Description: "Build the next DevTool binary through the portable runtime.", SideEffect: contract.SideEffectWrite},
-			{ID: "package", Title: "Package", Description: "Package a verified DevTool binary through the portable runtime.", SideEffect: contract.SideEffectWrite},
-			{ID: "runtime.doctor", Title: "Runtime Doctor", Description: "Verify the configured portable runtime.", SideEffect: contract.SideEffectRead},
-			{ID: "verify", Title: "Verify", Description: "Run DevTool self-host verification through the portable runtime.", SideEffect: contract.SideEffectWrite},
+			{ID: "build", Title: "Build", Description: "Build the next DevTool binary in the configured development environment.", SideEffect: contract.SideEffectWrite},
+			{ID: "package", Title: "Package", Description: "Package a verified DevTool binary in the configured development environment.", SideEffect: contract.SideEffectWrite},
+			{ID: "verify", Title: "Verify", Description: "Run DevTool self-host verification in the configured development environment.", SideEffect: contract.SideEffectWrite},
 		},
 		Resources: []contract.ResourceDescriptor{
 			{ID: "environment", Title: "Environment", Description: "DevTool development environment."},
@@ -46,7 +43,6 @@ func (Provider) ProjectDescriptor() contract.ProjectDescriptor {
 					{CommandID: "build", Label: "Build"},
 					{CommandID: "verify", Label: "Verify"},
 					{CommandID: "package", Label: "Package"},
-					{CommandID: "runtime.doctor", Label: "Runtime Doctor"},
 				},
 			},
 		},
@@ -64,80 +60,131 @@ func (Provider) Execute(ctx project.Context, command string, _ map[string]any) e
 
 	switch command {
 	case "build":
-		return invokePortable(
-			ctx,
-			workspace,
-			"build-artifact",
-			filepath.Join(workspace, ".devtool", "out", nextBinaryName()),
-			targetArgs(),
-			"Building DevTool N+1 through portable-runtime",
-			"DevTool N+1 built through portable-runtime",
-		)
+		return build(ctx, workspace)
 	case "verify":
-		return invokePortable(
-			ctx,
-			workspace,
-			"verify",
-			"",
-			nil,
-			"Verifying DevTool self-hosting through portable-runtime",
-			"DevTool portable self-host verification passed",
-		)
+		return verify(ctx, workspace)
 	case "package":
-		return invokePortable(
-			ctx,
-			workspace,
-			"package-artifact",
-			filepath.Join(workspace, ".devtool", "artifacts", packageBinaryName()),
-			targetArgs(),
-			"Packaging verified DevTool through portable-runtime",
-			"DevTool package exported through portable-runtime",
-		)
-	case "runtime.doctor":
-		var response portable.DoctorResponse
-		if err := ctx.InvokeService(portable.ServiceName, portable.MethodDoctor, struct{}{}, &response); err != nil {
-			return err
-		}
-		return ctx.Emit("result", fmt.Sprintf("%s READY: %s (%s)", response.Provider, response.Version, response.Smoke))
+		return packageArtifact(ctx, workspace)
 	default:
 		return fmt.Errorf("unknown DevTool project command %q", command)
 	}
 }
 
-func invokePortable(
-	ctx project.Context,
-	workspace string,
-	function string,
-	output string,
-	args map[string]string,
-	progress string,
-	success string,
-) error {
-	if err := ctx.Emit("progress", progress); err != nil {
+func build(ctx project.Context, workspace string) error {
+	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "out"), 0o755); err != nil {
+		return fmt.Errorf("create DevTool output directory: %w", err)
+	}
+	if err := ctx.Emit("progress", "Building DevTool N+1 in configured environment"); err != nil {
 		return err
 	}
-	var result json.RawMessage
-	if err := ctx.InvokeService(
-		portable.ServiceName,
-		portable.MethodInvoke,
-		portable.Invocation{
-			Workspace: workspace,
-			Module:    portableModule,
-			Function:  function,
-			Args:      args,
-			Output:    output,
+	if err := runEnvironment(ctx, workspace, environmentcontract.CommandRequest{
+		Executable: "go",
+		Args: []string{
+			"build",
+			"-trimpath",
+			"-o", ".devtool/out/" + nextBinaryName(),
+			"./cmd/devtool",
 		},
+		Env: targetEnv(),
+	}); err != nil {
+		return err
+	}
+	return ctx.Emit("result", "DevTool N+1 built in configured environment")
+}
+
+func verify(ctx project.Context, workspace string) error {
+	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "out"), 0o755); err != nil {
+		return fmt.Errorf("create DevTool output directory: %w", err)
+	}
+	if err := ctx.Emit("progress", "Verifying DevTool self-hosting in configured environment"); err != nil {
+		return err
+	}
+
+	steps := []environmentcontract.CommandRequest{
+		{Executable: "go", Args: []string{"test", "./..."}, Env: selfHostTestEnv()},
+		{Executable: "go", Args: []string{"-C", "devcontrol", "test", "./..."}, Env: selfHostTestEnv()},
+		{
+			Executable: "go",
+			Args: []string{
+				"build",
+				"-trimpath",
+				"-o", ".devtool/out/" + nextBinaryName(),
+				"./cmd/devtool",
+			},
+		},
+		{
+			Executable: ".devtool/out/" + nextBinaryName(),
+			Args:       []string{"project", "inspect", "--json"},
+		},
+	}
+	for _, step := range steps {
+		if err := runEnvironment(ctx, workspace, step); err != nil {
+			return err
+		}
+	}
+	return ctx.Emit("result", "DevTool self-host verification passed in configured environment")
+}
+
+func packageArtifact(ctx project.Context, workspace string) error {
+	if err := verify(ctx, workspace); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "artifacts"), 0o755); err != nil {
+		return fmt.Errorf("create DevTool artifact directory: %w", err)
+	}
+	if err := ctx.Emit("progress", "Packaging DevTool in configured environment"); err != nil {
+		return err
+	}
+	if err := runEnvironment(ctx, workspace, environmentcontract.CommandRequest{
+		Executable: "go",
+		Args: []string{
+			"build",
+			"-trimpath",
+			"-ldflags=-s -w",
+			"-o", ".devtool/artifacts/" + packageBinaryName(),
+			"./cmd/devtool",
+		},
+		Env: targetEnv(),
+	}); err != nil {
+		return err
+	}
+	return ctx.Emit("result", "DevTool package exported from configured environment")
+}
+
+func runEnvironment(ctx project.Context, workspace string, request environmentcontract.CommandRequest) error {
+	request.Root = workspace
+
+	var result environmentcontract.RunResult
+	if err := ctx.InvokeService(
+		environmentcontract.ServiceName,
+		environmentcontract.MethodRun,
+		request,
 		&result,
 	); err != nil {
 		return err
 	}
-	return ctx.Emit("result", success)
+	if result.ExitCode != 0 {
+		message := strings.TrimSpace(result.Stderr)
+		if message == "" {
+			message = strings.TrimSpace(result.Stdout)
+		}
+		if message == "" {
+			message = fmt.Sprintf("exit code %d", result.ExitCode)
+		}
+		return fmt.Errorf("%s failed: %s", request.Executable, message)
+	}
+	return nil
 }
 
-func targetArgs() map[string]string {
-	return map[string]string{
-		"target-os":   runtime.GOOS,
-		"target-arch": runtime.GOARCH,
+func selfHostTestEnv() []string {
+	return []string{"DEVTOOL_PROFILES="}
+}
+
+func targetEnv() []string {
+	return []string{
+		"CGO_ENABLED=0",
+		"GOOS=" + runtime.GOOS,
+		"GOARCH=" + runtime.GOARCH,
 	}
 }
 

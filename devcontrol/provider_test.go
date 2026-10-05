@@ -2,10 +2,11 @@ package devcontrol
 
 import (
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/thinkerqaq/devtool/core/contract"
-	"github.com/thinkerqaq/devtool/sdk/portable"
+	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 )
 
 func TestProjectDescriptorIsValid(t *testing.T) {
@@ -14,16 +15,22 @@ func TestProjectDescriptorIsValid(t *testing.T) {
 	}
 }
 
-func TestProjectExtensionRequiresPortableRuntime(t *testing.T) {
+func TestProjectExtensionRequiresEnvironment(t *testing.T) {
 	descriptor := Provider{}.ExtensionDescriptor()
-	if len(descriptor.Requires) != 1 || descriptor.Requires[0] != portable.ServiceName {
-		t.Fatalf("Requires = %#v, want [%q]", descriptor.Requires, portable.ServiceName)
+	if len(descriptor.Requires) != 1 || descriptor.Requires[0] != environmentcontract.ServiceName {
+		t.Fatalf("Requires = %#v, want [%q]", descriptor.Requires, environmentcontract.ServiceName)
 	}
 }
 
-func TestTargetArgsUseHostTarget(t *testing.T) {
-	args := targetArgs()
-	if args["target-os"] != runtime.GOOS || args["target-arch"] != runtime.GOARCH {
-		t.Fatalf("targetArgs() = %#v, want %s/%s", args, runtime.GOOS, runtime.GOARCH)
+func TestTargetEnvUsesHostTarget(t *testing.T) {
+	env := targetEnv()
+	for _, want := range []string{
+		"CGO_ENABLED=0",
+		"GOOS=" + runtime.GOOS,
+		"GOARCH=" + runtime.GOARCH,
+	} {
+		if !slices.Contains(env, want) {
+			t.Fatalf("targetEnv() = %#v, missing %q", env, want)
+		}
 	}
 }

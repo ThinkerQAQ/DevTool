@@ -71,19 +71,20 @@ jobs:
             echo "project-local code-intelligence dependency bootstrap is forbidden"
             exit 1
           fi
-      - name: Portable runtime doctor
-        run: go run ./cmd/devtool runtime.doctor
       - name: Self-host build
         run: go run ./cmd/devtool build
       - name: Self-host N+1 to N+2
         run: |
           cp .devtool/out/devtool-next /tmp/devtool-n1
           /tmp/devtool-n1 project inspect --json
-          /tmp/devtool-n1 runtime.doctor
           /tmp/devtool-n1 build
           cp .devtool/out/devtool-next /tmp/devtool-n2
           /tmp/devtool-n2 project inspect --json
           cmp /tmp/devtool-n1 /tmp/devtool-n2
+      - name: Self-host through local environment provider
+        run: |
+          DEVTOOL_PROFILES=railway go run ./cmd/devtool build
+          ./.devtool/out/devtool-next project inspect --json
       - name: Self-host verify
         run: go run ./cmd/devtool verify
       - name: Self-host package

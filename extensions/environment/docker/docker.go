@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/thinkerqaq/devtool/extensions/environment/internal/commandexec"
 	service "github.com/thinkerqaq/devtool/sdk/service"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
@@ -55,10 +56,6 @@ func (e *Extension) Register(reg extensioncontract.Registrar) error {
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
-	if method != environmentcontract.MethodCommand {
-		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
-	}
-
 	var request environmentcontract.CommandRequest
 	if err := json.Unmarshal(payload, &request); err != nil {
 		return nil, fmt.Errorf("decode environment command request: %w", err)
@@ -67,7 +64,19 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(spec)
+
+	switch method {
+	case environmentcontract.MethodCommand:
+		return json.Marshal(spec)
+	case environmentcontract.MethodRun:
+		result, err := commandexec.Run(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	default:
+		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
+	}
 }
 
 func (e *Extension) commandSpec(ctx context.Context, request environmentcontract.CommandRequest) (environmentcontract.CommandSpec, error) {
@@ -105,7 +114,7 @@ func (e *Extension) commandSpec(ctx context.Context, request environmentcontract
 	}
 	return environmentcontract.CommandSpec{
 		Program: "docker",
-		Args:    workspaceExecArgs(name, uid, gid, workdir, request.Executable, request.Args...),
+		Args:    workspaceExecArgs(name, uid, gid, workdir, request.Env, request.Executable, request.Args...),
 		Dir:     root,
 	}, nil
 }
@@ -212,7 +221,7 @@ func workspaceCreateArgs(name, root, devenvHome, image, uid, gid string) []strin
 	return args
 }
 
-func workspaceExecArgs(name, uid, gid, workdir, executable string, args ...string) []string {
+func workspaceExecArgs(name, uid, gid, workdir string, env []string, executable string, args ...string) []string {
 	dockerArgs := []string{
 		"exec", "-i",
 		"--workdir", workdir,
@@ -220,6 +229,11 @@ func workspaceExecArgs(name, uid, gid, workdir, executable string, args ...strin
 	}
 	if uid != "" && gid != "" {
 		dockerArgs = append(dockerArgs, "--user", uid+":"+gid)
+	}
+	for _, item := range env {
+		if value := strings.TrimSpace(item); value != "" {
+			dockerArgs = append(dockerArgs, "-e", value)
+		}
 	}
 	dockerArgs = append(dockerArgs, name, executable)
 	dockerArgs = append(dockerArgs, args...)

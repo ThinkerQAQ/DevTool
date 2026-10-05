@@ -37,7 +37,7 @@ func TestWorkspaceContainerUsesPersistentProjectMounts(t *testing.T) {
 
 func TestWorkspaceExecReusesNamedContainer(t *testing.T) {
 	name := workspaceContainerName(t.TempDir())
-	args := workspaceExecArgs(name, "1000", "1000", "/workspace", "codegraph-server", "--version")
+	args := workspaceExecArgs(name, "1000", "1000", "/workspace", []string{"FOO=bar"}, "codegraph-server", "--version")
 	if len(args) == 0 || args[0] != "exec" {
 		t.Fatalf("expected docker exec, got: %v", args)
 	}
@@ -49,6 +49,9 @@ func TestWorkspaceExecReusesNamedContainer(t *testing.T) {
 	}
 	if !slices.Contains(args, "HOME=/tmp/devenv-home") {
 		t.Fatalf("persistent HOME missing from docker exec args: %v", args)
+	}
+	if !slices.Contains(args, "FOO=bar") {
+		t.Fatalf("command environment missing from docker exec args: %v", args)
 	}
 	if got := strings.Join(args, " "); !strings.Contains(got, "codegraph-server --version") {
 		t.Fatalf("tool command missing from docker exec args: %v", args)
