@@ -36,10 +36,10 @@ func runCode(ctx context.Context, args []string, out io.Writer) error {
 		if len(args) != 1 {
 			return errors.New("code verify does not accept arguments")
 		}
-		if _, err := invokeCodeService(ctx, h, codeintelligence.GraphServiceName, codeintelligence.MethodSync, workspace); err != nil {
+		if _, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodSync, workspace); err != nil {
 			return fmt.Errorf("CodeGraph verify: %w", err)
 		}
-		if _, err := invokeCodeService(ctx, h, codeintelligence.LSPServiceName, codeintelligence.MethodVerify, workspace); err != nil {
+		if _, err := invokeCodeService(ctx, h, codeintelligence.RealtimeServiceName, codeintelligence.MethodVerify, workspace); err != nil {
 			return fmt.Errorf("LSP verify: %w", err)
 		}
 		fmt.Fprintln(out, "Code intelligence VERIFIED")
@@ -77,7 +77,7 @@ func projectCodeWorkspace(h *host.ProjectHost) codeintelligence.Workspace {
 }
 
 func runCodeDoctor(ctx context.Context, h *host.ProjectHost, workspace codeintelligence.Workspace, out io.Writer) error {
-	for _, serviceName := range []string{codeintelligence.GraphServiceName, codeintelligence.LSPServiceName} {
+	for _, serviceName := range []string{codeintelligence.IndexedServiceName, codeintelligence.RealtimeServiceName} {
 		raw, err := invokeCodeService(ctx, h, serviceName, codeintelligence.MethodDoctor, workspace)
 		if err != nil {
 			return fmt.Errorf("%s doctor: %w", serviceName, err)
@@ -104,13 +104,13 @@ func runCodeGraph(ctx context.Context, h *host.ProjectHost, workspace codeintell
 		if len(args) != 1 {
 			return errors.New("code graph mcp does not accept arguments")
 		}
-		_, err := invokeCodeService(ctx, h, codeintelligence.GraphServiceName, codeintelligence.MethodMCP, codeintelligence.MCPRequest{Workspace: workspace})
+		_, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodMCP, codeintelligence.MCPRequest{Workspace: workspace})
 		return err
 	case "sync":
 		if len(args) != 1 {
 			return errors.New("code graph sync does not accept arguments")
 		}
-		raw, err := invokeCodeService(ctx, h, codeintelligence.GraphServiceName, codeintelligence.MethodSync, workspace)
+		raw, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodSync, workspace)
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func runCodeGraph(ctx context.Context, h *host.ProjectHost, workspace codeintell
 				return errors.New("code graph query json-args must be valid JSON")
 			}
 		}
-		raw, err := invokeCodeService(ctx, h, codeintelligence.GraphServiceName, codeintelligence.MethodQuery, codeintelligence.GraphQuery{
+		raw, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodQuery, codeintelligence.GraphQuery{
 			Workspace: workspace,
 			Tool:      args[1],
 			Args:      queryArgs,
@@ -153,7 +153,7 @@ func runCodeLSP(ctx context.Context, h *host.ProjectHost, workspace codeintellig
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected code lsp mcp arguments: %v", fs.Args())
 	}
-	_, err := invokeCodeService(ctx, h, codeintelligence.LSPServiceName, codeintelligence.MethodMCP, codeintelligence.MCPRequest{
+	_, err := invokeCodeService(ctx, h, codeintelligence.RealtimeServiceName, codeintelligence.MethodMCP, codeintelligence.MCPRequest{
 		Workspace: workspace,
 		Context:   strings.TrimSpace(*contextName),
 	})
