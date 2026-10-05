@@ -10,10 +10,18 @@ Pinned baselines:
 
 - DevTool: `96f78f7b937d17f52a5ecdccc9164c8611dfd922`
 - IDFlow clean baseline: `3a652d74f7c4e34ab29343c33042e548cee248a8`
-- Primary Codespaces machine: **4 vCPU / 16 GB RAM**
-- Target machine simulation: **4 vCPU / 4 GB RAM**
+- Groups B/C remote machine: **GitHub Codespaces, 4 vCPU / 16 GB RAM**
+- Target cloud-machine simulation: **4 vCPU / 4 GB RAM**
 
 The existing IDFlow DevTool migration PR must not be used as the benchmark starting tree. Each benchmark run starts from the clean IDFlow baseline above so the agent has to discover and perform the migration itself.
+
+There are exactly **three end-to-end comparison groups**:
+
+- **A — GitHub Connector baseline**
+- **B — Remote Connector baseline**
+- **C — Remote Connector + DevTool V2 target**
+
+Direct execution inside Codespaces is not a fourth end-to-end group. It is used only for transport microbenchmarks and host-local reference measurements.
 
 ---
 
@@ -21,9 +29,9 @@ The existing IDFlow DevTool migration PR must not be used as the benchmark start
 
 The hypothesis is not merely that a remote server is fast.
 
-The hypothesis is:
+The hypothesis has three separable parts:
 
-> A persistent remote development node running DevTool V2 beside the source tree improves end-to-end agent engineering throughput because DevTool turns repository-scale indexed intelligence and realtime language intelligence into a small, stable set of coarse-grained remote capabilities. The latency added by the remote connector is smaller than the navigation, context-gathering, failed-tool-call and rework cost that DevTool removes.
+> Moving from GitHub-API-only editing to a real remote workspace improves engineering throughput; adding DevTool V2 on that same remote workspace improves it further by turning repository-scale indexed intelligence and realtime language intelligence into a small, stable set of coarse-grained capabilities; the remote connector overhead remains small enough that the combined architecture is still faster end to end.
 
 The target path is:
 
@@ -99,40 +107,45 @@ Do not optimize these before the first benchmark. The first benchmark must expos
 
 ## 3. Required DevTool work before testing
 
-Only add **generic observability and benchmark support**.
+Only add the **minimum generic observability needed to start the benchmark**.
 
-Do not change the semantic execution path.
+Do not build a benchmark framework and do not change the semantic execution path.
 
-### 3.1 Required behavior
+### 3.1 Required trace path
 
-DevTool must be able to emit structured timing spans for one agent request across these boundaries:
+The mandatory path is:
 
 ```text
-remote HTTP / MCP request
-  -> Agent Gateway dispatch
-  -> Agent Capability
-  -> Service invocation
-  -> Provider operation
+Agent Gateway tools/call
+  -> code_context
+  -> code-indexed.search
+     -> CodeGraph
+  -> code-realtime.symbols/references/diagnostics
+     -> Serena/LSP
 ```
 
-For `code_context`, a trace should make it possible to see approximately:
+A trace should make it possible to reconstruct approximately:
 
 ```text
 tools/call: code_context             1320 ms
   code_context                      1284 ms
     code-indexed.search              410 ms
+      CodeGraph provider             ...
     code-realtime.symbols            255 ms
+      Serena/LSP provider            ...
     code-realtime.references         351 ms
     code-realtime.diagnostics        249 ms
 ```
 
-The exact package layout is implementation-dependent, but the mechanism must remain cross-project and provider-neutral.
+Remote MCP client timing in `core/agent/mcpbridge/http.go` is useful but **optional for the minimum baseline**. Add it only if it remains a small, isolated change.
+
+Environment-wide tracing, benchmark result generation and host resource collectors are explicitly deferred.
 
 ### 3.2 Minimal trace schema
 
-Use JSON Lines so traces can be inspected with ordinary shell tools and processed later without introducing a telemetry backend.
+Use JSON Lines.
 
-Recommended event shape:
+Minimum useful fields:
 
 ```json
 {
@@ -140,29 +153,27 @@ Recommended event shape:
   "trace_id": "…",
   "span_id": "…",
   "parent_span_id": "…",
-  "layer": "gateway|capability|service|provider|environment",
+  "layer": "gateway|capability|service|provider",
   "name": "tools.call|code_context|code-indexed.search|code-realtime.references",
-  "tool": "code_context",
   "provider": "intelligence.codegraph",
   "method": "search",
   "duration_ms": 123.45,
   "status": "ok|error",
   "request_bytes": 123,
   "response_bytes": 456,
-  "error_class": "",
   "run_id": "…"
 }
 ```
 
-Required properties:
+Requirements:
 
-- one `trace_id` connects one top-level tool call to internal spans;
+- one `trace_id` connects a top-level tool call to internal spans;
 - parent/child relationships are reconstructable;
 - duration uses a monotonic clock;
 - success/error is explicit;
 - provider/service identity is recorded when known;
-- request/response **sizes** may be recorded;
-- raw source code, prompts, credentials, authorization headers and tool argument bodies must **not** be written to traces.
+- request/response sizes may be recorded;
+- raw source code, prompts, tool argument bodies, credentials, authorization headers and secret-bearing environment values must never be written to traces.
 
 ### 3.3 Enablement
 
@@ -173,64 +184,52 @@ Tracing must be:
 - independent of IDFlow;
 - usable by any DevTool-managed project.
 
-A simple generic runtime switch is sufficient for the benchmark baseline, for example:
+The smallest acceptable runtime surface is:
 
 ```text
 DEVTOOL_TRACE_FILE=.devtool/traces/benchmark.jsonl
 DEVTOOL_RUN_ID=<run-id>
 ```
 
-Do not create an IDFlow-specific configuration key.
+Do not add an IDFlow-specific configuration key and do not turn TOML into a benchmark workflow language.
 
-Do not turn TOML into a workflow language just to support this benchmark.
+### 3.4 Mandatory instrumentation points
 
-If the implementation chooses a configuration surface instead of environment variables, it must still follow the same constraints: optional, generic, provider-neutral and disabled by default.
+Instrument only what is required for causal attribution:
 
-### 3.4 Instrumentation points
-
-At minimum instrument:
-
-1. **Agent HTTP/MCP boundary**
+1. **Agent Gateway**
    - `core/agent/gateway.go`
-   - total request handling and `tools/call`.
+   - `tools/call` total duration.
 
-2. **Remote MCP client boundary when used**
-   - `core/agent/mcpbridge/http.go`
-   - request duration and response size.
-   - do not log bearer tokens, headers or payload contents.
-
-3. **Stable code capability**
+2. **Stable code capability**
    - `extensions/capability/code/code.go`
-   - total `code_context` duration.
-   - each indexed/realtime service call as a child span.
+   - total `code_context`;
+   - indexed and realtime child service calls.
 
-4. **Code intelligence providers**
-   - CodeGraph operation duration.
-   - Serena/LSP operation duration.
-   - provider error classification.
+3. **Code intelligence providers**
+   - CodeGraph operation duration;
+   - Serena/LSP operation duration;
+   - error status/classification.
 
-5. **Environment execution**
-   - local/docker command execution duration at the generic environment boundary.
-   - do not log secret-bearing environment values.
+4. **Optional remote MCP client**
+   - `core/agent/mcpbridge/http.go`;
+   - request duration/response size only if cheap to add.
 
-Project commands may also be traced through the generic command/service boundary if this falls out naturally from the implementation.
-
-### 3.5 External metrics, not DevTool responsibilities
-
-Do **not** put host resource monitoring into Core.
+### 3.5 Metrics deliberately kept outside DevTool
 
 Collect these externally during benchmark runs:
 
+- total wall-clock task time;
 - peak RSS;
 - CPU utilization / CPU time;
 - swap activity;
 - OOM events;
-- container/cgroup memory;
-- wall-clock build/verify/package duration.
+- build/verify/package wall time;
+- connector microbenchmark latency.
 
-Use OS/cgroup/Docker/Codespaces facilities for these metrics.
+DevTool Core must not become a host monitoring system.
 
-### 3.6 No benchmark-driven product special cases
+### 3.6 No benchmark-driven special cases
 
 The implementation must not introduce:
 
@@ -279,75 +278,103 @@ This preserves causal evidence.
 
 ## 5. Benchmark experiment groups
 
-All primary comparison groups use the same **4 vCPU / 16 GB Codespace**.
+There are exactly three end-to-end groups.
 
-The purpose is to keep machine saturation from contaminating the architecture comparison.
+Groups B and C use the same **4 vCPU / 16 GB Codespace**. Group A intentionally has no Codespace because the absence of a real remote workspace is part of the baseline being measured.
 
-### Group A — Remote baseline without DevTool code intelligence
+### Group A — GitHub Connector baseline
 
 ```text
-remote agent
-  -> remote connector
-  -> same Codespace
-  -> ordinary repository navigation / shell / file reads
+ChatGPT
+  -> GitHub Connector
+  -> GitHub repository APIs
+  -> file/search/commit/branch/PR operations
 ```
 
 Rules:
 
+- no remote development machine;
+- no Remote Connector;
+- no DevTool;
+- no CodeGraph/Serena/LSP;
+- code understanding comes from the GitHub Connector surface available to ChatGPT;
+- validation may use repository CI or other capabilities naturally available through the GitHub workflow, but must not secretly introduce a remote shell workspace.
+
+This is the baseline that represents direct ChatGPT-to-GitHub development.
+
+### Group B — Remote Connector baseline
+
+```text
+ChatGPT
+  -> Remote Connector
+  -> Codespace 4C16G
+  -> ordinary shell / filesystem / git / build tools
+```
+
+Rules:
+
+- real checked-out workspace is available;
+- ordinary shell, file reads, `rg`/search, Git, Go build/test and similar development operations are allowed;
 - no `code_context`;
 - no direct CodeGraph/Serena use;
-- the agent may use ordinary shell/file/Git operations that are available in the baseline environment;
-- use the same model and task prompt as Group B.
+- no DevTool code-intelligence capability.
 
-This measures the current remote-development baseline.
+This isolates the value of having a real remote development workspace and Remote Connector.
 
-### Group B — Target architecture
-
-```text
-remote agent
-  -> remote connector
-  -> same Codespace
-  -> DevTool local environment profile
-  -> code_context
-     -> CodeGraph
-     -> Serena/LSP
-```
-
-This is the architecture that a future persistent cloud development node is intended to run.
-
-### Group C — Transport isolation
+### Group C — Remote Connector + DevTool V2 target
 
 ```text
-agent running directly in Codespace
-  -> DevTool
-  -> code_context
-     -> CodeGraph
-     -> Serena/LSP
+ChatGPT
+  -> Remote Connector
+  -> same Codespace 4C16G
+  -> DevTool V2 using environment.local
+  -> stable capabilities
+     -> code_context
+        -> CodeGraph
+        -> Serena/LSP
+     -> project_*
+     -> scm_*
 ```
 
-No remote connector in the critical path.
+Rules:
 
-Comparison:
+- use the same Codespace class as Group B;
+- code understanding should prefer `code_context`;
+- project operations should prefer `project_*` where available;
+- SCM operations should prefer the configured DevTool SCM capability;
+- do not bypass DV2 merely to make the benchmark look faster unless the capability is genuinely missing or broken; record every bypass.
+
+This is the target architecture intended for a persistent cloud development node.
+
+### Causal comparisons
 
 ```text
-B vs A = value of DevTool code intelligence in the remote workflow
-B vs C = cost of the remote connector / transport layer
+B vs A
+= value of Remote Connector + real remote workspace
+
+C vs B
+= incremental value of DevTool V2 + CodeGraph/LSP
+
+C vs A
+= total value of the final architecture
 ```
 
-### Group D — 4 GB target-machine simulation
+### Separate 4C4G hardware stress run
 
-After A/B/C finish on 4C16G, run the target path again with the DevTool workload constrained to approximately:
+The 4C4G test is **not a fourth agent group**.
+
+After Group C has been measured on 4C16G, repeat representative Group C workloads while constraining the DevTool workload to approximately:
 
 ```text
 4 vCPU
 4 GB RAM
 ```
 
-Keep every other variable fixed.
+Keep the code, task and provider configuration fixed.
 
 This answers whether the low-cost 4C4G cloud machine is sufficient.
 
-A 2C8G Codespace may be used later only as a secondary CPU-vs-memory stress experiment. It is not the primary benchmark machine.
+A 2C8G Codespace may be used later only as a secondary CPU-vs-memory stress experiment.
 
 ---
 
@@ -393,15 +420,21 @@ Required architectural outcomes:
 
 For every A/B/C run:
 
-- identical IDFlow commit;
-- identical DevTool commit;
-- identical model/configuration;
-- identical task prompt;
-- separate worktree/branch;
+- identical IDFlow starting commit;
+- identical DevTool target commit;
+- identical ChatGPT model/configuration where the product surface permits;
+- identical task prompt and acceptance criteria;
+- separate benchmark branch/worktree or equivalent isolated Git history;
 - fresh agent conversation/session;
 - no access to another group's patch;
 - no access to PR #10 as an implementation guide;
-- same correctness gates.
+- same final correctness gates.
+
+Environment equality applies where it is part of the controlled comparison:
+
+- B and C must use the same Codespace class and base development environment;
+- A intentionally does not use Codespaces because "GitHub Connector only" is the independent variable;
+- differences caused by the tool surface itself are part of the measurement and must not be normalized away.
 
 Record deviations explicitly.
 
@@ -451,11 +484,11 @@ Time to merge-ready
 
 ## 8. Connector microbenchmark
 
-Do this separately from the LLM task.
+This is a **separate transport control**, not an end-to-end experiment group.
 
-The connector tax must be measured independently so it is not confused with CodeGraph/LSP work.
+The purpose is to estimate Remote Connector overhead without changing the agent used for the full migration.
 
-Run a trivial remote operation repeatedly, for example:
+On the same Codespace used by B/C, measure a trivial operation through the Remote Connector repeatedly, for example:
 
 ```text
 ping
@@ -463,38 +496,38 @@ pwd
 git rev-parse HEAD
 ```
 
-Use enough repetitions to report at least:
+Record at least:
 
 - p50;
 - p95;
 - maximum;
 - failure rate.
 
-Then run the same operation directly on the Codespace.
+Then measure the same underlying command directly on the Codespace host as a local execution reference.
 
 Approximation:
 
 ```text
 connector tax
-  = remote end-to-end latency
-  - server-local execution latency
+  = remote end-to-end operation latency
+  - host-local operation latency
 ```
 
-Also report:
+For DV2 calls also report:
 
 ```text
 connector overhead ratio
   = connector tax
-  / total code_context latency
+  / warm code_context latency
 ```
-
-The connector is acceptable for this architecture when its median overhead is small relative to the coarse-grained work done behind a single tool call.
 
 Initial interpretation bands:
 
 - **< 15%**: acceptable;
 - **15–25%**: measurable but not automatically blocking;
-- **> 25%**: investigate the transport layer before buying dedicated hardware.
+- **> 25%**: investigate the transport layer.
+
+Do not run a fourth "agent inside Codespace" migration. Host-local execution exists only to isolate transport cost.
 
 ---
 
@@ -594,30 +627,52 @@ External collection:
 
 Do not redefine success after seeing the data.
 
-The target architecture is considered validated for the IDFlow experiment when all of these hold:
+### 11.1 Correctness gate
 
-1. **Correctness**
-   - all compared implementations pass the same final acceptance gates.
+All three groups must satisfy the same final migration acceptance criteria. A faster incorrect implementation does not count.
 
-2. **Productivity**
-   - Group B reduces time-to-merge-ready by at least **20%** versus Group A, or produces equivalent time with a substantial reduction in human correction/rework.
+### 11.2 Overall architecture
 
-3. **Navigation**
-   - Group B reduces raw navigation/file/tool churn by roughly **30%** or more versus Group A.
+The final architecture is validated when Group C demonstrates a meaningful end-to-end advantage over Group A.
 
-4. **Human intervention**
-   - Group B does not require more human corrections than Group A.
+Target:
 
-5. **Transport**
-   - connector overhead is preferably **<15%** of warm `code_context` latency and is not a dominant component of end-to-end task time.
+- **C reduces time-to-merge-ready by at least 20% versus A**, or
+- C achieves comparable wall time with substantially fewer human corrections, failed edits and rework.
 
-6. **4 GB viability**
-   - no OOM;
-   - no sustained swap thrashing;
-   - peak working set leaves operational headroom;
-   - core warm workloads are no more than roughly **20%** slower than the unconstrained 4C16G reference unless the total task-level result is still clearly acceptable.
+### 11.3 Incremental DV2 value
 
-If 4 GB fails this gate, the benchmark should recommend a larger development node rather than hiding the problem with aggressive swap.
+DV2 code intelligence is considered valuable when C improves on B in at least one strong dimension without regressing correctness:
+
+- lower time-to-architecture-map or time-to-merge-ready;
+- roughly **30% lower raw navigation/file/tool churn**;
+- materially fewer incorrect assumptions/rework/human corrections.
+
+A target of ~15%+ task-time improvement from C vs B is strong evidence, but the benchmark should preserve the raw data even when the improvement is smaller.
+
+### 11.4 Remote workspace value
+
+B vs A determines whether a real remote workspace is itself valuable.
+
+This result must be reported independently from DV2 so that improvements are not incorrectly attributed to CodeGraph/LSP.
+
+### 11.5 Transport
+
+Remote Connector overhead should preferably be:
+
+- **<15%** of warm `code_context` latency;
+- non-dominant in end-to-end task time.
+
+### 11.6 4 GB viability
+
+The 4C4G stress run passes when:
+
+- no OOM occurs;
+- there is no sustained swap thrashing;
+- peak working set leaves operational headroom;
+- representative warm DV2 workloads are no more than roughly **20%** slower than the 4C16G reference unless task-level throughput remains clearly acceptable.
+
+If 4 GB fails, recommend a larger persistent node instead of hiding the problem with aggressive swap.
 
 ---
 
@@ -637,8 +692,9 @@ Each run should produce a small machine-readable and human-readable result set, 
 
 - DevTool SHA;
 - IDFlow SHA;
-- group A/B/C/D;
+- group A/B/C;
 - machine CPU/RAM;
+- resource profile (`4c16g-reference` or `4c4g-stress`) when applicable;
 - agent/model identifier where available;
 - run start/end;
 - cold/warm state;
@@ -650,65 +706,14 @@ Benchmark results may be committed later to a dedicated docs/results area after 
 
 ---
 
-## 13. Implementation plan for the local agent
+## 13. Minimum implementation plan for the local agent
 
-Implement the benchmark baseline in small coherent commits.
+The current local-agent quota is limited. Implement only the smallest benchmark-ready tracing path.
 
-### Commit 1 — Generic trace primitives
-
-- add minimal generic trace/span primitives;
-- disabled by default;
-- JSONL output;
-- run/trace/span identifiers;
-- security rule: metadata only, no source/prompt/credentials.
-
-### Commit 2 — Agent/Gateway instrumentation
-
-- instrument HTTP/MCP top-level request;
-- instrument `tools/call`;
-- preserve existing behavior and status codes.
-
-### Commit 3 — Capability and provider instrumentation
-
-- instrument `code_context`;
-- child spans for indexed and realtime service calls;
-- instrument CodeGraph and Serena provider operations.
-
-### Commit 4 — Environment/project execution timing
-
-- instrument generic environment execution boundary;
-- ensure local/docker behavior is unchanged.
-
-### Commit 5 — Benchmark harness/support
-
-Add only lightweight, reusable benchmark support needed to:
-
-- create/run tagged benchmark sessions;
-- write metadata/result files;
-- distinguish cold/warm runs;
-- avoid hand-calculated timestamps.
-
-Do not add an IDFlow-specific benchmark implementation to DevTool Core.
-
-### Commit 6 — Verification and docs
-
-Verify:
+Follow the normal development rhythm:
 
 ```text
-go test ./...
-DevTool self-host verify/package path
-trace disabled -> behavior unchanged
-trace enabled -> valid JSONL
-no secrets in trace output
-provider replacement remains configuration-only
-```
-
-Then update the relevant reference documentation for the new generic trace switch.
-
-Follow the repository development rhythm:
-
-```text
-change a coherent unit
+change one coherent unit
   -> commit
   -> push
   -> next unit
@@ -717,7 +722,64 @@ change a coherent unit
   -> concentrated verification
 ```
 
-Do not wait until the whole implementation is complete before pushing.
+Do not run the full regression suite after every small edit.
+
+### Commit 1 — Minimal structured tracing
+
+- add generic trace/span primitives;
+- disabled by default;
+- JSONL output;
+- `DEVTOOL_TRACE_FILE` / `DEVTOOL_RUN_ID` or an equivalently small generic switch;
+- trace/span/parent/run identifiers;
+- metadata only: no source, prompt, credentials or secret-bearing environment values.
+
+### Commit 2 — Trace the code-intelligence critical path
+
+Instrument:
+
+- Agent Gateway `tools/call`;
+- `code_context`;
+- indexed service call;
+- realtime symbols/references/diagnostics calls;
+- CodeGraph provider duration;
+- Serena/LSP provider duration.
+
+If remote MCP client timing is trivial to add safely, include it. Otherwise defer it.
+
+Do not add environment-wide tracing.
+
+### Commit 3 — Focused verification and documentation
+
+Run concentrated verification:
+
+```text
+go test ./...
+trace disabled -> behavior unchanged
+trace enabled -> valid JSONL
+one code_context -> reconstructable parent/child spans
+CodeGraph vs Serena/LSP cost -> distinguishable
+trace output -> no secrets/source payloads
+```
+
+Run the existing self-host/delivery verification required by the changed boundary if it is practical within the session.
+
+Update only the reference documentation necessary to explain how to enable tracing.
+
+### Explicitly deferred
+
+Do not spend the pre-benchmark implementation budget on:
+
+- benchmark harness;
+- automatic `metrics.json`;
+- automatic `summary.md`;
+- CPU/RSS collector;
+- cold/warm state manager;
+- environment-wide tracing;
+- dashboard;
+- OpenTelemetry backend;
+- Prometheus.
+
+These can be added after the first benchmark if the data proves they are worth productizing.
 
 ---
 
@@ -725,54 +787,79 @@ Do not wait until the whole implementation is complete before pushing.
 
 The DevTool implementation is benchmark-ready when:
 
-- trace is generic and disabled by default;
-- one remote `code_context` call produces a reconstructable span tree;
-- CodeGraph and Serena/LSP child costs are visible;
-- environment/project-command timing is visible where used;
+- tracing is generic and disabled by default;
+- one `code_context` call produces a reconstructable span tree;
+- Agent Gateway, `code_context`, CodeGraph and Serena/LSP costs are distinguishable;
 - no execution semantics have been optimized or altered;
 - no IDFlow special case exists;
 - no provider-native tool leaked to the Agent surface;
-- tests/self-hosting pass;
-- the trace output contains no credentials/source payloads.
+- focused tests pass;
+- trace output contains no credentials, prompts, tool bodies or source payloads.
 
-Only after this gate should the actual IDFlow A/B/C/D benchmark begin.
+Environment-wide timing, an automated benchmark harness and automatic resource collection are **not** merge gates for the first benchmark.
+
+Only after this gate should the actual IDFlow A/B/C benchmark begin.
 
 ---
 
 ## 15. Decision after the benchmark
 
-The benchmark should answer three separate decisions:
+The benchmark must answer four separate questions.
 
-### Architecture decision
+### Remote-workspace decision
 
-Does DV2 code intelligence improve remote agent engineering throughput?
+Does having a real remote development workspace improve over GitHub-Connector-only editing?
 
-Derived mainly from:
+Derived from:
 
 ```text
 B vs A
 ```
 
-### Connector decision
+### DevTool decision
 
-Is the remote connector cheap enough to keep in the architecture?
+Does DV2 + CodeGraph/LSP add incremental value once the same remote workspace already exists?
 
-Derived mainly from:
+Derived from:
 
 ```text
-B vs C
-+ connector microbenchmark
+C vs B
 ```
+
+### Final architecture decision
+
+Does the complete architecture justify using a persistent cloud development node?
+
+Derived from:
+
+```text
+C vs A
+```
+
+### Connector decision
+
+Is Remote Connector overhead small enough to remain in the architecture?
+
+Derived from:
+
+```text
+connector microbenchmark
++ trace-level transport share when available
+```
+
+Do not infer connector cost from C vs B because both groups use the same Remote Connector.
 
 ### Hardware decision
 
-Is a persistent 4C4G development node enough, or is more memory required?
+Is a persistent 4C4G development node sufficient?
 
-Derived mainly from:
+Derived from:
 
 ```text
-D vs B
+Group C on 4C4G stress profile
+vs
+Group C on 4C16G reference
 + memory/swap/OOM/resource metrics
 ```
 
-Only after these are answered should performance optimizations or a cloud-machine purchase be justified from benchmark evidence.
+Only after these questions are answered should we optimize DV2 or justify buying the persistent cloud machine from benchmark evidence.
