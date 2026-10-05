@@ -32,6 +32,11 @@ type = "go"
 module = "."
 package = "./extensions/intelligence/serena/cmd/provider"
 
+[extension.sourcegraph]
+type = "go"
+module = "."
+package = "./extensions/intelligence/sourcegraph/cmd/provider"
+
 [extension.scm]
 type = "go"
 module = "."
