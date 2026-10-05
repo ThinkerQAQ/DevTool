@@ -26,7 +26,33 @@ func TestRegistryBuildsDescriptor(t *testing.T) {
 	}
 }
 
-func TestRegistryRejectsDuplicateService(t *testing.T) {
+func TestRegistryAllowsMultipleServiceProvidersAndSelectsOne(t *testing.T) {
+	r := New()
+	one := service.Func(func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{"provider":"one"}`), nil
+	})
+	two := service.Func(func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{"provider":"two"}`), nil
+	})
+	if err := r.ProvideService("code-indexed", "intelligence.one", one); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ProvideService("code-indexed", "intelligence.two", two); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Service("code-indexed"); ok {
+		t.Fatal("Service() should be ambiguous before provider selection")
+	}
+	if err := r.SelectService("code-indexed", "intelligence.two"); err != nil {
+		t.Fatal(err)
+	}
+	provider, ok := r.ServiceProvider("code-indexed")
+	if !ok || provider != "intelligence.two" {
+		t.Fatalf("ServiceProvider() = %q, %v; want intelligence.two, true", provider, ok)
+	}
+}
+
+func TestRegistryRejectsDuplicateServiceProvider(t *testing.T) {
 	r := New()
 	invoker := service.Func(func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
 		return json.RawMessage(`{}`), nil
@@ -34,7 +60,7 @@ func TestRegistryRejectsDuplicateService(t *testing.T) {
 	if err := r.ProvideService("portable-runtime", "runtime.one", invoker); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.ProvideService("portable-runtime", "runtime.two", invoker); err == nil {
+	if err := r.ProvideService("portable-runtime", "runtime.one", invoker); err == nil {
 		t.Fatal("ProvideService() expected duplicate provider error")
 	}
 }
