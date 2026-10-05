@@ -43,10 +43,10 @@ provider = "environment.docker"
 [service.portable-runtime]
 provider = "runtime.dagger"
 
-[service.code-graph]
+[service.code-indexed]
 provider = "intelligence.codegraph"
 
-[service.code-lsp]
+[service.code-realtime]
 provider = "intelligence.lsp.serena"
 
 [service.scm-publish]
