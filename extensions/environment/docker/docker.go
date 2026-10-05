@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -108,15 +109,23 @@ func (e *Extension) commandSpec(ctx context.Context, request environmentcontract
 		return environmentcontract.CommandSpec{}, err
 	}
 
-	workdir := strings.TrimSpace(request.WorkingDir)
-	if workdir == "" {
-		workdir = "/workspace"
-	}
+	workdir := workspaceContainerDir(request.WorkingDir)
 	return environmentcontract.CommandSpec{
 		Program: "docker",
 		Args:    workspaceExecArgs(name, uid, gid, workdir, request.Env, request.Executable, request.Args...),
 		Dir:     root,
 	}, nil
+}
+
+func workspaceContainerDir(value string) string {
+	workdir := strings.TrimSpace(filepath.ToSlash(value))
+	if workdir == "" || workdir == "." {
+		return "/workspace"
+	}
+	if path.IsAbs(workdir) {
+		return path.Clean(workdir)
+	}
+	return path.Join("/workspace", workdir)
 }
 
 func ensureWorkspaceContainer(ctx context.Context, root, devenvHome, image, uid, gid string) (string, error) {
