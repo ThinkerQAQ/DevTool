@@ -114,7 +114,7 @@ func (e *Extension) commandSpec(ctx context.Context, request environmentcontract
 	}
 	return environmentcontract.CommandSpec{
 		Program: "docker",
-		Args:    workspaceExecArgs(name, uid, gid, workdir, request.Executable, request.Args...),
+		Args:    workspaceExecArgs(name, uid, gid, workdir, request.Env, request.Executable, request.Args...),
 		Dir:     root,
 	}, nil
 }
@@ -221,7 +221,7 @@ func workspaceCreateArgs(name, root, devenvHome, image, uid, gid string) []strin
 	return args
 }
 
-func workspaceExecArgs(name, uid, gid, workdir, executable string, args ...string) []string {
+func workspaceExecArgs(name, uid, gid, workdir string, env []string, executable string, args ...string) []string {
 	dockerArgs := []string{
 		"exec", "-i",
 		"--workdir", workdir,
@@ -229,6 +229,11 @@ func workspaceExecArgs(name, uid, gid, workdir, executable string, args ...strin
 	}
 	if uid != "" && gid != "" {
 		dockerArgs = append(dockerArgs, "--user", uid+":"+gid)
+	}
+	for _, item := range env {
+		if value := strings.TrimSpace(item); value != "" {
+			dockerArgs = append(dockerArgs, "-e", value)
+		}
 	}
 	dockerArgs = append(dockerArgs, name, executable)
 	dockerArgs = append(dockerArgs, args...)
