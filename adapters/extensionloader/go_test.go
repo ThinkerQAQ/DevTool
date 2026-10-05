@@ -1,6 +1,12 @@
 package extensionloader
 
-import (\n\t"context"\n\t"os"\n\t"testing"\n\n\t"github.com/thinkerqaq/devtool/core/project"\n)
+import (
+	"context"
+	"os"
+	"testing"
+
+	"github.com/thinkerqaq/devtool/core/project"
+)
 
 func TestCacheOutputNameChangesWithImplementation(t *testing.T) {
 	a := cacheOutputName("environment", ".", "./extensions/environment/docker/cmd/provider")
@@ -43,7 +49,6 @@ func TestGoModuleCacheIncludesVersion(t *testing.T) {
 		t.Fatalf("version must participate in cache identity: %q", a)
 	}
 }
-
 
 func TestResolveGoModuleProviderIntegration(t *testing.T) {
 	if testing.Short() {
