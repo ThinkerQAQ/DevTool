@@ -35,4 +35,4 @@ ghcr.io/thinkerqaq/devtool-runtime:<commit>
 
 Remote deployments such as Railway should use the DevTool runtime image. This avoids rebuilding DevTool during container startup while keeping the shared DevEnvironment image project-agnostic.
 
-Provider selection remains configuration-driven. For example, Railway sets `DEVTOOL_PROFILE=railway`, which selects `environment.local` without mutating `.devtool.toml` at runtime.
+Provider selection remains configuration-driven. For example, Railway sets `DEVTOOL_PROFILES=railway`, which selects `environment.local` without mutating `.devtool.toml` at runtime. Profiles are composable, so `DEVTOOL_PROFILES=railway,sourcegraph` can independently select the Railway environment and Sourcegraph indexed-intelligence provider.
