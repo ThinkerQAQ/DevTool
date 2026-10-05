@@ -10,7 +10,6 @@ const (
 
 type CommandRequest struct {
 	Root       string   `json:"root"`
-	Image      string   `json:"image"`
 	WorkingDir string   `json:"working_dir,omitempty"`
 	Executable string   `json:"executable"`
 	Args       []string `json:"args,omitempty"`
