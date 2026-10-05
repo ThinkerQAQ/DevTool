@@ -51,7 +51,7 @@ func TestQueryCallsSourcegraphMCP(t *testing.T) {
 		endpoint: server.URL,
 		remote:   mcpbridge.NewHTTP(server.URL, ""),
 	}
-	payload, err := json.Marshal(codeintelligence.GraphQuery{
+	payload, err := json.Marshal(codeintelligence.IndexedQuery{
 		Tool: "sourcegraph_find_references",
 		Args: json.RawMessage(`{"repo":"github.com/acme/repo","path":"main.go","symbol":"Foo"}`),
 	})
