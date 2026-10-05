@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/thinkerqaq/devtool/core/contract"
+	contract "github.com/thinkerqaq/devtool/sdk/contract"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/protocol"
 )
