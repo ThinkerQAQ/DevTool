@@ -80,3 +80,21 @@ func TestWorkspaceContainerNameIsProjectScoped(t *testing.T) {
 		t.Fatalf("unexpected container name: %q", first)
 	}
 }
+
+
+func TestConfigureOwnsImageSetting(t *testing.T) {
+	e := New()
+	if err := e.Configure(map[string]any{"image": "example.invalid/dev-base:1"}); err != nil {
+		t.Fatal(err)
+	}
+	if e.image != "example.invalid/dev-base:1" {
+		t.Fatalf("image = %q", e.image)
+	}
+}
+
+func TestConfigureRejectsNonStringImage(t *testing.T) {
+	e := New()
+	if err := e.Configure(map[string]any{"image": 123}); err == nil {
+		t.Fatal("Configure() expected non-string image error")
+	}
+}
