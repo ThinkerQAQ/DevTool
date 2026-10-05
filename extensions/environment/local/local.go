@@ -83,5 +83,6 @@ func commandSpec(request environmentcontract.CommandRequest) (environmentcontrac
 		Program: strings.TrimSpace(request.Executable),
 		Args:    append([]string(nil), request.Args...),
 		Dir:     workdir,
+		Env:     append([]string(nil), request.Env...),
 	}, nil
 }
