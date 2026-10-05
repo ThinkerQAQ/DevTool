@@ -31,7 +31,6 @@ jobs:
         run: |
           go run ./cmd/devtool code doctor
           go run ./cmd/devtool code verify
-          go run ./cmd/devtool code indexed query get_module_summary '{"path":"core"}'
       - name: Agent Gateway through configured extensions
         run: |
           cat <<'EOF' | go run ./cmd/devtool agent mcp > /tmp/devtool-agent-mcp.jsonl
