@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	service "github.com/thinkerqaq/devtool/sdk/service"
+	"github.com/thinkerqaq/devtool/extensions/environment/internal/commandexec"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 )
 
 const ExtensionID = "environment.local"
@@ -30,10 +31,7 @@ func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	return reg.ProvideService(environmentcontract.ServiceName, ExtensionID, service.Func(e.Invoke))
 }
 
-func (e *Extension) Invoke(_ context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
-	if method != environmentcontract.MethodCommand {
-		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
-	}
+func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
 	var request environmentcontract.CommandRequest
 	if err := json.Unmarshal(payload, &request); err != nil {
 		return nil, fmt.Errorf("decode environment command request: %w", err)
@@ -42,7 +40,19 @@ func (e *Extension) Invoke(_ context.Context, method string, payload json.RawMes
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(spec)
+
+	switch method {
+	case environmentcontract.MethodCommand:
+		return json.Marshal(spec)
+	case environmentcontract.MethodRun:
+		result, err := commandexec.Run(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	default:
+		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
+	}
 }
 
 func commandSpec(request environmentcontract.CommandRequest) (environmentcontract.CommandSpec, error) {
