@@ -74,7 +74,7 @@ provider = "intelligence.codegraph"
 [service.code-realtime]
 provider = "intelligence.lsp.serena"
 
-[service.scm-publish]
+[service.scm]
 provider = "scm.github"
 
 [code]
