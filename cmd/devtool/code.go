@@ -126,7 +126,7 @@ func runCodeGraph(ctx context.Context, h *host.ProjectHost, workspace codeintell
 				return errors.New("code graph query json-args must be valid JSON")
 			}
 		}
-		raw, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodQuery, codeintelligence.GraphQuery{
+		raw, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodQuery, codeintelligence.IndexedQuery{
 			Workspace: workspace,
 			Tool:      args[1],
 			Args:      queryArgs,
