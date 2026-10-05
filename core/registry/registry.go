@@ -184,7 +184,9 @@ func (r *Registry) AgentToolProviders() []AgentToolProviderEntry {
 	defer r.mu.RUnlock()
 	ids := make([]string, 0, len(r.agentProviders))
 	for id := range r.agentProviders {
-		ids = append(ids, id)
+		if r.agentProviderActiveLocked(id) {
+			ids = append(ids, id)
+		}
 	}
 	sort.Strings(ids)
 	entries := make([]AgentToolProviderEntry, 0, len(ids))
@@ -192,6 +194,21 @@ func (r *Registry) AgentToolProviders() []AgentToolProviderEntry {
 		entries = append(entries, AgentToolProviderEntry{ExtensionID: id, Provider: r.agentProviders[id]})
 	}
 	return entries
+}
+
+func (r *Registry) agentProviderActiveLocked(extensionID string) bool {
+	providesService := false
+	for serviceName, providers := range r.services {
+		if _, ok := providers[extensionID]; !ok {
+			continue
+		}
+		providesService = true
+		selected := r.selected[serviceName]
+		if selected == extensionID || (selected == "" && len(providers) == 1) {
+			return true
+		}
+	}
+	return !providesService
 }
 
 func (r *Registry) ProjectDescriptor(identity contract.ProjectIdentity) contract.ProjectDescriptor {
