@@ -30,52 +30,69 @@ func (r *fakeRegistrar) ProvideAgentTools(_ string, provider agentsdk.ToolProvid
 	return nil
 }
 
-func TestStableCodeToolSurface(t *testing.T) {
+func TestAgentSurfaceExposesOneIntentLevelCodeCapability(t *testing.T) {
 	e := New()
 	tools, err := e.ListTools(context.Background(), agentsdk.Session{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		got = append(got, tool.Name)
-	}
-	want := []string{"code_search", "code_symbols", "code_references", "code_diagnostics"}
-	if len(got) != len(want) {
-		t.Fatalf("tools = %v; want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("tools = %v; want %v", got, want)
-		}
+	if len(tools) != 1 || tools[0].Name != "code_context" {
+		t.Fatalf("tools = %+v; want only code_context", tools)
 	}
 }
 
-func TestCodeSearchRoutesToIndexedSemanticService(t *testing.T) {
-	var calledMethod string
-	var request map[string]any
+func TestCodeContextComposesIndexedAndRealtimeServices(t *testing.T) {
+	var calls []string
 	reg := &fakeRegistrar{services: map[string]service.Invoker{
 		"code-indexed": service.Func(func(_ context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
-			calledMethod = method
+			calls = append(calls, "indexed."+method)
+			var request map[string]any
 			if err := json.Unmarshal(payload, &request); err != nil {
 				return nil, err
 			}
-			return json.RawMessage(`{"matches":[]}`), nil
+			if request["query"] != "Registry" {
+				t.Fatalf("indexed query = %#v", request["query"])
+			}
+			return json.RawMessage(`{"matches":[{"path":"core/registry/registry.go"}]}`), nil
+		}),
+		"code-realtime": service.Func(func(_ context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
+			calls = append(calls, "realtime."+method)
+			switch method {
+			case "symbols":
+				return json.RawMessage(`{"symbols":[{"name":"Registry"}]}`), nil
+			case "references":
+				return json.RawMessage(`{"references":[{"path":"core/host/project.go"}]}`), nil
+			case "diagnostics":
+				return json.RawMessage(`{"diagnostics":[]}`), nil
+			default:
+				t.Fatalf("unexpected realtime method %q", method)
+				return nil, nil
+			}
 		}),
 	}}
 	e := New()
 	if err := e.Register(reg); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := e.CallTool(context.Background(), agentsdk.Session{ProjectRoot: "/workspace"}, "code_search", json.RawMessage(`{"query":"Registry","limit":5}`))
+
+	raw, err := e.CallTool(
+		context.Background(),
+		agentsdk.Session{ProjectRoot: "/workspace"},
+		"code_context",
+		json.RawMessage(`{"objective":"understand registry routing","symbol":"Registry","path":"core/registry/registry.go","limit":5}`),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calledMethod != "search" {
-		t.Fatalf("method = %q; want search", calledMethod)
+
+	wantCalls := []string{"indexed.search", "realtime.symbols", "realtime.references", "realtime.diagnostics"}
+	if len(calls) != len(wantCalls) {
+		t.Fatalf("calls = %v; want %v", calls, wantCalls)
 	}
-	if request["query"] != "Registry" {
-		t.Fatalf("query = %#v", request["query"])
+	for i := range wantCalls {
+		if calls[i] != wantCalls[i] {
+			t.Fatalf("calls = %v; want %v", calls, wantCalls)
+		}
 	}
 	if !json.Valid(raw) {
 		t.Fatalf("tool result is not JSON: %s", raw)
