@@ -146,7 +146,7 @@ func runCodeRealtime(ctx context.Context, h *host.ProjectHost, workspace codeint
 	}
 	fs := flag.NewFlagSet("code realtime mcp", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	contextName := fs.String("context", "agent", "Serena operation context")
+	contextName := fs.String("context", "agent", "realtime intelligence operation context")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
