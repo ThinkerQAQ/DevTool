@@ -8,7 +8,6 @@ import (
 type Session struct {
 	ProjectRoot      string   `json:"project_root"`
 	Workspaces       []string `json:"workspaces,omitempty"`
-	EnvironmentImage string   `json:"environment_image,omitempty"`
 	Context          string   `json:"context,omitempty"`
 }
 
