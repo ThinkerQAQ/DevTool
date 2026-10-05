@@ -6,7 +6,8 @@ const (
 	ServiceName   = "environment"
 	MethodCommand = "command"
 	MethodRun     = "run"
-	WorkspaceRoot = "/workspace"
+	// WorkspaceRoot is the provider-neutral logical project root. Environment providers map it to their own execution root.
+	WorkspaceRoot = "."
 )
 
 type CommandRequest struct {
