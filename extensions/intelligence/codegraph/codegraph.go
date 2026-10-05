@@ -9,11 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	service "github.com/thinkerqaq/devtool/sdk/service"
 	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/envexec"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	service "github.com/thinkerqaq/devtool/sdk/service"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 const ExtensionID = "intelligence.codegraph"
@@ -29,10 +30,10 @@ func New() *Extension { return &Extension{} }
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
-		ID:         ExtensionID,
-		Kind:       extensioncontract.KindCodeIntelligence,
-		Provides:   []string{codeintelligence.IndexedServiceName},
-		Requires:   []string{environmentcontract.ServiceName},
+		ID:       ExtensionID,
+		Kind:     extensioncontract.KindCodeIntelligence,
+		Provides: []string{codeintelligence.IndexedServiceName},
+		Requires: []string{environmentcontract.ServiceName},
 	}
 }
 
@@ -41,7 +42,17 @@ func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	return reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke))
 }
 
-func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
+func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (result json.RawMessage, err error) {
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:         "CodeGraph",
+		Layer:        "provider",
+		Service:      codeintelligence.IndexedServiceName,
+		Provider:     ExtensionID,
+		Method:       method,
+		RequestBytes: len(payload),
+	})
+	defer func() { span.End(len(result), err) }()
+
 	switch method {
 	case codeintelligence.MethodDoctor:
 		var workspace codeintelligence.Workspace

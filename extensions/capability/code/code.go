@@ -9,6 +9,7 @@ import (
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 const ExtensionID = "capability.code"
@@ -66,10 +67,17 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 	}, nil
 }
 
-func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name string, args json.RawMessage) (json.RawMessage, error) {
+func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name string, args json.RawMessage) (result json.RawMessage, err error) {
 	if strings.TrimSpace(name) != "code_context" {
 		return nil, fmt.Errorf("unknown code capability tool %q", name)
 	}
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:         "code_context",
+		Layer:        "capability",
+		Tool:         "code_context",
+		RequestBytes: len(args),
+	})
+	defer func() { span.End(len(result), err) }()
 
 	var input struct {
 		Objective   string `json:"objective"`
@@ -150,7 +158,7 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 	return toolResult(bundle)
 }
 
-func (e *Extension) invoke(ctx context.Context, serviceName, method string, request any) (json.RawMessage, error) {
+func (e *Extension) invoke(ctx context.Context, serviceName, method string, request any) (result json.RawMessage, err error) {
 	if e.services == nil {
 		return nil, fmt.Errorf("code capability service registry is unavailable")
 	}
@@ -162,6 +170,14 @@ func (e *Extension) invoke(ctx context.Context, serviceName, method string, requ
 	if err != nil {
 		return nil, err
 	}
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:         serviceName + "." + method,
+		Layer:        "service",
+		Service:      serviceName,
+		Method:       method,
+		RequestBytes: len(payload),
+	})
+	defer func() { span.End(len(result), err) }()
 	return invoker.Invoke(ctx, method, payload)
 }
 

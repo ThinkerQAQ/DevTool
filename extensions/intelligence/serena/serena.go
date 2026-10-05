@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
-	service "github.com/thinkerqaq/devtool/sdk/service"
 	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/envexec"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	service "github.com/thinkerqaq/devtool/sdk/service"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 const ExtensionID = "intelligence.lsp.serena"
@@ -70,7 +71,17 @@ func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Sessio
 	)
 }
 
-func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
+func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (result json.RawMessage, err error) {
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:         "Serena/LSP",
+		Layer:        "provider",
+		Service:      codeintelligence.RealtimeServiceName,
+		Provider:     ExtensionID,
+		Method:       method,
+		RequestBytes: len(payload),
+	})
+	defer func() { span.End(len(result), err) }()
+
 	switch method {
 	case codeintelligence.MethodDoctor:
 		var workspace codeintelligence.Workspace
