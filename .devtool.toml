@@ -22,6 +22,11 @@ type = "go"
 module = "."
 package = "./extensions/runtime/dagger/cmd/provider"
 
+[extension.code-capability]
+type = "go"
+module = "."
+package = "./extensions/capability/code/cmd/provider"
+
 [extension.codegraph]
 type = "go"
 module = "."
