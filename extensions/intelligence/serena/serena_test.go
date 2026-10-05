@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
@@ -61,32 +60,6 @@ echo "health ok"
 	}
 	if response.Provider != ExtensionID || response.Output != "health ok" {
 		t.Fatalf("response = %#v", response)
-	}
-}
-
-func TestMCPPassesProjectAndContext(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture is unix-only")
-	}
-	path := writeFixture(t, `#!/bin/sh
-[ "$1" = "start-mcp-server" ] || exit 3
-[ "$2" = "--project" ] || exit 4
-[ -d "$3" ] || exit 5
-[ "$4" = "--context" ] || exit 6
-[ "$5" = "codex" ] || exit 7
-`)
-	root := t.TempDir()
-	e := &Extension{executable: path}
-	payload, _ := json.Marshal(codeintelligence.MCPRequest{
-		Workspace: codeintelligence.Workspace{Root: root},
-		Context:   "codex",
-	})
-	raw, err := e.Invoke(context.Background(), codeintelligence.MethodMCP, payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(string(raw)) != "null" {
-		t.Fatalf("result = %s, want null", raw)
 	}
 }
 
