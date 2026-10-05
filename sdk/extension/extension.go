@@ -42,3 +42,8 @@ type Extension interface {
 	Descriptor() Descriptor
 	Register(Registrar) error
 }
+
+
+type Configurable interface {
+	Configure(map[string]any) error
+}
