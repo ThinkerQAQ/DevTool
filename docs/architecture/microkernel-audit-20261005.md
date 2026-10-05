@@ -196,34 +196,32 @@ The Host transports these settings through the generic `extension.configure` pro
 
 The same configuration channel is available to normal Process Extensions and Project Extensions.
 
-## P1 — Extension configuration is still Go-loader shaped
+## Resolved — Extension loader metadata is opaque to Core
 
-Current extension configuration uses:
+Core configuration no longer contains Go-specific `module/package` fields.
+
+Current schema:
 
 ```toml
-type = "go"
+[extension.example]
+loader = "go"
+
+[extension.example.loader_config]
 module = "."
 package = "./..."
 ```
 
-Core correctly injects the executable resolver, so the micro-kernel itself does not compile Go directly.
-
-However the project configuration schema still assumes build metadata shaped around the current Go loader.
-
-Longer-term desired model:
+Core only understands:
 
 ```text
-Extension Contract
-  -> executable/process protocol
-
-Loader adapters
-  -> Go package builder
-  -> prebuilt executable
-  -> remote extension
-  -> future loaders
+loader
+loader_config (opaque)
+settings      (opaque)
 ```
 
-Adding a new extension implementation mechanism should not require widening the core config schema every time.
+The selected loader adapter owns interpretation of `loader_config`.
+
+Today the implemented loader is `go`, and only `adapters/extensionloader` understands `module/package`. Future prebuilt/remote loaders can use different loader config without widening Core's schema.
 
 ## P1 — Code Intelligence service methods are provider-shaped
 
@@ -313,15 +311,14 @@ without Core knowing CodeGraph-specific persistence semantics.
 | Agent tools respect provider selection | Good after current fix | verified with Sourcegraph switch |
 | Intent-level Agent Capability API | Good | `code_context` composes internal semantic services; provider-native tools stay private |
 | Provider-owned environment config | Good | generic extension settings; Docker owns image configuration |
-| Loader extensibility | Partial | current config is Go-loader shaped |
+| Loader extensibility | Good | Core owns opaque loader config; Go metadata is adapter-private |
 | Lazy extension lifecycle | Optional optimization | not required for correctness |
 
 ## Recommended order
 
 1. Keep the Agent-facing capability surface intent-level; do not reintroduce one-tool-per-provider-operation wrappers.
-2. Generalize extension loader configuration beyond Go-shaped build metadata.
-3. Move legacy code-intelligence lifecycle operations such as raw MCP/query/sync further behind provider/runtime boundaries.
-4. Reduce built-in domain handling in the main CLI through capability/descriptor-driven dispatch where it adds real value.
-5. Then optimize lazy extension startup and provider caches/state persistence.
+2. Move legacy code-intelligence lifecycle operations such as raw MCP/query/sync further behind provider/runtime boundaries.
+3. Reduce built-in domain handling in the main CLI through capability/descriptor-driven dispatch where it adds real value.
+4. Then optimize lazy extension startup and provider caches/state persistence.
 
 The architecture should continue to evolve by tightening boundaries, not by adding another orchestration/platform layer.
