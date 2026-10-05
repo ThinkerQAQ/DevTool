@@ -101,8 +101,8 @@ func verify(ctx project.Context, workspace string) error {
 	}
 
 	steps := []environmentcontract.CommandRequest{
-		{Executable: "go", Args: []string{"test", "./..."}},
-		{Executable: "go", Args: []string{"-C", "devcontrol", "test", "./..."}},
+		{Executable: "go", Args: []string{"test", "./..."}, Env: selfHostTestEnv()},
+		{Executable: "go", Args: []string{"-C", "devcontrol", "test", "./..."}, Env: selfHostTestEnv()},
 		{
 			Executable: "go",
 			Args: []string{
@@ -174,6 +174,10 @@ func runEnvironment(ctx project.Context, workspace string, request environmentco
 		return fmt.Errorf("%s failed: %s", request.Executable, message)
 	}
 	return nil
+}
+
+func selfHostTestEnv() []string {
+	return []string{"DEVTOOL_PROFILES="}
 }
 
 func targetEnv() []string {
