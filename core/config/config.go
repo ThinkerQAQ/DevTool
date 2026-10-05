@@ -66,11 +66,11 @@ func Load(path string) (Config, error) {
 	if err := toml.Unmarshal(raw, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if profile := strings.TrimSpace(os.Getenv("DEVTOOL_PROFILE")); profile != "" {
+	if profiles := strings.TrimSpace(os.Getenv("DEVTOOL_PROFILES")); profiles != "" {
 		var err error
-		cfg, err = ApplyProfile(cfg, profile)
+		cfg, err = ApplyProfiles(cfg, strings.Split(profiles, ",")...)
 		if err != nil {
-			return Config{}, fmt.Errorf("apply profile %q: %w", profile, err)
+			return Config{}, err
 		}
 	}
 	if err := Validate(cfg); err != nil {
@@ -79,23 +79,28 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-func ApplyProfile(cfg Config, name string) (Config, error) {
-	name = strings.TrimSpace(name)
-	profile, ok := cfg.Profile[name]
-	if !ok {
-		return Config{}, fmt.Errorf("profile %q is not configured", name)
-	}
-	if cfg.Extension == nil {
-		cfg.Extension = map[string]Extension{}
-	}
-	for key, value := range profile.Extension {
-		cfg.Extension[key] = value
-	}
-	if cfg.Service == nil {
-		cfg.Service = map[string]Service{}
-	}
-	for key, value := range profile.Service {
-		cfg.Service[key] = value
+func ApplyProfiles(cfg Config, names ...string) (Config, error) {
+	for _, rawName := range names {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			continue
+		}
+		profile, ok := cfg.Profile[name]
+		if !ok {
+			return Config{}, fmt.Errorf("profile %q is not configured", name)
+		}
+		if cfg.Extension == nil {
+			cfg.Extension = map[string]Extension{}
+		}
+		for key, value := range profile.Extension {
+			cfg.Extension[key] = value
+		}
+		if cfg.Service == nil {
+			cfg.Service = map[string]Service{}
+		}
+		for key, value := range profile.Service {
+			cfg.Service[key] = value
+		}
 	}
 	return cfg, nil
 }
