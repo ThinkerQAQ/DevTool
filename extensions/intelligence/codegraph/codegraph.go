@@ -48,19 +48,12 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 		Kind:       extensioncontract.KindCodeIntelligence,
 		Provides:   []string{codeintelligence.IndexedServiceName},
 		Requires:   []string{environmentcontract.ServiceName},
-		AgentTools: true,
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	e.services = reg
-	if err := reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
-		return err
-	}
-	if e.bridge == nil {
-		e.bridge = mcpbridge.New(e.agentMCPCommand)
-	}
-	return reg.ProvideAgentTools(ExtensionID, e.bridge)
+	return reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke))
 }
 
 func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Session) (*exec.Cmd, error) {
