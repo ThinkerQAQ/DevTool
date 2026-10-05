@@ -35,6 +35,8 @@ jobs:
           context: .
           file: docker/runtime/Dockerfile
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ghcr.io/thinkerqaq/devtool-runtime:${{ github.sha }}
             ${{ github.ref_name == 'main' && 'ghcr.io/thinkerqaq/devtool-runtime:latest' || '' }}
