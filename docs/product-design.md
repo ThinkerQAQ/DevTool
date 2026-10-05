@@ -347,12 +347,16 @@ version = 1
 name = "PhotoWaypoint"
 
 [extension.project]
-type = "go"
+loader = "go"
+
+[extension.project.loader_config]
 module = "./go/devcontrol"
 package = "./cmd/provider"
 
 [extension.runtime]
-type = "go"
+loader = "go"
+
+[extension.runtime.loader_config]
 module = "."
 package = "./extensions/runtime/dagger/cmd/provider"
 
