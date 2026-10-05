@@ -60,7 +60,6 @@ func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Sessio
 	workspace := codeintelligence.Workspace{
 		Root:             session.ProjectRoot,
 		Workspaces:       session.Workspaces,
-		EnvironmentImage: session.EnvironmentImage,
 	}
 	args, err := graphBaseArgs(workspace, e.executable == "")
 	if err != nil {
