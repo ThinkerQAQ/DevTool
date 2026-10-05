@@ -37,7 +37,7 @@ jobs:
           cat <<'EOF' | go run ./cmd/devtool agent mcp > /tmp/devtool-agent-mcp.jsonl
           {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
           {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-          {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"code_search","arguments":{"query":"Registry","limit":5}}}
+          {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"code_context","arguments":{"objective":"understand Registry routing","symbol":"Registry","path":"core/registry/registry.go","limit":5}}}
           EOF
           python - <<'PY'
           import json
@@ -59,7 +59,8 @@ jobs:
           tools = messages[2]["result"]["tools"]
           names = {tool["name"] for tool in tools}
           assert "scm_publish" in names, names
-          assert {"code_search", "code_symbols", "code_references", "code_diagnostics"} <= names, names
+          assert "code_context" in names, names
+          assert not any(name in {"code_search", "code_symbols", "code_references", "code_diagnostics"} for name in names), names
           assert not any(name.startswith("codegraph_") for name in names), names
           assert not any(name.startswith("sourcegraph_") for name in names), names
           assert "find_symbol" not in names, names
