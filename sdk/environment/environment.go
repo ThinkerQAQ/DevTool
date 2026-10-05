@@ -14,6 +14,7 @@ type CommandRequest struct {
 	WorkingDir string   `json:"working_dir,omitempty"`
 	Executable string   `json:"executable"`
 	Args       []string `json:"args,omitempty"`
+	Env        []string `json:"env,omitempty"`
 }
 
 type CommandSpec struct {
