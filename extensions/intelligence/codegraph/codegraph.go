@@ -100,6 +100,28 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			return nil, fmt.Errorf("decode CodeGraph sync request: %w", err)
 		}
 		return e.runTool(ctx, request, "codegraph_reindex_workspace", json.RawMessage(`{"force":false}`))
+	case codeintelligence.MethodSearch:
+		var request codeintelligence.SearchRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode CodeGraph search request: %w", err)
+		}
+		query := strings.TrimSpace(request.Query)
+		if query == "" {
+			return nil, fmt.Errorf("CodeGraph search query is required")
+		}
+		limit := request.Limit
+		if limit <= 0 {
+			limit = 20
+		}
+		args, err := json.Marshal(map[string]any{
+			"query":   query,
+			"limit":   limit,
+			"compact": true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return e.runTool(ctx, request.Workspace, "codegraph_symbol_search", args)
 	case codeintelligence.MethodQuery:
 		var request codeintelligence.IndexedQuery
 		if err := json.Unmarshal(payload, &request); err != nil {
