@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -54,5 +56,50 @@ func TestGatewayDiscoversToolsFromRegistry(t *testing.T) {
 	}
 	if !strings.Contains(lines[2], `"text":"ok"`) {
 		t.Fatalf("tools/call response = %s", lines[2])
+	}
+}
+
+
+func TestGatewayHTTPTransport(t *testing.T) {
+	reg := registry.New()
+	if err := reg.ProvideAgentTools("fake.extension", fakeProvider{name: "fake_tool"}); err != nil {
+		t.Fatal(err)
+	}
+	gateway := NewGateway(reg, agentsdk.Session{ProjectRoot: "/tmp/example"})
+	handler := gateway.HTTPHandler("secret")
+
+	unauthorized := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	unauthorized.Header.Set("Content-Type", "application/json")
+	unauthorizedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedRecorder, unauthorized)
+	if unauthorizedRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want %d", unauthorizedRecorder.Code, http.StatusUnauthorized)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"name":"fake_tool"`) {
+		t.Fatalf("tools/list response = %s", recorder.Body.String())
+	}
+
+	notification := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`))
+	notification.Header.Set("Authorization", "Bearer secret")
+	notificationRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(notificationRecorder, notification)
+	if notificationRecorder.Code != http.StatusAccepted {
+		t.Fatalf("notification status = %d, want %d", notificationRecorder.Code, http.StatusAccepted)
+	}
+
+	health := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	healthRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(healthRecorder, health)
+	if healthRecorder.Code != http.StatusOK {
+		t.Fatalf("health status = %d", healthRecorder.Code)
 	}
 }

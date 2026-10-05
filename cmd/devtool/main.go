@@ -123,6 +123,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "  devtool config path")
 	fmt.Fprintln(out, "  devtool config validate")
 	fmt.Fprintln(out, "  devtool agent mcp [--context agent|codex|claude-code]")
+	fmt.Fprintln(out, "  devtool agent serve [--listen :8080] [--context agent] [--token-env DEVTOOL_AGENT_TOKEN]")
 	fmt.Fprintln(out, "  devtool code doctor")
 	fmt.Fprintln(out, "  devtool code verify")
 	fmt.Fprintln(out, "  devtool code graph mcp")
