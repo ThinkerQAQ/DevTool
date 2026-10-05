@@ -19,12 +19,14 @@ import (
 )
 
 // Resolve translates configured extension build metadata into an executable.
-// This adapter owns Go-specific build/cache behavior so Core only owns the
-// extension process protocol and lifecycle.
+// Loader-specific source/build behavior stays in this adapter so Core only owns
+// the extension process protocol and lifecycle.
 func Resolve(ctx context.Context, p project.Project, name string, configured config.Extension) (string, error) {
 	switch strings.TrimSpace(configured.Loader) {
 	case "go":
 		return resolveGo(ctx, p, name, configured.LoaderConfig)
+	case "go-module":
+		return resolveGoModule(ctx, p, name, configured.LoaderConfig)
 	default:
 		return "", fmt.Errorf("extension %q loader %q is unsupported", name, configured.Loader)
 	}
@@ -86,6 +88,103 @@ func resolveGo(ctx context.Context, p project.Project, name string, loaderConfig
 		return "", fmt.Errorf("build extension %q: %w", name, err)
 	}
 	return output, nil
+}
+
+// resolveGoModule installs a version-pinned Go main package from an external
+// module into the project-local DevTool cache. This lets ordinary projects
+// consume reusable extensions without vendoring or copying provider source.
+func resolveGoModule(ctx context.Context, p project.Project, name string, loaderConfig map[string]any) (string, error) {
+	var configured struct {
+		Module  string `json:"module"`
+		Version string `json:"version"`
+		Package string `json:"package"`
+	}
+	raw, err := json.Marshal(loaderConfig)
+	if err != nil {
+		return "", fmt.Errorf("encode extension.%s.loader_config: %w", name, err)
+	}
+	if err := json.Unmarshal(raw, &configured); err != nil {
+		return "", fmt.Errorf("decode extension.%s.loader_config for go-module loader: %w", name, err)
+	}
+
+	module := strings.TrimSpace(configured.Module)
+	version := strings.TrimSpace(configured.Version)
+	pkg := strings.TrimSpace(configured.Package)
+	target, binaryName, err := goModuleTarget(module, version, pkg)
+	if err != nil {
+		return "", fmt.Errorf("extension.%s: %w", name, err)
+	}
+
+	cacheDir := filepath.Join(p.Root, ".devtool", "cache", "extensions")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", err
+	}
+	outputName := goModuleCacheOutputName(name, module, version, pkg)
+	if runtime.GOOS == "windows" {
+		outputName += ".exe"
+		binaryName += ".exe"
+	}
+	output := filepath.Join(cacheDir, outputName)
+	if info, err := os.Stat(output); err == nil && !info.IsDir() {
+		return output, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	tempDir, err := os.MkdirTemp(cacheDir, ".go-module-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tempDir)
+
+	cmd := exec.CommandContext(ctx, "go", "install", target)
+	cmd.Dir = p.Root
+	cmd.Env = append(os.Environ(), "GOBIN="+tempDir, "GOWORK=off")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("install extension %q from %s: %w", name, target, err)
+	}
+
+	installed := filepath.Join(tempDir, binaryName)
+	info, err := os.Stat(installed)
+	if err != nil {
+		return "", fmt.Errorf("extension %q install completed without executable %s: %w", name, installed, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("extension %q installed path is a directory: %s", name, installed)
+	}
+	if err := os.Remove(output); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.Rename(installed, output); err != nil {
+		return "", fmt.Errorf("cache extension %q executable: %w", name, err)
+	}
+	return output, nil
+}
+
+func goModuleTarget(module, version, pkg string) (target, binaryName string, err error) {
+	module = strings.TrimSuffix(strings.TrimSpace(module), "/")
+	version = strings.TrimSpace(version)
+	pkg = strings.TrimSpace(pkg)
+	if module == "" {
+		return "", "", fmt.Errorf("loader_config.module is required")
+	}
+	if version == "" {
+		return "", "", fmt.Errorf("loader_config.version is required")
+	}
+	if pkg == "" {
+		return "", "", fmt.Errorf("loader_config.package is required")
+	}
+	if strings.HasPrefix(pkg, "/") || strings.Contains(pkg, "..") {
+		return "", "", fmt.Errorf("loader_config.package must be module-relative")
+	}
+	relative := strings.TrimPrefix(pkg, "./")
+	if relative == "" || relative == "." {
+		return module + "@" + version, filepath.Base(module), nil
+	}
+	importPath := module + "/" + strings.TrimPrefix(relative, "/")
+	return importPath + "@" + version, filepath.Base(importPath), nil
 }
 
 func goBuildNeedsBuild(ctx context.Context, projectRoot, moduleDir, pkg, output string) (bool, error) {
@@ -225,8 +324,12 @@ func sanitizeName(name string) string {
 	}, name)
 }
 
-
 func cacheOutputName(name, module, pkg string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(module) + "\x00" + strings.TrimSpace(pkg)))
+	return fmt.Sprintf("%s-%x", sanitizeName(name), sum[:6])
+}
+
+func goModuleCacheOutputName(name, module, version, pkg string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(module) + "\x00" + strings.TrimSpace(version) + "\x00" + strings.TrimSpace(pkg)))
 	return fmt.Sprintf("%s-%x", sanitizeName(name), sum[:6])
 }
