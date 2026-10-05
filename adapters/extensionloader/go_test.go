@@ -1,6 +1,6 @@
 package extensionloader
 
-import "testing"
+import (\n\t"context"\n\t"os"\n\t"testing"\n\n\t"github.com/thinkerqaq/devtool/core/project"\n)
 
 func TestCacheOutputNameChangesWithImplementation(t *testing.T) {
 	a := cacheOutputName("environment", ".", "./extensions/environment/docker/cmd/provider")
@@ -41,5 +41,32 @@ func TestGoModuleCacheIncludesVersion(t *testing.T) {
 	b := goModuleCacheOutputName("codegraph", "example.com/mod", "v1.0.1", "./cmd/provider")
 	if a == b {
 		t.Fatalf("version must participate in cache identity: %q", a)
+	}
+}
+
+
+func TestResolveGoModuleProviderIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	if os.Getenv("DEVTOOL_EXTENSION_LOADER_INTEGRATION") == "" {
+		t.Skip("set DEVTOOL_EXTENSION_LOADER_INTEGRATION=1 to run")
+	}
+	root := t.TempDir()
+	p := project.Project{Root: root}
+	got, err := resolveGoModule(context.Background(), p, "environment", map[string]any{
+		"module":  "github.com/thinkerqaq/devtool",
+		"version": "a8ec384948328f5ca9f4585970b19ab64fd65d08",
+		"package": "./extensions/environment/local/cmd/provider",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.IsDir() {
+		t.Fatalf("resolved provider is a directory: %s", got)
 	}
 }
