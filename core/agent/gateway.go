@@ -3,9 +3,11 @@ package agent
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -55,6 +57,60 @@ func (g *Gateway) Serve(ctx context.Context, in io.Reader, out io.Writer) error 
 		}
 	}
 	return scanner.Err()
+}
+
+
+func (g *Gateway) HTTPHandler(token string) http.Handler {
+	token = strings.TrimSpace(token)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "{\"status\":\"ok\"}\n")
+	})
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if token != "" && !authorizedBearer(r.Header.Get("Authorization"), token) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		defer r.Body.Close()
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024*1024))
+		var request rpcRequest
+		if err := decoder.Decode(&request); err != nil {
+			writeHTTPRPC(w, http.StatusBadRequest, errorResponse(nil, -32700, "parse error"))
+			return
+		}
+		if request.ID == nil {
+			// MCP notifications do not receive JSON-RPC responses.
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		writeHTTPRPC(w, http.StatusOK, g.handle(r.Context(), request))
+	})
+	return mux
+}
+
+func authorizedBearer(header, token string) bool {
+	expected := "Bearer " + token
+	if len(header) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(header), []byte(expected)) == 1
+}
+
+func writeHTTPRPC(w http.ResponseWriter, status int, response rpcResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (g *Gateway) handle(ctx context.Context, request rpcRequest) rpcResponse {
