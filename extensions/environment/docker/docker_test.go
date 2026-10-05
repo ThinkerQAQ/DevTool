@@ -35,6 +35,21 @@ func TestWorkspaceContainerUsesPersistentProjectMounts(t *testing.T) {
 	}
 }
 
+func TestWorkspaceContainerDirMapsProviderNeutralPaths(t *testing.T) {
+	cases := map[string]string{
+		"":            "/workspace",
+		".":           "/workspace",
+		"go":          "/workspace/go",
+		"android/app": "/workspace/android/app",
+		"/workspace/go": "/workspace/go",
+	}
+	for input, want := range cases {
+		if got := workspaceContainerDir(input); got != want {
+			t.Fatalf("workspaceContainerDir(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestWorkspaceExecReusesNamedContainer(t *testing.T) {
 	name := workspaceContainerName(t.TempDir())
 	args := workspaceExecArgs(name, "1000", "1000", "/workspace", []string{"FOO=bar"}, "codegraph-server", "--version")
