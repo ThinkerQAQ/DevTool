@@ -130,37 +130,3 @@ func sourcegraphAuthorization(token string) string {
 	}
 	return "token " + token
 }
-
-type prefixedProvider struct {
-	remote *mcpbridge.HTTPProvider
-}
-
-func (p prefixedProvider) ListTools(ctx context.Context, session agentsdk.Session) ([]agentsdk.Tool, error) {
-	tools, err := p.remote.ListTools(ctx, session)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]agentsdk.Tool, 0, len(tools))
-	for _, tool := range tools {
-		var definition map[string]any
-		if err := json.Unmarshal(tool.Definition, &definition); err != nil {
-			return nil, err
-		}
-		name := toolPrefix + tool.Name
-		definition["name"] = name
-		raw, err := json.Marshal(definition)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, agentsdk.Tool{Name: name, Definition: raw})
-	}
-	return out, nil
-}
-
-func (p prefixedProvider) CallTool(ctx context.Context, session agentsdk.Session, name string, args json.RawMessage) (json.RawMessage, error) {
-	name = strings.TrimPrefix(strings.TrimSpace(name), toolPrefix)
-	if name == "" {
-		return nil, fmt.Errorf("Sourcegraph tool name is required")
-	}
-	return p.remote.CallTool(ctx, session, name, args)
-}
