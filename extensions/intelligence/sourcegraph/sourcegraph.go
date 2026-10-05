@@ -14,10 +14,7 @@ import (
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
 
-const (
-	ExtensionID = "intelligence.sourcegraph"
-	toolPrefix   = "sourcegraph_"
-)
+const ExtensionID = "intelligence.sourcegraph"
 
 type Extension struct {
 	endpoint string
@@ -37,9 +34,9 @@ func New() *Extension {
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
-		ID:         ExtensionID,
-		Kind:       extensioncontract.KindCodeIntelligence,
-		Provides:   []string{codeintelligence.IndexedServiceName},
+		ID:       ExtensionID,
+		Kind:     extensioncontract.KindCodeIntelligence,
+		Provides: []string{codeintelligence.IndexedServiceName},
 	}
 }
 
@@ -50,10 +47,7 @@ func (e *Extension) Register(reg extensioncontract.Registrar) error {
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
 	switch method {
 	case codeintelligence.MethodDoctor:
-		if e.remote == nil {
-			return nil, fmt.Errorf("Sourcegraph MCP is not configured; set SOURCEGRAPH_MCP_URL")
-		}
-		tools, err := e.remote.ListTools(ctx, agentsdk.Session{})
+		tools, err := e.listTools(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("Sourcegraph MCP doctor: %w", err)
 		}
@@ -62,14 +56,20 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			Executable: e.endpoint,
 			Version:    fmt.Sprintf("%d tools", len(tools)),
 		})
-	case codeintelligence.MethodSync:
-		if e.remote == nil {
-			return nil, fmt.Errorf("Sourcegraph MCP is not configured; set SOURCEGRAPH_MCP_URL")
+	case codeintelligence.MethodVerify:
+		tools, err := e.listTools(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("Sourcegraph MCP verify: %w", err)
 		}
-		return json.Marshal(codeintelligence.VerifyResponse{
-			Provider: ExtensionID,
-			Output:   "index lifecycle is managed by Sourcegraph",
-		})
+		for _, tool := range tools {
+			if tool.Name == "keyword_search" {
+				return json.Marshal(codeintelligence.VerifyResponse{
+					Provider: ExtensionID,
+					Output:   "keyword_search available; index lifecycle is managed by Sourcegraph",
+				})
+			}
+		}
+		return nil, fmt.Errorf("Sourcegraph MCP verify: required tool %q is unavailable", "keyword_search")
 	case codeintelligence.MethodSearch:
 		if e.remote == nil {
 			return nil, fmt.Errorf("Sourcegraph MCP is not configured; set SOURCEGRAPH_MCP_URL")
@@ -98,30 +98,16 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			return nil, err
 		}
 		return e.remote.CallTool(ctx, agentsdk.Session{}, "keyword_search", args)
-	case codeintelligence.MethodQuery:
-		if e.remote == nil {
-			return nil, fmt.Errorf("Sourcegraph MCP is not configured; set SOURCEGRAPH_MCP_URL")
-		}
-		var request codeintelligence.IndexedQuery
-		if err := json.Unmarshal(payload, &request); err != nil {
-			return nil, fmt.Errorf("decode Sourcegraph query request: %w", err)
-		}
-		tool := strings.TrimSpace(request.Tool)
-		tool = strings.TrimPrefix(tool, toolPrefix)
-		if tool == "" {
-			return nil, fmt.Errorf("Sourcegraph query tool is required")
-		}
-		args := request.Args
-		if len(args) == 0 {
-			args = json.RawMessage(`{}`)
-		}
-		if !json.Valid(args) {
-			return nil, fmt.Errorf("Sourcegraph query args must be valid JSON")
-		}
-		return e.remote.CallTool(ctx, agentsdk.Session{}, tool, args)
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
+}
+
+func (e *Extension) listTools(ctx context.Context) ([]agentsdk.Tool, error) {
+	if e.remote == nil {
+		return nil, fmt.Errorf("Sourcegraph MCP is not configured; set SOURCEGRAPH_MCP_URL")
+	}
+	return e.remote.ListTools(ctx, agentsdk.Session{})
 }
 
 func sourcegraphAuthorization(token string) string {
