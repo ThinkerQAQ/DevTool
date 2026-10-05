@@ -56,6 +56,26 @@ func serveExtension(ext Extension, in io.Reader, out io.Writer) error {
 
 	session = protocol.NewSession(in, out, func(ctx context.Context, envelope protocol.Envelope) (any, error) {
 		switch envelope.Method {
+		case protocol.MethodExtensionConfigure:
+			configurable, ok := ext.(Configurable)
+			if !ok {
+				var request protocol.ExtensionConfigureRequest
+				if err := json.Unmarshal(envelope.Payload, &request); err != nil {
+					return nil, err
+				}
+				if len(request.Settings) != 0 {
+					return nil, fmt.Errorf("extension %q does not accept settings", ext.Descriptor().ID)
+				}
+				return nil, nil
+			}
+			var request protocol.ExtensionConfigureRequest
+			if err := json.Unmarshal(envelope.Payload, &request); err != nil {
+				return nil, err
+			}
+			if err := configurable.Configure(request.Settings); err != nil {
+				return nil, fmt.Errorf("configure extension %q: %w", ext.Descriptor().ID, err)
+			}
+			return nil, nil
 		case protocol.MethodExtensionDescribe:
 			raw, err := json.Marshal(ext.Descriptor())
 			if err != nil {
