@@ -15,6 +15,7 @@ func TestCommandSpecRunsInsideProjectRoot(t *testing.T) {
 		WorkingDir: workdir,
 		Executable: "gopls",
 		Args:       []string{"version"},
+		Env:        []string{"FOO=bar"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -27,6 +28,9 @@ func TestCommandSpecRunsInsideProjectRoot(t *testing.T) {
 	}
 	if len(spec.Args) != 1 || spec.Args[0] != "version" {
 		t.Fatalf("Args = %v", spec.Args)
+	}
+	if len(spec.Env) != 1 || spec.Env[0] != "FOO=bar" {
+		t.Fatalf("Env = %v", spec.Env)
 	}
 }
 
