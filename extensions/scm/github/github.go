@@ -54,6 +54,36 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		}
 		response := e.doctor(ctx, request.Root)
 		return json.Marshal(response)
+	case scm.MethodStatus:
+		var request scm.Request
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode scm status request: %w", err)
+		}
+		response, err := e.status(ctx, request.Root)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(response)
+	case scm.MethodCommit:
+		var request scm.CommitRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode scm commit request: %w", err)
+		}
+		response, err := e.commit(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(response)
+	case scm.MethodPush:
+		var request scm.PushRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode scm push request: %w", err)
+		}
+		response, err := e.push(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(response)
 	case scm.MethodPublish:
 		var request scm.PublishRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
@@ -82,14 +112,26 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 			"type":       "object",
 			"properties": map[string]any{},
 		}),
-		tool("scm_publish", "Commit current changes when needed, push the branch, create or reuse a GitHub pull request, and optionally merge it.", map[string]any{
+		tool("scm_status", "Inspect the current branch, worktree changes, and upstream divergence.", map[string]any{
+			"type": "object", "properties": map[string]any{},
+		}),
+		tool("scm_commit", "Stage current changes and create one source-control commit.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"base":           map[string]any{"type": "string", "default": "main"},
-				"title":          map[string]any{"type": "string"},
-				"body":           map[string]any{"type": "string"},
-				"commit_message": map[string]any{"type": "string"},
-				"merge":          map[string]any{"type": "boolean", "default": false},
+				"message": map[string]any{"type": "string"},
+			},
+			"required": []string{"message"},
+		}),
+		tool("scm_push", "Push the current branch without creating a pull request.", map[string]any{
+			"type": "object", "properties": map[string]any{},
+		}),
+		tool("scm_publish", "Push the current branch, create or reuse a GitHub pull request, and optionally merge it.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"base":  map[string]any{"type": "string", "default": "main"},
+				"title": map[string]any{"type": "string"},
+				"body":  map[string]any{"type": "string"},
+				"merge": map[string]any{"type": "boolean", "default": false},
 			},
 		}),
 	}, nil
@@ -99,6 +141,29 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 	switch name {
 	case "scm_doctor":
 		response := e.doctor(ctx, session.ProjectRoot)
+		return toolResult(response)
+	case "scm_status":
+		response, err := e.status(ctx, session.ProjectRoot)
+		if err != nil {
+			return nil, err
+		}
+		return toolResult(response)
+	case "scm_commit":
+		var request scm.CommitRequest
+		if err := json.Unmarshal(args, &request); err != nil {
+			return nil, fmt.Errorf("decode scm_commit arguments: %w", err)
+		}
+		request.Root = session.ProjectRoot
+		response, err := e.commit(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		return toolResult(response)
+	case "scm_push":
+		response, err := e.push(ctx, scm.PushRequest{Root: session.ProjectRoot})
+		if err != nil {
+			return nil, err
+		}
 		return toolResult(response)
 	case "scm_publish":
 		var request scm.PublishRequest
@@ -180,36 +245,20 @@ func (e *Extension) publish(ctx context.Context, request scm.PublishRequest) (sc
 		base = "main"
 	}
 
-	status, err := gitOutput(ctx, root, "status", "--porcelain")
+	status, err := e.status(ctx, root)
 	if err != nil {
 		return scm.PublishResponse{}, err
 	}
-	if strings.TrimSpace(status) != "" {
-		if strings.TrimSpace(request.CommitMessage) == "" {
-			return scm.PublishResponse{}, fmt.Errorf("commit_message is required when the worktree has changes")
-		}
-		if err := gitRun(ctx, root, "add", "-A"); err != nil {
-			return scm.PublishResponse{}, err
-		}
-		if err := gitRun(ctx, root, "commit", "-m", request.CommitMessage); err != nil {
-			return scm.PublishResponse{}, err
-		}
+	if !status.Clean {
+		return scm.PublishResponse{}, fmt.Errorf("worktree has uncommitted changes; commit them before publish")
 	}
-
-	commit, err := gitOutput(ctx, root, "rev-parse", "HEAD")
+	pushResponse, err := e.push(ctx, scm.PushRequest{Root: root})
 	if err != nil {
 		return scm.PublishResponse{}, err
 	}
-	pushCtx, cancelPush := context.WithTimeout(ctx, 20*time.Second)
-	defer cancelPush()
-	if err := gitRun(pushCtx, root, "push", "-u", "origin", "HEAD"); err != nil {
-		return scm.PublishResponse{}, err
-	}
+	commit := pushResponse.Commit
 
 	title := strings.TrimSpace(request.Title)
-	if title == "" {
-		title = strings.TrimSpace(request.CommitMessage)
-	}
 	if title == "" {
 		title = "Update " + branch
 	}
