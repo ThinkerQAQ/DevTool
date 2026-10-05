@@ -14,6 +14,7 @@ const (
 	KindNative           Kind = "native"
 	KindInfrastructure   Kind = "infrastructure"
 	KindCodeIntelligence Kind = "code-intelligence"
+	KindCapability       Kind = "capability"
 	KindPolicy           Kind = "policy"
 	KindUI               Kind = "ui"
 )
