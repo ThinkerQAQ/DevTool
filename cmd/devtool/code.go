@@ -72,7 +72,6 @@ func projectCodeWorkspace(h *host.ProjectHost) codeintelligence.Workspace {
 	return codeintelligence.Workspace{
 		Root:             root,
 		Workspaces:       workspaces,
-		EnvironmentImage: h.Project.Config.Dev.Environment.Image,
 	}
 }
 
