@@ -2,6 +2,7 @@ package extensionloader
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -52,7 +53,7 @@ func resolveGo(ctx context.Context, p project.Project, name string, configured c
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return "", err
 	}
-	outputName := sanitizeName(name)
+	outputName := cacheOutputName(name, module, pkg)
 	if runtime.GOOS == "windows" {
 		outputName += ".exe"
 	}
@@ -211,4 +212,10 @@ func sanitizeName(name string) string {
 		}
 		return '-'
 	}, name)
+}
+
+
+func cacheOutputName(name, module, pkg string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(module) + "\x00" + strings.TrimSpace(pkg)))
+	return fmt.Sprintf("%s-%x", sanitizeName(name), sum[:6])
 }
