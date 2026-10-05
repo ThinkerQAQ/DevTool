@@ -81,7 +81,7 @@ printf '{"ok":true}'
 		t.Fatal(err)
 	}
 	e := &Extension{executable: path}
-	payload, err := json.Marshal(codeintelligence.GraphQuery{
+	payload, err := json.Marshal(codeintelligence.IndexedQuery{
 		Workspace: codeintelligence.Workspace{Root: root, Workspaces: []string{root, "child"}},
 		Tool:      "analyze_impact",
 		Args:      json.RawMessage(`{"symbol":"OpenProject"}`),
@@ -100,14 +100,14 @@ printf '{"ok":true}'
 
 func TestQueryRejectsInvalidArgs(t *testing.T) {
 	e := &Extension{executable: "unused"}
-	payload, err := json.Marshal(codeintelligence.GraphQuery{
+	payload, err := json.Marshal(codeintelligence.IndexedQuery{
 		Workspace: codeintelligence.Workspace{Root: t.TempDir()},
 		Tool:      "analyze_impact",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var request codeintelligence.GraphQuery
+	var request codeintelligence.IndexedQuery
 	if err := json.Unmarshal(payload, &request); err != nil {
 		t.Fatal(err)
 	}
