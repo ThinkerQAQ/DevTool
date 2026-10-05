@@ -93,6 +93,55 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			return nil, fmt.Errorf("decode LSP verify request: %w", err)
 		}
 		return e.verify(ctx, request)
+	case codeintelligence.MethodSymbols:
+		var request codeintelligence.SymbolRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode realtime symbols request: %w", err)
+		}
+		if strings.TrimSpace(request.Symbol) == "" {
+			return nil, fmt.Errorf("realtime symbol is required")
+		}
+		args, err := json.Marshal(map[string]any{
+			"name_path_pattern": request.Symbol,
+			"relative_path":     strings.TrimSpace(request.Path),
+			"include_body":      request.IncludeBody,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_symbol", args)
+	case codeintelligence.MethodReferences:
+		var request codeintelligence.ReferencesRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode realtime references request: %w", err)
+		}
+		if strings.TrimSpace(request.Symbol) == "" {
+			return nil, fmt.Errorf("realtime reference symbol is required")
+		}
+		if strings.TrimSpace(request.Path) == "" {
+			return nil, fmt.Errorf("realtime reference path is required")
+		}
+		args, err := json.Marshal(map[string]any{
+			"name_path":     request.Symbol,
+			"relative_path": request.Path,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_referencing_symbols", args)
+	case codeintelligence.MethodDiagnostics:
+		var request codeintelligence.DiagnosticsRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode realtime diagnostics request: %w", err)
+		}
+		if strings.TrimSpace(request.Path) == "" {
+			return nil, fmt.Errorf("realtime diagnostics path is required")
+		}
+		args, err := json.Marshal(map[string]any{"relative_path": request.Path})
+		if err != nil {
+			return nil, err
+		}
+		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "get_diagnostics_for_file", args)
 	case codeintelligence.MethodMCP:
 		var request codeintelligence.MCPRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
@@ -183,4 +232,14 @@ func (e *Extension) combinedOutput(ctx context.Context, workspace codeintelligen
 		return nil, fmt.Errorf("serena: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+
+func sessionForWorkspace(workspace codeintelligence.Workspace) agentsdk.Session {
+	return agentsdk.Session{
+		ProjectRoot:      workspace.Root,
+		Workspaces:       append([]string(nil), workspace.Workspaces...),
+		EnvironmentImage: workspace.EnvironmentImage,
+		Context:          "agent",
+	}
 }
