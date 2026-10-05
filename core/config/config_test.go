@@ -129,3 +129,28 @@ func TestApplyProfilesComposesInOrder(t *testing.T) {
 		t.Fatalf("indexed provider = %q", got.Service["code-indexed"].Provider)
 	}
 }
+
+
+func TestLoadExtensionSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".devtool.toml")
+	raw := []byte(`version = 1
+[project]
+name = "Example"
+[extension.environment]
+type = "go"
+module = "."
+package = "./provider"
+[extension.environment.settings]
+image = "example.invalid/dev-base:1"
+`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Extension["environment"].Settings["image"]; got != "example.invalid/dev-base:1" {
+		t.Fatalf("extension image setting = %#v", got)
+	}
+}
