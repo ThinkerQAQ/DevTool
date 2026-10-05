@@ -2,7 +2,10 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -90,9 +93,16 @@ func (e *Extension) push(ctx context.Context, request scm.PushRequest) (scm.Push
 	if err != nil {
 		return scm.PushResponse{}, err
 	}
+	credential, err := e.resolveCredential(ctx, root)
+	if err != nil {
+		return scm.PushResponse{}, err
+	}
+	if !credential.Ready {
+		return scm.PushResponse{Provider: ExtensionID, Branch: status.Branch, Authorization: credential.Authorization}, nil
+	}
 	pushCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if err := gitRun(pushCtx, root, "push", "-u", "origin", "HEAD"); err != nil {
+	if err := gitRunAuthenticated(pushCtx, root, credential.Secret, "push", "-u", "origin", "HEAD"); err != nil {
 		return scm.PushResponse{}, err
 	}
 	commit, err := gitOutput(ctx, root, "rev-parse", "HEAD")
@@ -100,4 +110,22 @@ func (e *Extension) push(ctx context.Context, request scm.PushRequest) (scm.Push
 		return scm.PushResponse{}, err
 	}
 	return scm.PushResponse{Provider: ExtensionID, Branch: status.Branch, Commit: commit}, nil
+}
+
+func gitRunAuthenticated(ctx context.Context, root, token string, args ...string) error {
+	encoded := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=never",
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+		"GIT_CONFIG_VALUE_0=Authorization: Basic "+encoded,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
