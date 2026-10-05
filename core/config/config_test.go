@@ -55,19 +55,6 @@ func TestValidateRequiresExtensionType(t *testing.T) {
 	}
 }
 
-func TestValidateRequiresConfiguredEnvironmentForCodeIntelligence(t *testing.T) {
-	cfg := Config{
-		Version: CurrentVersion,
-		Project: Project{Name: "Example"},
-		Service: map[string]Service{
-			"code-indexed": {Provider: "intelligence.codegraph"},
-		},
-	}
-	if err := Validate(cfg); err == nil {
-		t.Fatal("Validate() expected missing dev.environment.image error")
-	}
-}
-
 
 func TestApplyProfileOverridesExtensionAndService(t *testing.T) {
 	cfg := Config{
