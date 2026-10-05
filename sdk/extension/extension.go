@@ -1,7 +1,7 @@
 package extension
 
 import (
-	"github.com/thinkerqaq/devtool/core/contract"
+	contract "github.com/thinkerqaq/devtool/sdk/contract"
 	"github.com/thinkerqaq/devtool/core/service"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
