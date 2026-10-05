@@ -13,10 +13,12 @@ func TestLoad(t *testing.T) {
 name = "Example"
 [extension.project]
 loader = "go"
+[extension.project.loader_config]
 module = "./devcontrol"
 package = "./cmd/provider"
 [extension.runtime]
 loader = "go"
+[extension.runtime.loader_config]
 module = "."
 package = "./extensions/runtime/dagger/cmd/provider"
 [service.portable-runtime]
@@ -138,6 +140,7 @@ func TestLoadExtensionSettings(t *testing.T) {
 name = "Example"
 [extension.environment]
 loader = "go"
+[extension.environment.loader_config]
 module = "."
 package = "./provider"
 [extension.environment.settings]
