@@ -3,8 +3,8 @@ package codeintelligence
 import "encoding/json"
 
 const (
-	GraphServiceName = "code-graph"
-	LSPServiceName   = "code-lsp"
+	IndexedServiceName  = "code-indexed"
+	RealtimeServiceName = "code-realtime"
 
 	MethodDoctor = "doctor"
 	MethodMCP    = "mcp"
