@@ -90,7 +90,7 @@ func TestApplyProfileOverridesExtensionAndService(t *testing.T) {
 			},
 		},
 	}
-	got, err := ApplyProfile(cfg, "railway")
+	got, err := ApplyProfiles(cfg, "railway")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,41 @@ func TestApplyProfileOverridesExtensionAndService(t *testing.T) {
 
 func TestApplyProfileRejectsUnknownProfile(t *testing.T) {
 	cfg := Config{Profile: map[string]Profile{}}
-	if _, err := ApplyProfile(cfg, "missing"); err == nil {
-		t.Fatal("ApplyProfile() expected unknown profile error")
+	if _, err := ApplyProfiles(cfg, "missing"); err == nil {
+		t.Fatal("ApplyProfiles() expected unknown profile error")
+	}
+}
+
+
+func TestApplyProfilesComposesInOrder(t *testing.T) {
+	cfg := Config{
+		Version: CurrentVersion,
+		Project: Project{Name: "Example"},
+		Service: map[string]Service{
+			"environment": {Provider: "environment.docker"},
+			"code-indexed": {Provider: "intelligence.codegraph"},
+		},
+		Profile: map[string]Profile{
+			"railway": {
+				Service: map[string]Service{
+					"environment": {Provider: "environment.local"},
+				},
+			},
+			"sourcegraph": {
+				Service: map[string]Service{
+					"code-indexed": {Provider: "intelligence.sourcegraph"},
+				},
+			},
+		},
+	}
+	got, err := ApplyProfiles(cfg, "railway", "sourcegraph")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Service["environment"].Provider != "environment.local" {
+		t.Fatalf("environment provider = %q", got.Service["environment"].Provider)
+	}
+	if got.Service["code-indexed"].Provider != "intelligence.sourcegraph" {
+		t.Fatalf("indexed provider = %q", got.Service["code-indexed"].Provider)
 	}
 }
