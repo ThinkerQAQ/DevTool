@@ -28,7 +28,8 @@ type Registry struct {
 	views          map[string]contract.ViewDescriptor
 	features       map[string]contract.FeatureBinding
 	navigation     map[string]contract.NavigationItem
-	services       map[string]serviceEntry
+	services       map[string]map[string]service.Invoker
+	selected       map[string]string
 	agentProviders map[string]agentsdk.ToolProvider
 }
 
@@ -39,7 +40,8 @@ func New() *Registry {
 		views:          map[string]contract.ViewDescriptor{},
 		features:       map[string]contract.FeatureBinding{},
 		navigation:     map[string]contract.NavigationItem{},
-		services:       map[string]serviceEntry{},
+		services:       map[string]map[string]service.Invoker{},
+		selected:       map[string]string{},
 		agentProviders: map[string]agentsdk.ToolProvider{},
 	}
 }
@@ -92,25 +94,72 @@ func (r *Registry) ProvideService(name, extensionID string, value service.Invoke
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if existing, exists := r.services[name]; exists {
-		return fmt.Errorf("service %q is already provided by extension %q", name, existing.extensionID)
+	providers := r.services[name]
+	if providers == nil {
+		providers = map[string]service.Invoker{}
+		r.services[name] = providers
 	}
-	r.services[name] = serviceEntry{extensionID: extensionID, value: value}
+	if _, exists := providers[extensionID]; exists {
+		return fmt.Errorf("service %q is already provided by extension %q", name, extensionID)
+	}
+	providers[extensionID] = value
+	return nil
+}
+
+func (r *Registry) SelectService(name, extensionID string) error {
+	name = strings.TrimSpace(name)
+	extensionID = strings.TrimSpace(extensionID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	providers := r.services[name]
+	if providers == nil {
+		return fmt.Errorf("service %q has no registered providers", name)
+	}
+	if _, ok := providers[extensionID]; !ok {
+		return fmt.Errorf("service %q has no provider %q", name, extensionID)
+	}
+	r.selected[name] = extensionID
 	return nil
 }
 
 func (r *Registry) Service(name string) (service.Invoker, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	entry, ok := r.services[name]
-	return entry.value, ok
+	providers := r.services[name]
+	if len(providers) == 0 {
+		return nil, false
+	}
+	if selected := r.selected[name]; selected != "" {
+		value, ok := providers[selected]
+		return value, ok
+	}
+	if len(providers) != 1 {
+		return nil, false
+	}
+	for _, value := range providers {
+		return value, true
+	}
+	return nil, false
 }
 
 func (r *Registry) ServiceProvider(name string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	entry, ok := r.services[name]
-	return entry.extensionID, ok
+	providers := r.services[name]
+	if len(providers) == 0 {
+		return "", false
+	}
+	if selected := r.selected[name]; selected != "" {
+		_, ok := providers[selected]
+		return selected, ok
+	}
+	if len(providers) != 1 {
+		return "", false
+	}
+	for provider := range providers {
+		return provider, true
+	}
+	return "", false
 }
 
 func (r *Registry) ProvideAgentTools(extensionID string, provider agentsdk.ToolProvider) error {
