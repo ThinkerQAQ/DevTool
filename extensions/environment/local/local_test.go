@@ -34,6 +34,22 @@ func TestCommandSpecRunsInsideProjectRoot(t *testing.T) {
 	}
 }
 
+func TestCommandSpecMapsLogicalWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	spec, err := commandSpec(environmentcontract.CommandRequest{
+		Root:       root,
+		WorkingDir: environmentcontract.WorkspaceRoot,
+		Executable: "codegraph-server",
+		Args:       []string{"--version"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Dir != root {
+		t.Fatalf("Dir = %q, want project root %q", spec.Dir, root)
+	}
+}
+
 func TestCommandSpecRejectsWorkingDirectoryOutsideRoot(t *testing.T) {
 	root := t.TempDir()
 	_, err := commandSpec(environmentcontract.CommandRequest{
