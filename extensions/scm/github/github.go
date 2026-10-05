@@ -13,16 +13,17 @@ import (
 	"strings"
 	"time"
 
-	service "github.com/thinkerqaq/devtool/sdk/service"
-	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
+	credentialcontract "github.com/thinkerqaq/devtool/sdk/credential"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/sdk/scm"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 )
 
 const ExtensionID = "scm.github"
 
 type Extension struct {
 	httpClient *http.Client
+	services   extensioncontract.Registrar
 }
 
 func New() *Extension {
@@ -31,18 +32,15 @@ func New() *Extension {
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
-		ID:         ExtensionID,
-		Kind:       extensioncontract.KindInfrastructure,
-		Provides:   []string{scm.ServiceName},
-		AgentTools: true,
+		ID:       ExtensionID,
+		Kind:     extensioncontract.KindInfrastructure,
+		Provides: []string{scm.ServiceName},
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
-	if err := reg.ProvideService(scm.ServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
-		return err
-	}
-	return reg.ProvideAgentTools(ExtensionID, e)
+	e.services = reg
+	return reg.ProvideService(scm.ServiceName, ExtensionID, service.Func(e.Invoke))
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
@@ -106,83 +104,6 @@ func (e *Extension) InvokeService(ctx context.Context, serviceName, method strin
 	return e.Invoke(ctx, method, payload)
 }
 
-func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Tool, error) {
-	return []agentsdk.Tool{
-		tool("scm_doctor", "Check source-control remote and credentials before publishing.", map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		}),
-		tool("scm_status", "Inspect the current branch, worktree changes, and upstream divergence.", map[string]any{
-			"type": "object", "properties": map[string]any{},
-		}),
-		tool("scm_commit", "Stage current changes and create one source-control commit.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"message": map[string]any{"type": "string"},
-			},
-			"required": []string{"message"},
-		}),
-		tool("scm_push", "Push the current branch without creating a pull request.", map[string]any{
-			"type": "object", "properties": map[string]any{},
-		}),
-		tool("scm_publish", "Push the current branch, create or reuse a GitHub pull request, and optionally merge it.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"base":  map[string]any{"type": "string", "default": "main"},
-				"title": map[string]any{"type": "string"},
-				"body":  map[string]any{"type": "string"},
-				"merge": map[string]any{"type": "boolean", "default": false},
-			},
-		}),
-	}, nil
-}
-
-func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name string, args json.RawMessage) (json.RawMessage, error) {
-	switch name {
-	case "scm_doctor":
-		response := e.doctor(ctx, session.ProjectRoot)
-		return toolResult(response)
-	case "scm_status":
-		response, err := e.status(ctx, session.ProjectRoot)
-		if err != nil {
-			return nil, err
-		}
-		return toolResult(response)
-	case "scm_commit":
-		var request scm.CommitRequest
-		if err := json.Unmarshal(args, &request); err != nil {
-			return nil, fmt.Errorf("decode scm_commit arguments: %w", err)
-		}
-		request.Root = session.ProjectRoot
-		response, err := e.commit(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		return toolResult(response)
-	case "scm_push":
-		response, err := e.push(ctx, scm.PushRequest{Root: session.ProjectRoot})
-		if err != nil {
-			return nil, err
-		}
-		return toolResult(response)
-	case "scm_publish":
-		var request scm.PublishRequest
-		if len(args) != 0 {
-			if err := json.Unmarshal(args, &request); err != nil {
-				return nil, fmt.Errorf("decode scm_publish arguments: %w", err)
-			}
-		}
-		request.Root = session.ProjectRoot
-		response, err := e.publish(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		return toolResult(response)
-	default:
-		return nil, fmt.Errorf("unknown SCM tool %q", name)
-	}
-}
-
 func (e *Extension) doctor(ctx context.Context, root string) scm.DoctorResponse {
 	remote, err := gitOutput(ctx, root, "config", "--get", "remote.origin.url")
 	if err != nil {
@@ -192,13 +113,14 @@ func (e *Extension) doctor(ctx context.Context, root string) scm.DoctorResponse 
 	if err != nil {
 		return scm.DoctorResponse{Provider: ExtensionID, Remote: remote, Reason: err.Error()}
 	}
-	_, token, err := githubCredential(ctx, root)
+	credential, err := e.resolveCredential(ctx, root)
 	if err != nil {
 		return scm.DoctorResponse{Provider: ExtensionID, Remote: owner + "/" + repo, Reason: err.Error()}
 	}
-	if strings.TrimSpace(token) == "" {
-		return scm.DoctorResponse{Provider: ExtensionID, Remote: owner + "/" + repo, Reason: "GitHub credential is unavailable"}
+	if !credential.Ready {
+		return scm.DoctorResponse{Provider: ExtensionID, Remote: owner + "/" + repo, Authorization: credential.Authorization}
 	}
+	token := credential.Secret
 	var identity struct {
 		Login string `json:"login"`
 	}
@@ -222,10 +144,14 @@ func (e *Extension) publish(ctx context.Context, request scm.PublishRequest) (sc
 	if err != nil {
 		return scm.PublishResponse{}, err
 	}
-	_, token, err := githubCredential(ctx, root)
+	credential, err := e.resolveCredential(ctx, root)
 	if err != nil {
 		return scm.PublishResponse{}, fmt.Errorf("GitHub credential preflight: %w", err)
 	}
+	if !credential.Ready {
+		return scm.PublishResponse{Provider: ExtensionID, Authorization: credential.Authorization}, nil
+	}
+	token := credential.Secret
 	var identity struct {
 		Login string `json:"login"`
 	}
@@ -434,25 +360,22 @@ func parseGitHubRemote(remote string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func tool(name, description string, inputSchema map[string]any) agentsdk.Tool {
-	raw, _ := json.Marshal(map[string]any{
-		"name":        name,
-		"description": description,
-		"inputSchema": inputSchema,
-	})
-	return agentsdk.Tool{Name: name, Definition: raw}
-}
-
-func toolResult(value any) (json.RawMessage, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
+func (e *Extension) resolveCredential(ctx context.Context, root string) (credentialcontract.ResolveResponse, error) {
+	invoker, ok := e.services.Service(credentialcontract.ServiceName)
+	if !ok {
+		return credentialcontract.ResolveResponse{}, fmt.Errorf("service %q is not configured", credentialcontract.ServiceName)
 	}
-	result, err := json.Marshal(map[string]any{
-		"content": []map[string]string{{"type": "text", "text": string(raw)}},
-	})
+	payload, err := json.Marshal(credentialcontract.ResolveRequest{Root: root, Host: "github.com", Scopes: []string{"repo"}})
 	if err != nil {
-		return nil, err
+		return credentialcontract.ResolveResponse{}, err
 	}
-	return result, nil
+	raw, err := invoker.Invoke(ctx, credentialcontract.MethodResolve, payload)
+	if err != nil {
+		return credentialcontract.ResolveResponse{}, err
+	}
+	var response credentialcontract.ResolveResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return credentialcontract.ResolveResponse{}, err
+	}
+	return response, nil
 }
