@@ -1,15 +1,10 @@
 package codeintelligence
 
-import "encoding/json"
-
 const (
 	IndexedServiceName  = "code-indexed"
 	RealtimeServiceName = "code-realtime"
 
 	MethodDoctor      = "doctor"
-	MethodMCP         = "mcp"
-	MethodSync        = "sync"
-	MethodQuery       = "query"
 	MethodVerify      = "verify"
 	MethodSearch      = "search"
 	MethodSymbols     = "symbols"
@@ -22,16 +17,6 @@ type Workspace struct {
 	Workspaces       []string `json:"workspaces,omitempty"`
 }
 
-type IndexedQuery struct {
-	Workspace
-	Tool string          `json:"tool"`
-	Args json.RawMessage `json:"args,omitempty"`
-}
-
-type MCPRequest struct {
-	Workspace
-	Context string `json:"context,omitempty"`
-}
 
 type DoctorResponse struct {
 	Provider   string `json:"provider"`
