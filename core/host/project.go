@@ -115,6 +115,16 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 			return nil, fmt.Errorf("project extension %q requires service %q, but no provider is registered", extensionDescriptor.ID, required)
 		}
 	}
+	projectTools, err := newProjectToolProvider(process, projectDescriptor)
+	if err != nil {
+		return nil, fmt.Errorf("register project agent tools: %w", err)
+	}
+	if projectTools.Count() != 0 {
+		if err := reg.ProvideAgentTools(extensionDescriptor.ID+".commands", projectTools); err != nil {
+			return nil, fmt.Errorf("register project agent tools: %w", err)
+		}
+	}
+
 	h := &ProjectHost{
 		Project:    p,
 		Extension:  extensionDescriptor,
