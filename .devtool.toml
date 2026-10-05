@@ -3,10 +3,6 @@ version = 1
 [project]
 name = "DevTool"
 
-[dev.environment]
-profile = "base"
-image = "ghcr.io/thinkerqaq/dev-base@sha256:f922f24b2dd917faa87bfc090dd90321aaf82651cc9a2de320a22519c3b77a8e"
-
 [extension.project]
 type = "go"
 module = "./devcontrol"
@@ -16,6 +12,9 @@ package = "./cmd/provider"
 type = "go"
 module = "."
 package = "./extensions/environment/docker/cmd/provider"
+
+[extension.environment.settings]
+image = "ghcr.io/thinkerqaq/dev-base@sha256:f922f24b2dd917faa87bfc090dd90321aaf82651cc9a2de320a22519c3b77a8e"
 
 [extension.runtime]
 type = "go"
