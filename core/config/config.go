@@ -15,22 +15,14 @@ type Project struct {
 }
 
 type Extension struct {
-	Type    string `toml:"type" json:"type"`
-	Module  string `toml:"module" json:"module,omitempty"`
-	Package string `toml:"package" json:"package,omitempty"`
+	Type     string         `toml:"type" json:"type"`
+	Module   string         `toml:"module" json:"module,omitempty"`
+	Package  string         `toml:"package" json:"package,omitempty"`
+	Settings map[string]any `toml:"settings" json:"settings,omitempty"`
 }
 
 type Service struct {
 	Provider string `toml:"provider" json:"provider"`
-}
-
-type Environment struct {
-	Profile string `toml:"profile" json:"profile,omitempty"`
-	Image   string `toml:"image" json:"image,omitempty"`
-}
-
-type Dev struct {
-	Environment Environment `toml:"environment" json:"environment"`
 }
 
 type Code struct {
@@ -51,7 +43,6 @@ type Config struct {
 	Project   Project              `toml:"project" json:"project"`
 	Extension map[string]Extension `toml:"extension" json:"extension,omitempty"`
 	Service   map[string]Service   `toml:"service" json:"service,omitempty"`
-	Dev       Dev                  `toml:"dev" json:"dev,omitempty"`
 	Code      Code                 `toml:"code" json:"code,omitempty"`
 	UI        UI                   `toml:"ui" json:"ui"`
 	Profile   map[string]Profile   `toml:"profile" json:"profile,omitempty"`
