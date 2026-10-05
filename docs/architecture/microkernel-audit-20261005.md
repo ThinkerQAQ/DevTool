@@ -143,87 +143,58 @@ A successful Sourcegraph query still requires a valid Sourcegraph instance and O
 
 # Remaining architecture gaps
 
-## P0 — Stable Agent Capability API is still missing
+## Resolved — Agent Capability is intent-level, not a Provider proxy
 
-Current MCP tools are still provider-native.
+The previous provider-native tool surface has been removed.
 
-Examples:
-
-```text
-codegraph_*
-sourcegraph_*
-find_symbol
-find_referencing_symbols
-...
-```
-
-Therefore switching the provider changes the tool names/schema visible to ChatGPT.
-
-This violates the intended invariant:
-
-> provider replacement must not change the consumer-facing Capability API.
-
-Desired structure:
+Agent-facing code intelligence now exposes a single engineering-intent capability:
 
 ```text
-ChatGPT / Agent
-      |
-      v
-Stable Capability Tools
-      |
-      +-- code.search
-      +-- code.definition
-      +-- code.references
-      +-- code.diagnostics
-      +-- code.impact
-      |
-      v
-Capability composition / adapters
-      |
-      +-- realtime -> LSP
-      +-- indexed  -> CodeGraph / Sourcegraph
+code_context
 ```
 
-Provider-native MCP should become an internal implementation detail or an explicitly diagnostic/raw surface.
-
-This is the most important remaining architecture change.
-
-## P1 — Environment configuration leaks into higher layers
-
-Current generic structures still contain:
+Internally it can compose:
 
 ```text
-Agent Session.EnvironmentImage
-CodeIntelligence Workspace.EnvironmentImage
-Environment CommandRequest.Image
+selected code-indexed provider
+  -> search / indexed context
+
+selected code-realtime provider
+  -> symbols
+  -> references
+  -> diagnostics
 ```
 
-An image is a Docker-style implementation concern.
+This establishes the anti-proxy invariant:
 
-It does not naturally apply to:
+> adding a Provider method does not automatically add an Agent Tool.
 
-- environment.local
-- SSH
-- Coder
-- Kubernetes with a separately defined runtime
-- other future providers
+Provider Contracts may grow with fine-grained semantic operations, while the public Agent surface only grows when a new stable engineering intent exists.
 
-Desired direction:
+Provider-native tools such as `codegraph_*`, `sourcegraph_*`, `find_symbol`, and individual `code_search/code_references/code_diagnostics` wrappers are not exposed by default.
+
+## Resolved — Environment configuration is provider-owned
+
+Docker image selection no longer appears in:
 
 ```text
-Code Intelligence / Agent
-        |
-        | project/workspace only
-        v
-Environment Service
-        |
-        v
-selected Environment Provider
-        |
-        +-- provider-owned settings
+Agent Session
+CodeIntelligence Workspace
+Environment CommandRequest
 ```
 
-Environment settings should belong to the selected environment provider, not to code intelligence or generic Agent session contracts.
+Generic Extension configuration now supports opaque Provider settings:
+
+```toml
+[extension.environment.settings]
+image = "..."
+```
+
+The Host transports these settings through the generic `extension.configure` protocol without interpreting Provider-specific fields.
+
+`environment.docker` owns and validates `settings.image`; `environment.local` does not need to know the concept exists.
+
+The same configuration channel is available to normal Process Extensions and Project Extensions.
 
 ## P1 — Extension configuration is still Go-loader shaped
 
@@ -340,18 +311,17 @@ without Core knowing CodeGraph-specific persistence semantics.
 | Runtime/provider separation | Good | local/docker selection proven without changing intelligence implementations |
 | SDK/Core dependency direction | Good after current refactor | contracts promoted to SDK |
 | Agent tools respect provider selection | Good after current fix | verified with Sourcegraph switch |
-| Stable consumer-facing Capability API | **Not complete** | provider-native MCP tools still leak |
-| Provider-owned environment config | **Not complete** | EnvironmentImage leaks upward |
+| Intent-level Agent Capability API | Good | `code_context` composes internal semantic services; provider-native tools stay private |
+| Provider-owned environment config | Good | generic extension settings; Docker owns image configuration |
 | Loader extensibility | Partial | current config is Go-loader shaped |
 | Lazy extension lifecycle | Optional optimization | not required for correctness |
 
 ## Recommended order
 
-1. Build stable Agent-facing Code Capability tools.
-2. Make CodeGraph / Sourcegraph / LSP adapters implement those semantic operations.
-3. Stop exposing provider-native MCP tools by default.
-4. Move environment image/settings into environment-provider configuration.
-5. Generalize extension loader configuration.
-6. Only then optimize lazy loading and provider caches.
+1. Keep the Agent-facing capability surface intent-level; do not reintroduce one-tool-per-provider-operation wrappers.
+2. Generalize extension loader configuration beyond Go-shaped build metadata.
+3. Move legacy code-intelligence lifecycle operations such as raw MCP/query/sync further behind provider/runtime boundaries.
+4. Reduce built-in domain handling in the main CLI through capability/descriptor-driven dispatch where it adds real value.
+5. Then optimize lazy extension startup and provider caches/state persistence.
 
 The architecture should continue to evolve by tightening boundaries, not by adding another orchestration/platform layer.
