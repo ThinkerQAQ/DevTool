@@ -17,7 +17,7 @@ import (
 
 func runCode(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("code requires subcommand: doctor, verify, graph, or lsp")
+		return errors.New("code requires subcommand: doctor, verify, indexed, or realtime")
 	}
 	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
 	if err != nil {
@@ -37,21 +37,21 @@ func runCode(ctx context.Context, args []string, out io.Writer) error {
 			return errors.New("code verify does not accept arguments")
 		}
 		if _, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodSync, workspace); err != nil {
-			return fmt.Errorf("CodeGraph verify: %w", err)
+			return fmt.Errorf("indexed intelligence verify: %w", err)
 		}
 		if _, err := invokeCodeService(ctx, h, codeintelligence.RealtimeServiceName, codeintelligence.MethodVerify, workspace); err != nil {
-			return fmt.Errorf("LSP verify: %w", err)
+			return fmt.Errorf("realtime intelligence verify: %w", err)
 		}
 		fmt.Fprintln(out, "Code intelligence VERIFIED")
-		fmt.Fprintln(out, "- CodeGraph: PASS")
-		fmt.Fprintln(out, "- LSP: PASS")
+		fmt.Fprintln(out, "- Indexed: PASS")
+		fmt.Fprintln(out, "- Realtime: PASS")
 		return nil
-	case "graph":
-		return runCodeGraph(ctx, h, workspace, args[1:], out)
-	case "lsp":
-		return runCodeLSP(ctx, h, workspace, args[1:])
+	case "indexed":
+		return runCodeIndexed(ctx, h, workspace, args[1:], out)
+	case "realtime":
+		return runCodeRealtime(ctx, h, workspace, args[1:])
 	default:
-		return fmt.Errorf("unknown code subcommand %q; use doctor, verify, graph, or lsp", args[0])
+		return fmt.Errorf("unknown code subcommand %q; use doctor, verify, indexed, or realtime", args[0])
 	}
 }
 
@@ -95,20 +95,20 @@ func runCodeDoctor(ctx context.Context, h *host.ProjectHost, workspace codeintel
 	return nil
 }
 
-func runCodeGraph(ctx context.Context, h *host.ProjectHost, workspace codeintelligence.Workspace, args []string, out io.Writer) error {
+func runCodeIndexed(ctx context.Context, h *host.ProjectHost, workspace codeintelligence.Workspace, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("code graph requires subcommand: mcp, sync, or query")
+		return errors.New("code indexed requires subcommand: mcp, sync, or query")
 	}
 	switch args[0] {
 	case "mcp":
 		if len(args) != 1 {
-			return errors.New("code graph mcp does not accept arguments")
+			return errors.New("code indexed mcp does not accept arguments")
 		}
 		_, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodMCP, codeintelligence.MCPRequest{Workspace: workspace})
 		return err
 	case "sync":
 		if len(args) != 1 {
-			return errors.New("code graph sync does not accept arguments")
+			return errors.New("code indexed sync does not accept arguments")
 		}
 		raw, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodSync, workspace)
 		if err != nil {
@@ -117,13 +117,13 @@ func runCodeGraph(ctx context.Context, h *host.ProjectHost, workspace codeintell
 		return writeJSONResult(out, raw)
 	case "query":
 		if len(args) < 2 || len(args) > 3 {
-			return errors.New("code graph query requires <tool> [json-args]")
+			return errors.New("code indexed query requires <tool> [json-args]")
 		}
 		queryArgs := json.RawMessage(`{}`)
 		if len(args) == 3 {
 			queryArgs = json.RawMessage(strings.TrimSpace(args[2]))
 			if !json.Valid(queryArgs) {
-				return errors.New("code graph query json-args must be valid JSON")
+				return errors.New("code indexed query json-args must be valid JSON")
 			}
 		}
 		raw, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodQuery, codeintelligence.IndexedQuery{
@@ -136,22 +136,22 @@ func runCodeGraph(ctx context.Context, h *host.ProjectHost, workspace codeintell
 		}
 		return writeJSONResult(out, raw)
 	default:
-		return fmt.Errorf("unknown code graph subcommand %q; use mcp, sync, or query", args[0])
+		return fmt.Errorf("unknown code indexed subcommand %q; use mcp, sync, or query", args[0])
 	}
 }
 
-func runCodeLSP(ctx context.Context, h *host.ProjectHost, workspace codeintelligence.Workspace, args []string) error {
+func runCodeRealtime(ctx context.Context, h *host.ProjectHost, workspace codeintelligence.Workspace, args []string) error {
 	if len(args) == 0 || args[0] != "mcp" {
-		return errors.New("code lsp requires subcommand: mcp")
+		return errors.New("code realtime requires subcommand: mcp")
 	}
-	fs := flag.NewFlagSet("code lsp mcp", flag.ContinueOnError)
+	fs := flag.NewFlagSet("code realtime mcp", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	contextName := fs.String("context", "agent", "Serena operation context")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("unexpected code lsp mcp arguments: %v", fs.Args())
+		return fmt.Errorf("unexpected code realtime mcp arguments: %v", fs.Args())
 	}
 	_, err := invokeCodeService(ctx, h, codeintelligence.RealtimeServiceName, codeintelligence.MethodMCP, codeintelligence.MCPRequest{
 		Workspace: workspace,
