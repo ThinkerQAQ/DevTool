@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thinkerqaq/devtool/core/service"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/sdk/scm"

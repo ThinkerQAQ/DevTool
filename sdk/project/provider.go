@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/thinkerqaq/devtool/core/contract"
+	contract "github.com/thinkerqaq/devtool/sdk/contract"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/protocol"
 )
@@ -53,6 +53,22 @@ func serve(provider Provider, in io.Reader, out io.Writer) error {
 	var session *protocol.Session
 	session = protocol.NewSession(in, out, func(ctx context.Context, envelope protocol.Envelope) (any, error) {
 		switch envelope.Method {
+		case protocol.MethodExtensionConfigure:
+			var request protocol.ExtensionConfigureRequest
+			if err := json.Unmarshal(envelope.Payload, &request); err != nil {
+				return nil, err
+			}
+			configurable, ok := provider.(extensioncontract.Configurable)
+			if !ok {
+				if len(request.Settings) != 0 {
+					return nil, fmt.Errorf("project extension %q does not accept settings", provider.ExtensionDescriptor().ID)
+				}
+				return nil, nil
+			}
+			if err := configurable.Configure(request.Settings); err != nil {
+				return nil, fmt.Errorf("configure project extension %q: %w", provider.ExtensionDescriptor().ID, err)
+			}
+			return nil, nil
 		case protocol.MethodDescribe:
 			return describePayload{
 				Extension: provider.ExtensionDescriptor(),

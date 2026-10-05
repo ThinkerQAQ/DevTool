@@ -1,8 +1,8 @@
 package extension
 
 import (
-	"github.com/thinkerqaq/devtool/core/contract"
-	"github.com/thinkerqaq/devtool/core/service"
+	contract "github.com/thinkerqaq/devtool/sdk/contract"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
 
@@ -14,6 +14,7 @@ const (
 	KindNative           Kind = "native"
 	KindInfrastructure   Kind = "infrastructure"
 	KindCodeIntelligence Kind = "code-intelligence"
+	KindCapability       Kind = "capability"
 	KindPolicy           Kind = "policy"
 	KindUI               Kind = "ui"
 )
@@ -40,4 +41,9 @@ type Registrar interface {
 type Extension interface {
 	Descriptor() Descriptor
 	Register(Registrar) error
+}
+
+
+type Configurable interface {
+	Configure(map[string]any) error
 }

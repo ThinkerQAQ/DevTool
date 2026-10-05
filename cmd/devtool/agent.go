@@ -134,7 +134,6 @@ func projectAgentSession(h *host.ProjectHost, contextName string) agentsdk.Sessi
 	return agentsdk.Session{
 		ProjectRoot:      root,
 		Workspaces:       workspaces,
-		EnvironmentImage: h.Project.Config.Dev.Environment.Image,
 		Context:          contextName,
 	}
 }

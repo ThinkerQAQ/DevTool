@@ -22,7 +22,6 @@ func Command(ctx context.Context, services extensioncontract.Registrar, workspac
 	}
 	payload, err := json.Marshal(environmentcontract.CommandRequest{
 		Root:       workspace.Root,
-		Image:      workspace.EnvironmentImage,
 		WorkingDir: environmentcontract.WorkspaceRoot,
 		Executable: executable,
 		Args:       args,

@@ -15,22 +15,13 @@ type Project struct {
 }
 
 type Extension struct {
-	Type    string `toml:"type" json:"type"`
-	Module  string `toml:"module" json:"module,omitempty"`
-	Package string `toml:"package" json:"package,omitempty"`
+	Loader       string         `toml:"loader" json:"loader"`
+	LoaderConfig map[string]any `toml:"loader_config" json:"loader_config,omitempty"`
+	Settings     map[string]any `toml:"settings" json:"settings,omitempty"`
 }
 
 type Service struct {
 	Provider string `toml:"provider" json:"provider"`
-}
-
-type Environment struct {
-	Profile string `toml:"profile" json:"profile,omitempty"`
-	Image   string `toml:"image" json:"image,omitempty"`
-}
-
-type Dev struct {
-	Environment Environment `toml:"environment" json:"environment"`
 }
 
 type Code struct {
@@ -41,14 +32,19 @@ type UI struct {
 	Features []string `toml:"features" json:"features"`
 }
 
+type Profile struct {
+	Extension map[string]Extension `toml:"extension" json:"extension,omitempty"`
+	Service   map[string]Service   `toml:"service" json:"service,omitempty"`
+}
+
 type Config struct {
 	Version   int                  `toml:"version" json:"version"`
 	Project   Project              `toml:"project" json:"project"`
 	Extension map[string]Extension `toml:"extension" json:"extension,omitempty"`
 	Service   map[string]Service   `toml:"service" json:"service,omitempty"`
-	Dev       Dev                  `toml:"dev" json:"dev,omitempty"`
 	Code      Code                 `toml:"code" json:"code,omitempty"`
 	UI        UI                   `toml:"ui" json:"ui"`
+	Profile   map[string]Profile   `toml:"profile" json:"profile,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -60,8 +56,41 @@ func Load(path string) (Config, error) {
 	if err := toml.Unmarshal(raw, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if profiles := strings.TrimSpace(os.Getenv("DEVTOOL_PROFILES")); profiles != "" {
+		var err error
+		cfg, err = ApplyProfiles(cfg, strings.Split(profiles, ",")...)
+		if err != nil {
+			return Config{}, err
+		}
+	}
 	if err := Validate(cfg); err != nil {
 		return Config{}, fmt.Errorf("validate %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func ApplyProfiles(cfg Config, names ...string) (Config, error) {
+	for _, rawName := range names {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			continue
+		}
+		profile, ok := cfg.Profile[name]
+		if !ok {
+			return Config{}, fmt.Errorf("profile %q is not configured", name)
+		}
+		if cfg.Extension == nil {
+			cfg.Extension = map[string]Extension{}
+		}
+		for key, value := range profile.Extension {
+			cfg.Extension[key] = value
+		}
+		if cfg.Service == nil {
+			cfg.Service = map[string]Service{}
+		}
+		for key, value := range profile.Service {
+			cfg.Service[key] = value
+		}
 	}
 	return cfg, nil
 }
@@ -77,8 +106,8 @@ func Validate(cfg Config) error {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("extension name is required")
 		}
-		if strings.TrimSpace(ext.Type) == "" {
-			return fmt.Errorf("extension.%s.type is required", name)
+		if strings.TrimSpace(ext.Loader) == "" {
+			return fmt.Errorf("extension.%s.loader is required", name)
 		}
 	}
 	for name, service := range cfg.Service {
@@ -88,12 +117,6 @@ func Validate(cfg Config) error {
 		if strings.TrimSpace(service.Provider) == "" {
 			return fmt.Errorf("service.%s.provider is required", name)
 		}
-	}
-	if _, ok := cfg.Service["code-graph"]; ok && strings.TrimSpace(cfg.Dev.Environment.Image) == "" {
-		return fmt.Errorf("dev.environment.image is required when code-graph service is configured")
-	}
-	if _, ok := cfg.Service["code-lsp"]; ok && strings.TrimSpace(cfg.Dev.Environment.Image) == "" {
-		return fmt.Errorf("dev.environment.image is required when code-lsp service is configured")
 	}
 	for index, workspace := range cfg.Code.Workspaces {
 		if strings.TrimSpace(workspace) == "" {

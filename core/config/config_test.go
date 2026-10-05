@@ -12,11 +12,13 @@ func TestLoad(t *testing.T) {
 [project]
 name = "Example"
 [extension.project]
-type = "go"
+loader = "go"
+[extension.project.loader_config]
 module = "./devcontrol"
 package = "./cmd/provider"
 [extension.runtime]
-type = "go"
+loader = "go"
+[extension.runtime.loader_config]
 module = "."
 package = "./extensions/runtime/dagger/cmd/provider"
 [service.portable-runtime]
@@ -34,7 +36,7 @@ features = ["jobs", "logs"]
 	if cfg.Project.Name != "Example" {
 		t.Fatalf("project name = %q", cfg.Project.Name)
 	}
-	if cfg.Extension["project"].Module != "./devcontrol" {
+	if cfg.Extension["project"].Loader != "go" || cfg.Extension["project"].LoaderConfig["module"] != "./devcontrol" {
 		t.Fatalf("unexpected project extension: %+v", cfg.Extension["project"])
 	}
 	if cfg.Service["portable-runtime"].Provider != "runtime.dagger" {
@@ -42,7 +44,7 @@ features = ["jobs", "logs"]
 	}
 }
 
-func TestValidateRequiresExtensionType(t *testing.T) {
+func TestValidateRequiresExtensionLoader(t *testing.T) {
 	cfg := Config{
 		Version: CurrentVersion,
 		Project: Project{Name: "Example"},
@@ -51,19 +53,107 @@ func TestValidateRequiresExtensionType(t *testing.T) {
 		},
 	}
 	if err := Validate(cfg); err == nil {
-		t.Fatal("Validate() expected missing extension type error")
+		t.Fatal("Validate() expected missing extension loader error")
 	}
 }
 
-func TestValidateRequiresConfiguredEnvironmentForCodeIntelligence(t *testing.T) {
+
+func TestApplyProfileOverridesExtensionAndService(t *testing.T) {
+	cfg := Config{
+		Version: CurrentVersion,
+		Project: Project{Name: "Example"},
+		Extension: map[string]Extension{
+			"environment": {Loader: "go", LoaderConfig: map[string]any{"module": ".", "package": "./extensions/environment/docker/cmd/provider"}},
+		},
+		Service: map[string]Service{
+			"environment": {Provider: "environment.docker"},
+		},
+		Profile: map[string]Profile{
+			"railway": {
+				Extension: map[string]Extension{
+					"environment": {Loader: "go", LoaderConfig: map[string]any{"module": ".", "package": "./extensions/environment/local/cmd/provider"}},
+				},
+				Service: map[string]Service{
+					"environment": {Provider: "environment.local"},
+				},
+			},
+		},
+	}
+	got, err := ApplyProfiles(cfg, "railway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Extension["environment"].LoaderConfig["package"] != "./extensions/environment/local/cmd/provider" {
+		t.Fatalf("extension override = %+v", got.Extension["environment"])
+	}
+	if got.Service["environment"].Provider != "environment.local" {
+		t.Fatalf("service override = %+v", got.Service["environment"])
+	}
+}
+
+func TestApplyProfileRejectsUnknownProfile(t *testing.T) {
+	cfg := Config{Profile: map[string]Profile{}}
+	if _, err := ApplyProfiles(cfg, "missing"); err == nil {
+		t.Fatal("ApplyProfiles() expected unknown profile error")
+	}
+}
+
+
+func TestApplyProfilesComposesInOrder(t *testing.T) {
 	cfg := Config{
 		Version: CurrentVersion,
 		Project: Project{Name: "Example"},
 		Service: map[string]Service{
-			"code-graph": {Provider: "intelligence.codegraph"},
+			"environment": {Provider: "environment.docker"},
+			"code-indexed": {Provider: "intelligence.codegraph"},
+		},
+		Profile: map[string]Profile{
+			"railway": {
+				Service: map[string]Service{
+					"environment": {Provider: "environment.local"},
+				},
+			},
+			"sourcegraph": {
+				Service: map[string]Service{
+					"code-indexed": {Provider: "intelligence.sourcegraph"},
+				},
+			},
 		},
 	}
-	if err := Validate(cfg); err == nil {
-		t.Fatal("Validate() expected missing dev.environment.image error")
+	got, err := ApplyProfiles(cfg, "railway", "sourcegraph")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Service["environment"].Provider != "environment.local" {
+		t.Fatalf("environment provider = %q", got.Service["environment"].Provider)
+	}
+	if got.Service["code-indexed"].Provider != "intelligence.sourcegraph" {
+		t.Fatalf("indexed provider = %q", got.Service["code-indexed"].Provider)
+	}
+}
+
+
+func TestLoadExtensionSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".devtool.toml")
+	raw := []byte(`version = 1
+[project]
+name = "Example"
+[extension.environment]
+loader = "go"
+[extension.environment.loader_config]
+module = "."
+package = "./provider"
+[extension.environment.settings]
+image = "example.invalid/dev-base:1"
+`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Extension["environment"].Settings["image"]; got != "example.invalid/dev-base:1" {
+		t.Fatalf("extension image setting = %#v", got)
 	}
 }

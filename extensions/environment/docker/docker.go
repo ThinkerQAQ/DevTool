@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/thinkerqaq/devtool/core/service"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 )
@@ -20,7 +20,8 @@ import (
 const ExtensionID = "environment.docker"
 
 type Extension struct {
-	mu sync.Mutex
+	mu    sync.Mutex
+	image string
 }
 
 func New() *Extension {
@@ -33,6 +34,20 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 		Kind:     extensioncontract.KindInfrastructure,
 		Provides: []string{environmentcontract.ServiceName},
 	}
+}
+
+func (e *Extension) Configure(settings map[string]any) error {
+	raw, ok := settings["image"]
+	if !ok {
+		e.image = ""
+		return nil
+	}
+	image, ok := raw.(string)
+	if !ok {
+		return fmt.Errorf("environment.docker settings.image must be a string")
+	}
+	e.image = strings.TrimSpace(image)
+	return nil
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
@@ -56,9 +71,9 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 }
 
 func (e *Extension) commandSpec(ctx context.Context, request environmentcontract.CommandRequest) (environmentcontract.CommandSpec, error) {
-	image := strings.TrimSpace(request.Image)
+	image := strings.TrimSpace(e.image)
 	if image == "" {
-		return environmentcontract.CommandSpec{}, fmt.Errorf("environment image is required")
+		return environmentcontract.CommandSpec{}, fmt.Errorf("environment.docker settings.image is required")
 	}
 	if strings.TrimSpace(request.Root) == "" {
 		return environmentcontract.CommandSpec{}, fmt.Errorf("environment project root is required")

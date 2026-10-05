@@ -38,7 +38,7 @@ exit 2
 	}
 }
 
-func TestQueryPassesWorkspacesAndJSON(t *testing.T) {
+func TestVerifyReindexesWorkspace(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is unix-only")
 	}
@@ -60,11 +60,11 @@ while [ "$#" -gt 0 ]; do
       ;;
     --run-tool)
       shift
-      [ "$1" = "codegraph_analyze_impact" ] && found_tool=1
+      [ "$1" = "codegraph_reindex_workspace" ] && found_tool=1
       ;;
     --tool-args)
       shift
-      [ "$1" = '{"symbol":"OpenProject"}' ] && found_args=1
+      [ "$1" = '{"force":false}' ] && found_args=1
       ;;
   esac
   shift
@@ -81,40 +81,62 @@ printf '{"ok":true}'
 		t.Fatal(err)
 	}
 	e := &Extension{executable: path}
-	payload, err := json.Marshal(codeintelligence.GraphQuery{
-		Workspace: codeintelligence.Workspace{Root: root, Workspaces: []string{root, "child"}},
-		Tool:      "analyze_impact",
-		Args:      json.RawMessage(`{"symbol":"OpenProject"}`),
-	})
+	payload, err := json.Marshal(codeintelligence.Workspace{Root: root, Workspaces: []string{root, "child"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := e.Invoke(context.Background(), codeintelligence.MethodQuery, payload)
+	raw, err := e.Invoke(context.Background(), codeintelligence.MethodVerify, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(string(raw)) != `{"ok":true}` {
-		t.Fatalf("result = %s", raw)
+	var response codeintelligence.VerifyResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Provider != ExtensionID || !strings.Contains(response.Output, `"ok":true`) {
+		t.Fatalf("response = %#v", response)
 	}
 }
 
-func TestQueryRejectsInvalidArgs(t *testing.T) {
-	e := &Extension{executable: "unused"}
-	payload, err := json.Marshal(codeintelligence.GraphQuery{
+func TestSearchMapsToSymbolSearch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is unix-only")
+	}
+	path := writeFixture(t, `#!/bin/sh
+found_tool=0
+found_args=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --run-tool)
+      shift
+      [ "$1" = "codegraph_symbol_search" ] && found_tool=1
+      ;;
+    --tool-args)
+      shift
+      [ "$1" = '{"compact":true,"limit":7,"query":"Registry"}' ] && found_args=1
+      ;;
+  esac
+  shift
+done
+[ "$found_tool" -eq 1 ] || exit 6
+[ "$found_args" -eq 1 ] || exit 7
+printf '{"results":[]}'
+`)
+	e := &Extension{executable: path}
+	payload, err := json.Marshal(codeintelligence.SearchRequest{
 		Workspace: codeintelligence.Workspace{Root: t.TempDir()},
-		Tool:      "analyze_impact",
+		Query:     "Registry",
+		Limit:     7,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var request codeintelligence.GraphQuery
-	if err := json.Unmarshal(payload, &request); err != nil {
+	raw, err := e.Invoke(context.Background(), codeintelligence.MethodSearch, payload)
+	if err != nil {
 		t.Fatal(err)
 	}
-	request.Args = json.RawMessage(`{`)
-	payload, _ = json.Marshal(request)
-	if _, err := e.Invoke(context.Background(), codeintelligence.MethodQuery, payload); err == nil {
-		t.Fatal("Invoke() expected invalid JSON error")
+	if strings.TrimSpace(string(raw)) != `{"results":[]}` {
+		t.Fatalf("result = %s", raw)
 	}
 }
 

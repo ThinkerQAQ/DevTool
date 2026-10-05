@@ -5,12 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
-	"github.com/thinkerqaq/devtool/core/service"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/envexec"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
@@ -43,30 +42,22 @@ func (e *Extension) Close() error {
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
-		ID:         ExtensionID,
-		Kind:       extensioncontract.KindCodeIntelligence,
-		Provides:   []string{codeintelligence.LSPServiceName},
-		Requires:   []string{environmentcontract.ServiceName},
-		AgentTools: true,
+		ID:       ExtensionID,
+		Kind:     extensioncontract.KindCodeIntelligence,
+		Provides: []string{codeintelligence.RealtimeServiceName},
+		Requires: []string{environmentcontract.ServiceName},
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	e.services = reg
-	if err := reg.ProvideService(codeintelligence.LSPServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
-		return err
-	}
-	if e.bridge == nil {
-		e.bridge = mcpbridge.New(e.agentMCPCommand)
-	}
-	return reg.ProvideAgentTools(ExtensionID, e.bridge)
+	return reg.ProvideService(codeintelligence.RealtimeServiceName, ExtensionID, service.Func(e.Invoke))
 }
 
 func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Session) (*exec.Cmd, error) {
 	workspace := codeintelligence.Workspace{
-		Root:             session.ProjectRoot,
-		Workspaces:       session.Workspaces,
-		EnvironmentImage: session.EnvironmentImage,
+		Root:       session.ProjectRoot,
+		Workspaces: session.Workspaces,
 	}
 	contextName := strings.TrimSpace(session.Context)
 	if contextName == "" {
@@ -93,15 +84,58 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			return nil, fmt.Errorf("decode LSP verify request: %w", err)
 		}
 		return e.verify(ctx, request)
-	case codeintelligence.MethodMCP:
-		var request codeintelligence.MCPRequest
+	case codeintelligence.MethodSymbols:
+		var request codeintelligence.SymbolRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
-			return nil, fmt.Errorf("decode LSP MCP request: %w", err)
+			return nil, fmt.Errorf("decode realtime symbols request: %w", err)
 		}
-		if err := e.mcp(ctx, request); err != nil {
+		if strings.TrimSpace(request.Symbol) == "" {
+			return nil, fmt.Errorf("realtime symbol is required")
+		}
+		toolArgs := map[string]any{
+			"name_path_pattern": request.Symbol,
+			"include_body":      request.IncludeBody,
+		}
+		if path := strings.TrimSpace(request.Path); path != "" {
+			toolArgs["relative_path"] = path
+		}
+		args, err := json.Marshal(toolArgs)
+		if err != nil {
 			return nil, err
 		}
-		return json.RawMessage(`null`), nil
+		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_symbol", args)
+	case codeintelligence.MethodReferences:
+		var request codeintelligence.ReferencesRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode realtime references request: %w", err)
+		}
+		if strings.TrimSpace(request.Symbol) == "" {
+			return nil, fmt.Errorf("realtime reference symbol is required")
+		}
+		if strings.TrimSpace(request.Path) == "" {
+			return nil, fmt.Errorf("realtime reference path is required")
+		}
+		args, err := json.Marshal(map[string]any{
+			"name_path":     request.Symbol,
+			"relative_path": request.Path,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_referencing_symbols", args)
+	case codeintelligence.MethodDiagnostics:
+		var request codeintelligence.DiagnosticsRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode realtime diagnostics request: %w", err)
+		}
+		if strings.TrimSpace(request.Path) == "" {
+			return nil, fmt.Errorf("realtime diagnostics path is required")
+		}
+		args, err := json.Marshal(map[string]any{"relative_path": request.Path})
+		if err != nil {
+			return nil, err
+		}
+		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "get_diagnostics_for_file", args)
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
@@ -130,28 +164,6 @@ func (e *Extension) verify(ctx context.Context, workspace codeintelligence.Works
 		Output:   strings.TrimSpace(string(out)),
 	}
 	return json.Marshal(response)
-}
-
-func (e *Extension) mcp(ctx context.Context, request codeintelligence.MCPRequest) error {
-	contextName := strings.TrimSpace(request.Context)
-	if contextName == "" {
-		contextName = "agent"
-	}
-	cmd, err := e.command(ctx, request.Workspace,
-		"start-mcp-server",
-		"--project", e.projectPath(request.Workspace),
-		"--context", contextName,
-	)
-	if err != nil {
-		return err
-	}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Serena LSP MCP: %w", err)
-	}
-	return nil
 }
 
 func (e *Extension) projectPath(workspace codeintelligence.Workspace) string {
@@ -183,4 +195,12 @@ func (e *Extension) combinedOutput(ctx context.Context, workspace codeintelligen
 		return nil, fmt.Errorf("serena: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+func sessionForWorkspace(workspace codeintelligence.Workspace) agentsdk.Session {
+	return agentsdk.Session{
+		ProjectRoot: workspace.Root,
+		Workspaces:  append([]string(nil), workspace.Workspaces...),
+		Context:     "agent",
+	}
 }

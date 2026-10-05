@@ -32,7 +32,7 @@ type processExtensionClient struct {
 	closeErr  error
 }
 
-func LoadProcessExtension(ctx context.Context, p project.Project, name, executable string, services *registry.Registry) (*ProcessExtension, error) {
+func LoadProcessExtension(ctx context.Context, p project.Project, name, executable string, settings map[string]any, services *registry.Registry) (*ProcessExtension, error) {
 	executable = strings.TrimSpace(executable)
 	if executable == "" {
 		return nil, fmt.Errorf("extension %q executable is required", name)
@@ -55,6 +55,10 @@ func LoadProcessExtension(ctx context.Context, p project.Project, name, executab
 	if strings.TrimSpace(descriptor.ID) == "" {
 		_ = client.close()
 		return nil, fmt.Errorf("extension %q returned empty id", name)
+	}
+	if err := client.call(ctx, protocol.MethodExtensionConfigure, protocol.ExtensionConfigureRequest{Settings: settings}, nil); err != nil {
+		_ = client.close()
+		return nil, fmt.Errorf("configure extension %q: %w", descriptor.ID, err)
 	}
 	if descriptor.Kind == extensioncontract.KindProject {
 		client.close()

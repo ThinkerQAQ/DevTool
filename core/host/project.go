@@ -63,7 +63,7 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		if err != nil {
 			return nil, fmt.Errorf("resolve extension %q executable: %w", name, err)
 		}
-		ext, err := coreextension.LoadProcessExtension(ctx, p, name, executable, reg)
+		ext, err := coreextension.LoadProcessExtension(ctx, p, name, executable, configured.Settings, reg)
 		if err != nil {
 			return nil, fmt.Errorf("load extension %q: %w", name, err)
 		}
@@ -75,21 +75,17 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		}
 	}
 
-	for _, descriptor := range descriptors {
-		for _, required := range descriptor.Requires {
-			if _, ok := reg.Service(required); !ok {
-				return nil, fmt.Errorf("extension %q requires service %q, but no provider is registered", descriptor.ID, required)
-			}
+	for serviceName, configured := range p.Config.Service {
+		if err := reg.SelectService(serviceName, configured.Provider); err != nil {
+			return nil, fmt.Errorf("configure service %q: %w", serviceName, err)
 		}
 	}
 
-	for serviceName, configured := range p.Config.Service {
-		provider, ok := reg.ServiceProvider(serviceName)
-		if !ok {
-			return nil, fmt.Errorf("configured service %q has no registered provider", serviceName)
-		}
-		if provider != configured.Provider {
-			return nil, fmt.Errorf("service %q expected provider %q, got %q", serviceName, configured.Provider, provider)
+	for _, descriptor := range descriptors {
+		for _, required := range descriptor.Requires {
+			if _, ok := reg.Service(required); !ok {
+				return nil, fmt.Errorf("extension %q requires service %q, but no provider is selected", descriptor.ID, required)
+			}
 		}
 	}
 
@@ -97,7 +93,7 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 	if err != nil {
 		return nil, fmt.Errorf("resolve project extension executable: %w", err)
 	}
-	process, err := coreextension.StartProjectProcess(ctx, p, projectExecutable, reg)
+	process, err := coreextension.StartProjectProcess(ctx, p, projectExecutable, projectExtension.Settings, reg)
 	if err != nil {
 		return nil, fmt.Errorf("start project extension: %w", err)
 	}

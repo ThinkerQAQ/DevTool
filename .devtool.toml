@@ -3,37 +3,62 @@ version = 1
 [project]
 name = "DevTool"
 
-[dev.environment]
-profile = "base"
-image = "ghcr.io/thinkerqaq/dev-base@sha256:f922f24b2dd917faa87bfc090dd90321aaf82651cc9a2de320a22519c3b77a8e"
-
 [extension.project]
-type = "go"
+loader = "go"
+
+[extension.project.loader_config]
 module = "./devcontrol"
 package = "./cmd/provider"
 
 [extension.environment]
-type = "go"
+loader = "go"
+
+[extension.environment.loader_config]
 module = "."
 package = "./extensions/environment/docker/cmd/provider"
 
+[extension.environment.settings]
+image = "ghcr.io/thinkerqaq/dev-base@sha256:f922f24b2dd917faa87bfc090dd90321aaf82651cc9a2de320a22519c3b77a8e"
+
 [extension.runtime]
-type = "go"
+loader = "go"
+
+[extension.runtime.loader_config]
 module = "."
 package = "./extensions/runtime/dagger/cmd/provider"
 
+[extension.code-capability]
+loader = "go"
+
+[extension.code-capability.loader_config]
+module = "."
+package = "./extensions/capability/code/cmd/provider"
+
 [extension.codegraph]
-type = "go"
+loader = "go"
+
+[extension.codegraph.loader_config]
 module = "."
 package = "./extensions/intelligence/codegraph/cmd/provider"
 
 [extension.lsp]
-type = "go"
+loader = "go"
+
+[extension.lsp.loader_config]
 module = "."
 package = "./extensions/intelligence/serena/cmd/provider"
 
+[extension.sourcegraph]
+loader = "go"
+
+[extension.sourcegraph.loader_config]
+module = "."
+package = "./extensions/intelligence/sourcegraph/cmd/provider"
+
 [extension.scm]
-type = "go"
+loader = "go"
+
+[extension.scm.loader_config]
 module = "."
 package = "./extensions/scm/github/cmd/provider"
 
@@ -43,10 +68,10 @@ provider = "environment.docker"
 [service.portable-runtime]
 provider = "runtime.dagger"
 
-[service.code-graph]
+[service.code-indexed]
 provider = "intelligence.codegraph"
 
-[service.code-lsp]
+[service.code-realtime]
 provider = "intelligence.lsp.serena"
 
 [service.scm-publish]
@@ -54,3 +79,16 @@ provider = "scm.github"
 
 [code]
 workspaces = ["."]
+
+[profile.railway.extension.environment]
+loader = "go"
+
+[profile.railway.extension.environment.loader_config]
+module = "."
+package = "./extensions/environment/local/cmd/provider"
+
+[profile.railway.service.environment]
+provider = "environment.local"
+
+[profile.sourcegraph.service.code-indexed]
+provider = "intelligence.sourcegraph"

@@ -347,12 +347,16 @@ version = 1
 name = "PhotoWaypoint"
 
 [extension.project]
-type = "go"
+loader = "go"
+
+[extension.project.loader_config]
 module = "./go/devcontrol"
 package = "./cmd/provider"
 
 [extension.runtime]
-type = "go"
+loader = "go"
+
+[extension.runtime.loader_config]
 module = "."
 package = "./extensions/runtime/dagger/cmd/provider"
 
@@ -646,6 +650,61 @@ Self-hosting 的意义是持续证明：
 
 > **Core 越小越稳定；能力全部通过清晰 Contract 扩展；配置只做 wiring；项目不依赖具体实现；DevTool 必须持续用自己开发自己。**
 
+
+---
+
+## 13.1 Agent Capability 不做代理层
+
+Agent-facing Capability 只表达稳定工程意图，不机械镜像底层 Provider API。
+
+禁止：
+
+~~~text
+Provider 新增 findReferences
+        ↓
+DevTool 立刻新增 code_references
+
+Provider 新增 diagnostics
+        ↓
+DevTool 立刻新增 code_diagnostics
+~~~
+
+这种设计会让 DevTool 退化成 MCP/API Proxy，并让 Agent Tool 数量随底层实现无限增长。
+
+正确分层：
+
+~~~text
+Cloud / Local Agent
+        │
+        ▼
+Intent-level Capability
+        │
+        └── code_context
+                │
+                ├── indexed search
+                ├── realtime symbols
+                ├── references
+                └── diagnostics
+                        │
+                        ▼
+              replaceable Providers
+~~~
+
+约束：
+
+1. 新增 Provider 方法，不自动产生新的 Agent Tool。
+2. Provider Contract 可以细粒度，因为它只服务 Extension 之间的内部适配。
+3. Agent Tool 只有出现新的稳定工程意图时才新增。
+4. 一个 Capability 可以组合多个 Service/Provider，并附带 project/worktree 上下文。
+5. 对外结果应表达工程上下文或工程结果，而不是简单转发底层工具响应。
+
+当前 Code Intelligence 的第一版 Agent Capability 只暴露：
+
+~~~text
+code_context
+~~~
+
+底层仍可以扩展 `search / symbols / references / diagnostics / impact / callers / callees` 等语义，但这些不会按 1:1 关系暴露到 Agent Tool surface。
 
 ---
 

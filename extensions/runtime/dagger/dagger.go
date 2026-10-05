@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/thinkerqaq/devtool/core/service"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/sdk/portable"
 )

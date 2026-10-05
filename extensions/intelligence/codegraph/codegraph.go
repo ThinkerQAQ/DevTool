@@ -5,15 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
-	"github.com/thinkerqaq/devtool/core/service"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/envexec"
-	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
@@ -26,55 +23,22 @@ type Extension struct {
 	// is resolved through the configured Environment service.
 	executable string
 	services   extensioncontract.Registrar
-	bridge     *mcpbridge.Provider
 }
 
-func New() *Extension {
-	e := &Extension{}
-	e.bridge = mcpbridge.New(e.agentMCPCommand)
-	return e
-}
-
-func (e *Extension) Close() error {
-	if e.bridge == nil {
-		return nil
-	}
-	return e.bridge.Close()
-}
+func New() *Extension { return &Extension{} }
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
 		ID:         ExtensionID,
 		Kind:       extensioncontract.KindCodeIntelligence,
-		Provides:   []string{codeintelligence.GraphServiceName},
+		Provides:   []string{codeintelligence.IndexedServiceName},
 		Requires:   []string{environmentcontract.ServiceName},
-		AgentTools: true,
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	e.services = reg
-	if err := reg.ProvideService(codeintelligence.GraphServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
-		return err
-	}
-	if e.bridge == nil {
-		e.bridge = mcpbridge.New(e.agentMCPCommand)
-	}
-	return reg.ProvideAgentTools(ExtensionID, e.bridge)
-}
-
-func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Session) (*exec.Cmd, error) {
-	workspace := codeintelligence.Workspace{
-		Root:             session.ProjectRoot,
-		Workspaces:       session.Workspaces,
-		EnvironmentImage: session.EnvironmentImage,
-	}
-	args, err := graphBaseArgs(workspace, e.executable == "")
-	if err != nil {
-		return nil, err
-	}
-	args = append(args, "--profile", "graph", "--mcp")
-	return e.command(ctx, workspace, args...)
+	return reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke))
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
@@ -85,41 +49,38 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			return nil, fmt.Errorf("decode CodeGraph doctor request: %w", err)
 		}
 		return e.doctor(ctx, workspace)
-	case codeintelligence.MethodMCP:
-		var request codeintelligence.MCPRequest
-		if err := json.Unmarshal(payload, &request); err != nil {
-			return nil, fmt.Errorf("decode CodeGraph MCP request: %w", err)
-		}
-		if err := e.mcp(ctx, request.Workspace); err != nil {
-			return nil, err
-		}
-		return json.RawMessage(`null`), nil
-	case codeintelligence.MethodSync:
+	case codeintelligence.MethodVerify:
 		var request codeintelligence.Workspace
 		if err := json.Unmarshal(payload, &request); err != nil {
-			return nil, fmt.Errorf("decode CodeGraph sync request: %w", err)
+			return nil, fmt.Errorf("decode CodeGraph verify request: %w", err)
 		}
-		return e.runTool(ctx, request, "codegraph_reindex_workspace", json.RawMessage(`{"force":false}`))
-	case codeintelligence.MethodQuery:
-		var request codeintelligence.GraphQuery
+		raw, err := e.runTool(ctx, request, "codegraph_reindex_workspace", json.RawMessage(`{"force":false}`))
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(codeintelligence.VerifyResponse{Provider: ExtensionID, Output: strings.TrimSpace(string(raw))})
+	case codeintelligence.MethodSearch:
+		var request codeintelligence.SearchRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
-			return nil, fmt.Errorf("decode CodeGraph query request: %w", err)
+			return nil, fmt.Errorf("decode CodeGraph search request: %w", err)
 		}
-		tool := strings.TrimSpace(request.Tool)
-		if tool == "" {
-			return nil, fmt.Errorf("CodeGraph query tool is required")
+		query := strings.TrimSpace(request.Query)
+		if query == "" {
+			return nil, fmt.Errorf("CodeGraph search query is required")
 		}
-		if !strings.HasPrefix(tool, "codegraph_") {
-			tool = "codegraph_" + tool
+		limit := request.Limit
+		if limit <= 0 {
+			limit = 20
 		}
-		args := request.Args
-		if len(args) == 0 {
-			args = json.RawMessage(`{}`)
+		args, err := json.Marshal(map[string]any{
+			"query":   query,
+			"limit":   limit,
+			"compact": true,
+		})
+		if err != nil {
+			return nil, err
 		}
-		if !json.Valid(args) {
-			return nil, fmt.Errorf("CodeGraph query args must be valid JSON")
-		}
-		return e.runTool(ctx, request.Workspace, tool, args)
+		return e.runTool(ctx, request.Workspace, "codegraph_symbol_search", args)
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
@@ -136,25 +97,6 @@ func (e *Extension) doctor(ctx context.Context, workspace codeintelligence.Works
 		Version:    strings.TrimSpace(string(out)),
 	}
 	return json.Marshal(response)
-}
-
-func (e *Extension) mcp(ctx context.Context, workspace codeintelligence.Workspace) error {
-	args, err := graphBaseArgs(workspace, e.executable == "")
-	if err != nil {
-		return err
-	}
-	args = append(args, "--profile", "graph", "--mcp")
-	cmd, err := e.command(ctx, workspace, args...)
-	if err != nil {
-		return err
-	}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("CodeGraph MCP: %w", err)
-	}
-	return nil
 }
 
 func (e *Extension) runTool(ctx context.Context, workspace codeintelligence.Workspace, tool string, toolArgs json.RawMessage) (json.RawMessage, error) {
