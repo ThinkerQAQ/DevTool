@@ -55,6 +55,27 @@ loader = "go"
 module = "."
 package = "./extensions/intelligence/sourcegraph/cmd/provider"
 
+[extension.scm-capability]
+loader = "go"
+
+[extension.scm-capability.loader_config]
+module = "."
+package = "./extensions/capability/scm/cmd/provider"
+
+[extension.credential-store]
+loader = "go"
+
+[extension.credential-store.loader_config]
+module = "."
+package = "./extensions/credential/file/cmd/provider"
+
+[extension.credential]
+loader = "go"
+
+[extension.credential.loader_config]
+module = "."
+package = "./extensions/credential/github/cmd/provider"
+
 [extension.scm]
 loader = "go"
 
@@ -73,6 +94,12 @@ provider = "intelligence.codegraph"
 
 [service.code-realtime]
 provider = "intelligence.lsp.serena"
+
+[service.credential-store]
+provider = "credential.store.file"
+
+[service.credential]
+provider = "credential.github"
 
 [service.scm]
 provider = "scm.github"

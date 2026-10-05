@@ -1,6 +1,10 @@
 package scm
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	credentialcontract "github.com/thinkerqaq/devtool/sdk/credential"
+)
 
 const ServiceName = "scm"
 
@@ -34,10 +38,11 @@ type PublishRequest struct {
 }
 
 type DoctorResponse struct {
-	Provider string `json:"provider"`
-	Ready    bool   `json:"ready"`
-	Remote   string `json:"remote,omitempty"`
-	Reason   string `json:"reason,omitempty"`
+	Provider      string                            `json:"provider"`
+	Ready         bool                              `json:"ready"`
+	Remote        string                            `json:"remote,omitempty"`
+	Reason        string                            `json:"reason,omitempty"`
+	Authorization *credentialcontract.Authorization `json:"authorization,omitempty"`
 }
 
 type StatusResponse struct {
@@ -57,19 +62,21 @@ type CommitResponse struct {
 }
 
 type PushResponse struct {
-	Provider string `json:"provider"`
-	Branch   string `json:"branch"`
-	Commit   string `json:"commit"`
+	Provider      string                            `json:"provider"`
+	Branch        string                            `json:"branch"`
+	Commit        string                            `json:"commit"`
+	Authorization *credentialcontract.Authorization `json:"authorization,omitempty"`
 }
 
 type PublishResponse struct {
-	Provider  string `json:"provider"`
-	Branch    string `json:"branch"`
-	Commit    string `json:"commit"`
-	PRNumber  int    `json:"pr_number,omitempty"`
-	PRURL     string `json:"pr_url,omitempty"`
-	Merged    bool   `json:"merged"`
-	DurationM int64  `json:"duration_ms"`
+	Provider      string                            `json:"provider"`
+	Branch        string                            `json:"branch"`
+	Commit        string                            `json:"commit"`
+	PRNumber      int                               `json:"pr_number,omitempty"`
+	PRURL         string                            `json:"pr_url,omitempty"`
+	Merged        bool                              `json:"merged"`
+	DurationM     int64                             `json:"duration_ms"`
+	Authorization *credentialcontract.Authorization `json:"authorization,omitempty"`
 }
 
 type ToolArguments struct {
