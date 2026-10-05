@@ -68,3 +68,7 @@ package = "./extensions/environment/local/cmd/provider"
 
 [profile.railway.service.environment]
 provider = "environment.local"
+
+
+[profile.sourcegraph.service.code-indexed]
+provider = "intelligence.sourcegraph"
