@@ -12,11 +12,11 @@ func TestLoad(t *testing.T) {
 [project]
 name = "Example"
 [extension.project]
-type = "go"
+loader = "go"
 module = "./devcontrol"
 package = "./cmd/provider"
 [extension.runtime]
-type = "go"
+loader = "go"
 module = "."
 package = "./extensions/runtime/dagger/cmd/provider"
 [service.portable-runtime]
@@ -34,7 +34,7 @@ features = ["jobs", "logs"]
 	if cfg.Project.Name != "Example" {
 		t.Fatalf("project name = %q", cfg.Project.Name)
 	}
-	if cfg.Extension["project"].Module != "./devcontrol" {
+	if cfg.Extension["project"].Loader != "go" || cfg.Extension["project"].LoaderConfig["module"] != "./devcontrol" {
 		t.Fatalf("unexpected project extension: %+v", cfg.Extension["project"])
 	}
 	if cfg.Service["portable-runtime"].Provider != "runtime.dagger" {
@@ -42,7 +42,7 @@ features = ["jobs", "logs"]
 	}
 }
 
-func TestValidateRequiresExtensionType(t *testing.T) {
+func TestValidateRequiresExtensionLoader(t *testing.T) {
 	cfg := Config{
 		Version: CurrentVersion,
 		Project: Project{Name: "Example"},
@@ -51,7 +51,7 @@ func TestValidateRequiresExtensionType(t *testing.T) {
 		},
 	}
 	if err := Validate(cfg); err == nil {
-		t.Fatal("Validate() expected missing extension type error")
+		t.Fatal("Validate() expected missing extension loader error")
 	}
 }
 
@@ -61,7 +61,7 @@ func TestApplyProfileOverridesExtensionAndService(t *testing.T) {
 		Version: CurrentVersion,
 		Project: Project{Name: "Example"},
 		Extension: map[string]Extension{
-			"environment": {Type: "go", Package: "./extensions/environment/docker/cmd/provider"},
+			"environment": {Loader: "go", LoaderConfig: map[string]any{"module": ".", "package": "./extensions/environment/docker/cmd/provider"}},
 		},
 		Service: map[string]Service{
 			"environment": {Provider: "environment.docker"},
@@ -69,7 +69,7 @@ func TestApplyProfileOverridesExtensionAndService(t *testing.T) {
 		Profile: map[string]Profile{
 			"railway": {
 				Extension: map[string]Extension{
-					"environment": {Type: "go", Package: "./extensions/environment/local/cmd/provider"},
+					"environment": {Loader: "go", LoaderConfig: map[string]any{"module": ".", "package": "./extensions/environment/local/cmd/provider"}},
 				},
 				Service: map[string]Service{
 					"environment": {Provider: "environment.local"},
@@ -81,7 +81,7 @@ func TestApplyProfileOverridesExtensionAndService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Extension["environment"].Package != "./extensions/environment/local/cmd/provider" {
+	if got.Extension["environment"].LoaderConfig["package"] != "./extensions/environment/local/cmd/provider" {
 		t.Fatalf("extension override = %+v", got.Extension["environment"])
 	}
 	if got.Service["environment"].Provider != "environment.local" {
@@ -137,7 +137,7 @@ func TestLoadExtensionSettings(t *testing.T) {
 [project]
 name = "Example"
 [extension.environment]
-type = "go"
+loader = "go"
 module = "."
 package = "./provider"
 [extension.environment.settings]
