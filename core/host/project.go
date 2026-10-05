@@ -93,7 +93,7 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 	if err != nil {
 		return nil, fmt.Errorf("resolve project extension executable: %w", err)
 	}
-	process, err := coreextension.StartProjectProcess(ctx, p, projectExecutable, reg)
+	process, err := coreextension.StartProjectProcess(ctx, p, projectExecutable, projectExtension.Settings, reg)
 	if err != nil {
 		return nil, fmt.Errorf("start project extension: %w", err)
 	}
