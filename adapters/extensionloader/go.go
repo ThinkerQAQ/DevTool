@@ -22,22 +22,33 @@ import (
 // This adapter owns Go-specific build/cache behavior so Core only owns the
 // extension process protocol and lifecycle.
 func Resolve(ctx context.Context, p project.Project, name string, configured config.Extension) (string, error) {
-	switch strings.TrimSpace(configured.Type) {
+	switch strings.TrimSpace(configured.Loader) {
 	case "go":
-		return resolveGo(ctx, p, name, configured)
+		return resolveGo(ctx, p, name, configured.LoaderConfig)
 	default:
-		return "", fmt.Errorf("extension %q loader type %q is unsupported", name, configured.Type)
+		return "", fmt.Errorf("extension %q loader %q is unsupported", name, configured.Loader)
 	}
 }
 
-func resolveGo(ctx context.Context, p project.Project, name string, configured config.Extension) (string, error) {
+func resolveGo(ctx context.Context, p project.Project, name string, loaderConfig map[string]any) (string, error) {
+	var configured struct {
+		Module  string `json:"module"`
+		Package string `json:"package"`
+	}
+	raw, err := json.Marshal(loaderConfig)
+	if err != nil {
+		return "", fmt.Errorf("encode extension.%s.loader_config: %w", name, err)
+	}
+	if err := json.Unmarshal(raw, &configured); err != nil {
+		return "", fmt.Errorf("decode extension.%s.loader_config for go loader: %w", name, err)
+	}
 	module := strings.TrimSpace(configured.Module)
 	pkg := strings.TrimSpace(configured.Package)
 	if module == "" {
-		return "", fmt.Errorf("extension.%s.module is required", name)
+		return "", fmt.Errorf("extension.%s.loader_config.module is required", name)
 	}
 	if pkg == "" {
-		return "", fmt.Errorf("extension.%s.package is required", name)
+		return "", fmt.Errorf("extension.%s.loader_config.package is required", name)
 	}
 
 	moduleDir := filepath.Join(p.Root, filepath.FromSlash(module))
