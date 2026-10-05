@@ -105,8 +105,9 @@ The implemented path resolves/caches the Project Extension executable through `a
 ### Phase B — implemented
 
 - extract development-environment execution behind the generic `environment` Service;
-- provide Docker as `environment.docker`;
-- make CodeGraph and Serena depend on the Environment service instead of Docker code;
+- expose both `command` (resolve a long-lived process command) and `run` (execute a one-shot development command) through that service;
+- provide `environment.local` and `environment.docker` as interchangeable execution backends;
+- make CodeGraph, Serena and project development commands depend on the Environment service instead of a concrete backend;
 - validate declared Extension service requirements when opening a project;
 - run Environment, Dagger, CodeGraph, Serena and SCM as independently configured process extensions;
 - allow process extensions to call required Host services over the same bidirectional RPC session;
@@ -124,16 +125,20 @@ A global `devtool daemon` is not part of this phase. Add it only if repeated CLI
                          DevTool Host
                     config / registry / routing
                               |
-          +-------------------+-------------------+
-          |                   |                   |
-      CodeGraph            Serena/LSP             SCM
-      Extension            Extension            Extension
-          |                   |                   |
-          +--------- reusable processes ----------+
+        +---------------------+----------------------+
+        |                     |                      |
+  Project Extension       CodeGraph              Serena/LSP
+ build/verify/package     Extension              Extension
+        |                     |                      |
+        +---------------------+----------------------+
                               |
-                   reusable project environment
-                              |
-                     configured container image
+                      environment Service
+                       command / run
+                         /       \
+                        /         \
+             environment.local  environment.docker
+                    |                 |
+              current host      reusable container
 ```
 
 The host manages reuse. Capability implementations remain replaceable.
@@ -168,7 +173,7 @@ Kubernetes does not provide DevTool's project/agent semantics:
 - defining project commands and portable runtime contracts;
 - sharing the same capability model between local agents and remote agents;
 - SCM publish semantics and approval boundaries;
-- DevTool self-hosting through the same project-extension/runtime model.
+- DevTool self-hosting through the same Project Extension + configured Environment model.
 
 Therefore Kubernetes is a possible provider below DevTool, not a replacement for DevTool.
 
@@ -381,7 +386,7 @@ The current refactor has met the closure criteria:
 8. ✅ no global daemon is required to obtain the lifecycle reuse achieved in this phase;
 9. ✅ Agent Gateway can list CodeGraph/Serena/SCM tools and then call a CodeGraph tool in the same MCP session.
 
-CI verification also covers Go tests, DevControl tests, real Dagger integration, project inspection, runtime doctor, self-host build, verify and package.
+CI verification also covers Go tests, DevControl tests, real Dagger integration, project inspection, Docker-backed self-host build/N+1/N+2, local-provider self-host build, verify and package. Railway separately verifies the same Project Commands with `environment.local`.
 
 
 ## 15. Lifecycle scope rule: cached handle != persistent process
