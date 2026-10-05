@@ -75,21 +75,17 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		}
 	}
 
-	for _, descriptor := range descriptors {
-		for _, required := range descriptor.Requires {
-			if _, ok := reg.Service(required); !ok {
-				return nil, fmt.Errorf("extension %q requires service %q, but no provider is registered", descriptor.ID, required)
-			}
+	for serviceName, configured := range p.Config.Service {
+		if err := reg.SelectService(serviceName, configured.Provider); err != nil {
+			return nil, fmt.Errorf("configure service %q: %w", serviceName, err)
 		}
 	}
 
-	for serviceName, configured := range p.Config.Service {
-		provider, ok := reg.ServiceProvider(serviceName)
-		if !ok {
-			return nil, fmt.Errorf("configured service %q has no registered provider", serviceName)
-		}
-		if provider != configured.Provider {
-			return nil, fmt.Errorf("service %q expected provider %q, got %q", serviceName, configured.Provider, provider)
+	for _, descriptor := range descriptors {
+		for _, required := range descriptor.Requires {
+			if _, ok := reg.Service(required); !ok {
+				return nil, fmt.Errorf("extension %q requires service %q, but no provider is selected", descriptor.ID, required)
+			}
 		}
 	}
 
