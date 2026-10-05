@@ -8,9 +8,9 @@ DevTool is now structurally aligned with the intended direction:
 
 > micro-kernel + extensibility + configuration-driven provider selection
 
-The architecture is **not yet complete**. Provider registration and selection are now replaceable, but the public Agent capability surface still exposes provider-native tools, and environment-specific settings still leak into higher-level code-intelligence/session contracts.
+The code-intelligence boundary is now closed at the intended abstraction level: provider registration and selection are replaceable, the Agent surface is intent-level, provider-native lifecycle operations remain private, and provider-specific environment settings stay behind generic extension configuration.
 
-The remaining work is refinement rather than a rewrite.
+The remaining work is incremental control-plane cleanup and lifecycle optimization rather than a rewrite.
 
 ## Verified architecture
 
@@ -223,33 +223,24 @@ The selected loader adapter owns interpretation of `loader_config`.
 
 Today the implemented loader is `go`, and only `adapters/extensionloader` understands `module/package`. Future prebuilt/remote loaders can use different loader config without widening Core's schema.
 
-## P1 — Code Intelligence service methods are provider-shaped
+## Resolved — Code Intelligence service methods are semantic
 
-The internal service contract still exposes:
+The shared code-intelligence service contract now exposes stable semantic operations:
 
 ```text
-mcp
-sync
-query
+doctor
 verify
-```
-
-These operations reflect current provider mechanics rather than stable engineering semantics.
-
-Target:
-
-```text
-definition
-references
-symbols
-diagnostics
 search
-callers
-callees
-impact
+symbols
+references
+diagnostics
 ```
 
-Lifecycle operations such as MCP startup or index synchronization should stay private to providers/runtime management.
+Provider mechanics such as raw MCP startup, index synchronization, and arbitrary provider query dispatch are no longer part of the shared service contract.
+
+CodeGraph may reindex internally while implementing `verify`; Serena may run a private MCP server internally while implementing realtime semantic operations; Sourcegraph owns its remote index lifecycle. Those mechanics do not widen the Agent or shared service API.
+
+Future semantics such as `definition`, `callers`, `callees`, or `impact` should only be added when DevTool has a stable cross-provider contract for them.
 
 ## P1 — Code CLI is still a built-in domain surface
 
