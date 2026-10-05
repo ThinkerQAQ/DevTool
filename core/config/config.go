@@ -41,6 +41,11 @@ type UI struct {
 	Features []string `toml:"features" json:"features"`
 }
 
+type Profile struct {
+	Extension map[string]Extension `toml:"extension" json:"extension,omitempty"`
+	Service   map[string]Service   `toml:"service" json:"service,omitempty"`
+}
+
 type Config struct {
 	Version   int                  `toml:"version" json:"version"`
 	Project   Project              `toml:"project" json:"project"`
@@ -49,6 +54,7 @@ type Config struct {
 	Dev       Dev                  `toml:"dev" json:"dev,omitempty"`
 	Code      Code                 `toml:"code" json:"code,omitempty"`
 	UI        UI                   `toml:"ui" json:"ui"`
+	Profile   map[string]Profile   `toml:"profile" json:"profile,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -60,8 +66,36 @@ func Load(path string) (Config, error) {
 	if err := toml.Unmarshal(raw, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if profile := strings.TrimSpace(os.Getenv("DEVTOOL_PROFILE")); profile != "" {
+		var err error
+		cfg, err = ApplyProfile(cfg, profile)
+		if err != nil {
+			return Config{}, fmt.Errorf("apply profile %q: %w", profile, err)
+		}
+	}
 	if err := Validate(cfg); err != nil {
 		return Config{}, fmt.Errorf("validate %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func ApplyProfile(cfg Config, name string) (Config, error) {
+	name = strings.TrimSpace(name)
+	profile, ok := cfg.Profile[name]
+	if !ok {
+		return Config{}, fmt.Errorf("profile %q is not configured", name)
+	}
+	if cfg.Extension == nil {
+		cfg.Extension = map[string]Extension{}
+	}
+	for key, value := range profile.Extension {
+		cfg.Extension[key] = value
+	}
+	if cfg.Service == nil {
+		cfg.Service = map[string]Service{}
+	}
+	for key, value := range profile.Service {
+		cfg.Service[key] = value
 	}
 	return cfg, nil
 }
