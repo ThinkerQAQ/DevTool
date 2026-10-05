@@ -5,6 +5,7 @@ import "encoding/json"
 const (
 	ServiceName   = "environment"
 	MethodCommand = "command"
+	MethodRun     = "run"
 	WorkspaceRoot = "/workspace"
 )
 
@@ -20,6 +21,12 @@ type CommandSpec struct {
 	Args    []string `json:"args,omitempty"`
 	Dir     string   `json:"dir,omitempty"`
 	Env     []string `json:"env,omitempty"`
+}
+
+type RunResult struct {
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
 }
 
 func Encode(value any) (json.RawMessage, error) {
