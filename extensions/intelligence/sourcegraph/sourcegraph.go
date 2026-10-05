@@ -40,18 +40,11 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 		ID:         ExtensionID,
 		Kind:       extensioncontract.KindCodeIntelligence,
 		Provides:   []string{codeintelligence.IndexedServiceName},
-		AgentTools: e.remote != nil,
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
-	if err := reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
-		return err
-	}
-	if e.remote == nil {
-		return nil
-	}
-	return reg.ProvideAgentTools(ExtensionID, prefixedProvider{remote: e.remote})
+	return reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke))
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
