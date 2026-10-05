@@ -15,10 +15,9 @@ type Project struct {
 }
 
 type Extension struct {
-	Type     string         `toml:"type" json:"type"`
-	Module   string         `toml:"module" json:"module,omitempty"`
-	Package  string         `toml:"package" json:"package,omitempty"`
-	Settings map[string]any `toml:"settings" json:"settings,omitempty"`
+	Loader       string         `toml:"loader" json:"loader"`
+	LoaderConfig map[string]any `toml:"loader_config" json:"loader_config,omitempty"`
+	Settings     map[string]any `toml:"settings" json:"settings,omitempty"`
 }
 
 type Service struct {
@@ -107,8 +106,8 @@ func Validate(cfg Config) error {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("extension name is required")
 		}
-		if strings.TrimSpace(ext.Type) == "" {
-			return fmt.Errorf("extension.%s.type is required", name)
+		if strings.TrimSpace(ext.Loader) == "" {
+			return fmt.Errorf("extension.%s.loader is required", name)
 		}
 	}
 	for name, service := range cfg.Service {
