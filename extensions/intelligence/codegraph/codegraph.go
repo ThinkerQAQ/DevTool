@@ -46,7 +46,7 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
 		ID:         ExtensionID,
 		Kind:       extensioncontract.KindCodeIntelligence,
-		Provides:   []string{codeintelligence.GraphServiceName},
+		Provides:   []string{codeintelligence.IndexedServiceName},
 		Requires:   []string{environmentcontract.ServiceName},
 		AgentTools: true,
 	}
@@ -54,7 +54,7 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	e.services = reg
-	if err := reg.ProvideService(codeintelligence.GraphServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
+	if err := reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
 		return err
 	}
 	if e.bridge == nil {
