@@ -77,6 +77,34 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			Provider: ExtensionID,
 			Output:   "index lifecycle is managed by Sourcegraph",
 		})
+	case codeintelligence.MethodSearch:
+		if e.remote == nil {
+			return nil, fmt.Errorf("Sourcegraph MCP is not configured; set SOURCEGRAPH_MCP_URL")
+		}
+		var request codeintelligence.SearchRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode Sourcegraph search request: %w", err)
+		}
+		query := strings.TrimSpace(request.Query)
+		if query == "" {
+			return nil, fmt.Errorf("Sourcegraph search query is required")
+		}
+		if repository := strings.TrimSpace(request.Repository); repository != "" {
+			query += " repo:" + repository
+		}
+		if revision := strings.TrimSpace(request.Revision); revision != "" {
+			query += " rev:" + revision
+		}
+		limit := request.Limit
+		if limit <= 0 {
+			limit = 20
+		}
+		query += fmt.Sprintf(" count:%d", limit)
+		args, err := json.Marshal(map[string]any{"query": query})
+		if err != nil {
+			return nil, err
+		}
+		return e.remote.CallTool(ctx, agentsdk.Session{}, "keyword_search", args)
 	case codeintelligence.MethodQuery:
 		if e.remote == nil {
 			return nil, fmt.Errorf("Sourcegraph MCP is not configured; set SOURCEGRAPH_MCP_URL")
