@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/contract"
@@ -33,6 +34,19 @@ type ProjectHost struct {
 	readiness  []ReadinessProviderEntry
 }
 
+func extensionIsSelected(cfg config.Config, extension config.Extension) bool {
+	id := strings.TrimSpace(extension.ID)
+	if id == "" {
+		return true
+	}
+	for _, selected := range cfg.Service {
+		if strings.TrimSpace(selected.Provider) == id {
+			return true
+		}
+	}
+	return false
+}
+
 func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) (*ProjectHost, error) {
 	p, err := project.Discover(start)
 	if err != nil {
@@ -59,8 +73,8 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 	}()
 
 	names := make([]string, 0, len(p.Config.Extension))
-	for name := range p.Config.Extension {
-		if name != "project" {
+	for name, configured := range p.Config.Extension {
+		if name != "project" && extensionIsSelected(p.Config, configured) {
 			names = append(names, name)
 		}
 	}

@@ -15,6 +15,7 @@ type Project struct {
 }
 
 type Extension struct {
+	ID           string         `toml:"id" json:"id,omitempty"`
 	Loader       string         `toml:"loader" json:"loader"`
 	LoaderConfig map[string]any `toml:"loader_config" json:"loader_config,omitempty"`
 	Settings     map[string]any `toml:"settings" json:"settings,omitempty"`
