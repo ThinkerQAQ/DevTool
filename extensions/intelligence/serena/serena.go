@@ -89,7 +89,9 @@ func (e *Extension) CheckReadiness(ctx context.Context, request readiness.Reques
 	if _, err := e.verify(ctx, workspace); err != nil {
 		kind := readiness.KindVerificationFailed
 		resource := "serena-workspace"
-		if strings.Contains(err.Error(), "gopls") && (strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "executable")) {
+		errText := strings.ToLower(err.Error())
+		if strings.Contains(errText, "gopls") &&
+			(strings.Contains(errText, "not installed") || strings.Contains(errText, "not found") || strings.Contains(errText, "executable")) {
 			kind = readiness.KindMissingDependency
 			resource = "gopls"
 		}
@@ -265,7 +267,8 @@ func (e *Extension) combinedOutput(ctx context.Context, workspace codeintelligen
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("serena: %w: %s", err, strings.TrimSpace(stderr.String()))
+		detail := strings.TrimSpace(strings.Join([]string{stdout.String(), stderr.String()}, "\n"))
+		return nil, fmt.Errorf("serena: %w: %s", err, detail)
 	}
 	return stdout.Bytes(), nil
 }
