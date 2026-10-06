@@ -412,3 +412,106 @@ representations before they cross the service boundary.
 The largest measured result-budget waste was transport duplication inside the realtime
 provider. Removing it cuts realtime response bytes by ~61% without changing Agent tools,
 provider selection, or requesting additional source bodies.
+
+
+## Phase 5 — Remote Connector / MCP decision
+
+### Measurement
+
+A local DevTool HTTP Agent Gateway was started on loopback and the same trivial
+`tools/list` request was measured in two paths.
+
+Host-local HTTP, 30 samples:
+
+- p50: **0.624 ms**
+- p95: **0.883 ms**
+- first/cold outlier: 106 ms
+
+Remote Desktop Commander command path, 12 samples, where each connector operation caused
+the Codespace to issue the same loopback `tools/list` request:
+
+- p50: **2.494 s**
+- p95: **3.339 s**
+- mean: **2.636 s**
+
+The large difference is not inside DevTool's MCP HTTP implementation. It includes the
+external Remote Connector command round-trip and remote process/shell launch.
+
+For the active `code_context` provider path:
+
+- Phase-0 MCP lock wait was effectively zero;
+- warm CodeGraph provider work is milliseconds after lifecycle reuse;
+- warm Serena provider work is ~0.1–0.4 s depending on the requested refinement;
+- `core/agent/mcpbridge/http.go` is not on the default CodeGraph + Serena path. It is
+  currently used by replaceable remote providers such as Sourcegraph.
+
+### Decision
+
+**Do not change `core/agent/mcpbridge/http.go` for this optimization series.**
+
+The >15% overhead observed through Remote Desktop Commander is external to DevTool.
+Changing DevTool's HTTP mutex, batching unrelated calls, or adding another proxy would not
+remove that connector/shell round-trip and would add a second transport/control-plane
+concern without evidence of an internal bottleneck.
+
+The correct architecture remains:
+
+```text
+Remote Agent / Connector
+  -> persistent DevTool Agent Gateway
+  -> code_context
+  -> configured service contracts
+  -> replaceable providers
+```
+
+The remote integration should reuse the persistent Agent Gateway instead of spawning a
+new remote shell command per stable-capability call. That is an integration/infrastructure
+concern, not a new DevTool proxy layer.
+
+### Phase 5 conclusion
+
+Transport optimization inside DevTool is **not justified** by the measured data.
+
+No Phase-5 transport code change was made.
+
+---
+
+## Controlled Repository Understanding rerun
+
+After Phases 0–4, the six fixed IDFlow architecture questions were rerun against a fresh
+copy of fixed baseline SHA `3a652d74f7c4e34ab29343c33042e548cee248a8`.
+
+One persistent DevTool Agent Gateway process was used. No raw file read, grep/find, or
+provider-native Agent tool was required for candidate discovery.
+
+| Question | code_context latency | Useful top-8 candidate |
+| --- | ---: | --- |
+| development control-plane entry | 6.595 s cold | yes |
+| legacy/bootstrap | 0.012 s warm | yes |
+| build/verify/package | 0.014 s warm | yes |
+| Project Extension boundary | 0.014 s warm | yes |
+| DevTool provider responsibility | 0.015 s warm | yes |
+| minimal migration surface | 0.018 s warm | yes |
+
+Total stable-capability execution time for all six questions:
+
+**6.669 s**
+
+Useful candidate hit rate:
+
+**6/6 (100%)**
+
+Reference benchmark architecture-map wall-clock:
+
+- Group B Remote Workspace: **3m53s**
+- Group C before optimization: **7m50s**
+
+The controlled optimized provider/capability execution time is now far below the B
+reference budget. A full human/Agent architecture-map wall-clock contains reasoning and
+connector overhead and is therefore not directly equivalent to the 6.669 s provider
+execution measurement, but the original DevTool warm-path bottleneck is no longer the
+dominant factor.
+
+This satisfies the stop condition for further code-path complexity: the remaining large
+round-trip cost measured in this environment is external Remote Connector infrastructure,
+not the stable capability or provider composition.
