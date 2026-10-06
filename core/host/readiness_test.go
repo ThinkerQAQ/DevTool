@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/registry"
 	coreservice "github.com/thinkerqaq/devtool/core/service"
 	"github.com/thinkerqaq/devtool/sdk/readiness"
@@ -57,5 +58,23 @@ func TestReadinessProvidersIncludesOnlySelectedServiceProvider(t *testing.T) {
 	}
 	if got[0].ExtensionID != "intelligence.codegraph" {
 		t.Fatalf("ReadinessProviders()[0] = %q, want intelligence.codegraph", got[0].ExtensionID)
+	}
+}
+
+func TestExtensionIsSelected(t *testing.T) {
+	cfg := config.Config{
+		Service: map[string]config.Service{
+			"code-indexed": {Provider: "intelligence.codegraph"},
+		},
+	}
+
+	if !extensionIsSelected(cfg, config.Extension{}) {
+		t.Fatal("extension without id should remain active")
+	}
+	if !extensionIsSelected(cfg, config.Extension{ID: "intelligence.codegraph"}) {
+		t.Fatal("selected provider should be active")
+	}
+	if extensionIsSelected(cfg, config.Extension{ID: "intelligence.sourcegraph"}) {
+		t.Fatal("unselected provider should be inactive")
 	}
 }
