@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
+	"github.com/thinkerqaq/devtool/sdk/readiness"
 )
 
 func TestDoctorUsesConfiguredExecutable(t *testing.T) {
@@ -60,6 +62,43 @@ echo "health ok"
 	}
 	if response.Provider != ExtensionID || response.Output != "health ok" {
 		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestReadinessClassifiesMissingGoplsFromSerenaStdout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is unix-only")
+	}
+	path := writeFixture(t, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "Serena 1.test"
+  exit 0
+fi
+if [ "$1" = "project" ] && [ "$2" = "health-check" ]; then
+  echo "go: Found a Go version but gopls is not installed."
+  echo "Please install gopls and add it to PATH."
+  exit 1
+fi
+exit 2
+`)
+	root := t.TempDir()
+	e := &Extension{executable: path}
+	report, err := e.CheckReadiness(context.Background(), readiness.Request{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Ready {
+		t.Fatal("report unexpectedly ready")
+	}
+	if len(report.Issues) != 1 {
+		t.Fatalf("issues = %#v", report.Issues)
+	}
+	issue := report.Issues[0]
+	if issue.Kind != readiness.KindMissingDependency || issue.Resource != "gopls" {
+		t.Fatalf("issue = %#v", issue)
+	}
+	if !strings.Contains(strings.ToLower(issue.Message), "gopls") {
+		t.Fatalf("message = %q; want gopls detail", issue.Message)
 	}
 }
 
