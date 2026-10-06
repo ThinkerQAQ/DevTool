@@ -117,6 +117,36 @@ Without `--allow-unauthenticated`, the configured token environment variable mus
 
 ---
 
+## Structured tracing
+
+DevTool can emit generic timing spans for Agent Gateway operations and the
+`code_context` capability path. Tracing is disabled unless a trace file is
+explicitly set for the process:
+
+```bash
+DEVTOOL_TRACE_FILE=.devtool/traces/benchmark.jsonl \
+DEVTOOL_RUN_ID=<run-id> \
+devtool agent mcp --context codex
+```
+
+`DEVTOOL_TRACE_FILE` selects an append-only JSON Lines file. Relative paths are
+resolved from the DevTool process working directory. `DEVTOOL_RUN_ID` is an
+optional correlation label written to every span; it does not enable tracing by
+itself.
+
+Each line records span identifiers, parent linkage, layer, operation,
+provider/service identity when available, duration, status, request/response
+byte counts, run ID and timestamp. Trace context follows the existing extension
+process protocol, so one `tools/call` can be reconstructed across the capability,
+service and provider processes.
+
+Trace output is metadata-only. It does not include source content, prompts,
+tool argument bodies, authorization headers, tokens, credentials, secrets or
+secret-bearing environment values. Protect the trace file as operational data
+and do not commit benchmark traces before reviewing them.
+
+---
+
 ## Project commands
 
 Any first argument not recognized as a Core command is resolved through the configured Project Extension.

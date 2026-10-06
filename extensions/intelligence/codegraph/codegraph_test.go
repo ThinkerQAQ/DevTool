@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 )
 
@@ -98,6 +99,77 @@ printf '{"ok":true}'
 	}
 }
 
+func TestMCPCommandUsesPersistentGraphMode(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "root")
+	if err := os.MkdirAll(filepath.Join(root, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e := New()
+	e.executable = "codegraph-fixture"
+	t.Cleanup(func() { _ = e.Close() })
+
+	cmd, err := e.mcpCommand(context.Background(), agentsdk.Session{
+		ProjectRoot: root,
+		Workspaces:  []string{root, "child"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd.Args[1:], " ")
+	for _, want := range []string{"--mcp", "--graph-only", "--workspace " + root, "--workspace " + filepath.Join(root, "child")} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args = %q; missing %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "--run-tool") {
+		t.Fatalf("persistent MCP command unexpectedly uses one-shot mode: %q", joined)
+	}
+}
+
+func TestWorkspaceFingerprintChangesWithSourceState(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "probe.go")
+	if err := os.WriteFile(path, []byte("package probe\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := codeintelligence.Workspace{Root: root}
+	first, err := workspaceFingerprint(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package probe\nfunc Changed() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspaceFingerprint(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("fingerprint did not change after source edit")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	third, err := workspaceFingerprint(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == third {
+		t.Fatal("fingerprint did not change after source deletion")
+	}
+}
+
+func TestUnwrapMCPToolResult(t *testing.T) {
+	raw := json.RawMessage(`{"content":[{"type":"text","text":"{\"results\":[]}"}]}`)
+	got, err := unwrapMCPToolResult(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"results":[]}` {
+		t.Fatalf("got = %s", got)
+	}
+}
+
 func TestSearchMapsToSymbolSearch(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is unix-only")
@@ -147,4 +219,37 @@ func writeFixture(t *testing.T, script string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestDiscoveryKeywordsRemoveGenericInstructionWords(t *testing.T) {
+	got := discoveryKeywords("Which code is legacy/bootstrap that should be deleted after migration?")
+	joined := strings.Join(got, ",")
+	for _, want := range []string{"legacy", "bootstrap", "migration"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("keywords = %v; missing %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{"code", "deleted", "should", "after", "which"} {
+		for _, keyword := range got {
+			if keyword == unwanted {
+				t.Fatalf("keywords = %v; contains generic word %q", got, unwanted)
+			}
+		}
+	}
+}
+
+func TestPatternDiscoveryRewardsMultipleObjectiveTerms(t *testing.T) {
+	raw := json.RawMessage(`{"matches":[
+		{"name":"printUsage","kind":"function","path":"go/cmd/devtool/main.go","line_start":10,"matched_in":"body","matched_text":"development operations use this control plane entry"},
+		{"name":"handleControl","kind":"function","path":"go/browser/control.go","line_start":20,"matched_in":"name","matched_text":"control request"}
+	]}`)
+	candidates := map[string]discoveryCandidate{}
+	keywords := []string{"development", "control", "plane", "entry"}
+	mergePatternCandidates(candidates, raw, keywords)
+
+	main := candidates["go/cmd/devtool/main.go\x00printUsage"]
+	other := candidates["go/browser/control.go\x00handleControl"]
+	if main.Score <= other.Score {
+		t.Fatalf("multi-term score %.1f <= single-term score %.1f", main.Score, other.Score)
+	}
 }

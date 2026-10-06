@@ -1,6 +1,10 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
+)
 
 type MessageType string
 
@@ -13,11 +17,12 @@ const (
 )
 
 type Envelope struct {
-	ID      string          `json:"id,omitempty"`
-	ReplyTo string          `json:"reply_to,omitempty"`
-	Type    MessageType     `json:"type"`
-	Method  string          `json:"method,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
+	ID      string                `json:"id,omitempty"`
+	ReplyTo string                `json:"reply_to,omitempty"`
+	Type    MessageType           `json:"type"`
+	Method  string                `json:"method,omitempty"`
+	Payload json.RawMessage       `json:"payload,omitempty"`
+	Trace   *devtooltrace.Carrier `json:"trace,omitempty"`
 }
 
 const (

@@ -13,10 +13,9 @@ const (
 )
 
 type Workspace struct {
-	Root             string   `json:"root"`
-	Workspaces       []string `json:"workspaces,omitempty"`
+	Root       string   `json:"root"`
+	Workspaces []string `json:"workspaces,omitempty"`
 }
-
 
 type DoctorResponse struct {
 	Provider   string `json:"provider"`
@@ -29,13 +28,13 @@ type VerifyResponse struct {
 	Output   string `json:"output,omitempty"`
 }
 
-
 type SearchRequest struct {
 	Workspace
 	Query      string `json:"query"`
 	Repository string `json:"repository,omitempty"`
 	Revision   string `json:"revision,omitempty"`
 	Limit      int    `json:"limit,omitempty"`
+	Discovery  bool   `json:"discovery,omitempty"`
 }
 
 type SymbolRequest struct {

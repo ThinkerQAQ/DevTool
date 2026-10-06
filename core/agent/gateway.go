@@ -14,6 +14,7 @@ import (
 
 	"github.com/thinkerqaq/devtool/core/registry"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 const protocolVersion = "2025-06-18"
@@ -58,7 +59,6 @@ func (g *Gateway) Serve(ctx context.Context, in io.Reader, out io.Writer) error 
 	}
 	return scanner.Err()
 }
-
 
 func (g *Gateway) HTTPHandler(token string) http.Handler {
 	token = strings.TrimSpace(token)
@@ -142,10 +142,19 @@ func (g *Gateway) handle(ctx context.Context, request rpcRequest) rpcResponse {
 		if err := json.Unmarshal(request.Params, &params); err != nil {
 			return errorResponse(request.ID, -32602, "invalid tools/call params")
 		}
+		ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+			Name:         "tools/call",
+			Layer:        "gateway",
+			Tool:         params.Name,
+			RequestBytes: len(params.Arguments),
+		})
 		result, err := g.callTool(ctx, params.Name, params.Arguments)
 		if err != nil {
-			return successRawResponse(request.ID, toolErrorResult(err))
+			failure := toolErrorResult(err)
+			span.End(len(failure), err)
+			return successRawResponse(request.ID, failure)
 		}
+		span.End(len(result), nil)
 		return successRawResponse(request.ID, result)
 	default:
 		return errorResponse(request.ID, -32601, fmt.Sprintf("method %q not found", request.Method))

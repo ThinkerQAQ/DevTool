@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
-	service "github.com/thinkerqaq/devtool/sdk/service"
 	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/envexec"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	service "github.com/thinkerqaq/devtool/sdk/service"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 const ExtensionID = "intelligence.lsp.serena"
@@ -70,7 +71,17 @@ func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Sessio
 	)
 }
 
-func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
+func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (result json.RawMessage, err error) {
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:         "Serena/LSP",
+		Layer:        "provider",
+		Service:      codeintelligence.RealtimeServiceName,
+		Provider:     ExtensionID,
+		Method:       method,
+		RequestBytes: len(payload),
+	})
+	defer func() { span.End(len(result), err) }()
+
 	switch method {
 	case codeintelligence.MethodDoctor:
 		var workspace codeintelligence.Workspace
@@ -103,7 +114,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err != nil {
 			return nil, err
 		}
-		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_symbol", args)
+		raw, err := e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_symbol", args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrapMCPToolResult(raw)
 	case codeintelligence.MethodReferences:
 		var request codeintelligence.ReferencesRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
@@ -122,7 +137,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err != nil {
 			return nil, err
 		}
-		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_referencing_symbols", args)
+		raw, err := e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_referencing_symbols", args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrapMCPToolResult(raw)
 	case codeintelligence.MethodDiagnostics:
 		var request codeintelligence.DiagnosticsRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
@@ -135,7 +154,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err != nil {
 			return nil, err
 		}
-		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "get_diagnostics_for_file", args)
+		raw, err := e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "get_diagnostics_for_file", args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrapMCPToolResult(raw)
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
@@ -195,6 +218,40 @@ func (e *Extension) combinedOutput(ctx context.Context, workspace codeintelligen
 		return nil, fmt.Errorf("serena: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+func unwrapMCPToolResult(raw json.RawMessage) (json.RawMessage, error) {
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		StructuredContent struct {
+			Result string `json:"result"`
+		} `json:"structuredContent"`
+		IsError bool `json:"isError,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return append(json.RawMessage(nil), raw...), nil
+	}
+
+	text := strings.TrimSpace(result.StructuredContent.Result)
+	if text == "" && len(result.Content) != 0 {
+		text = strings.TrimSpace(result.Content[0].Text)
+	}
+	if result.IsError {
+		if text == "" {
+			text = "Serena MCP tool returned an error"
+		}
+		return nil, fmt.Errorf("%s", text)
+	}
+	if text != "" && json.Valid([]byte(text)) {
+		return json.RawMessage(text), nil
+	}
+	if text != "" {
+		return json.Marshal(text)
+	}
+	return append(json.RawMessage(nil), raw...), nil
 }
 
 func sessionForWorkspace(workspace codeintelligence.Workspace) agentsdk.Session {
