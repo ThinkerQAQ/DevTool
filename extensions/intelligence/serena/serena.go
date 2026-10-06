@@ -114,7 +114,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err != nil {
 			return nil, err
 		}
-		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_symbol", args)
+		raw, err := e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_symbol", args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrapMCPToolResult(raw)
 	case codeintelligence.MethodReferences:
 		var request codeintelligence.ReferencesRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
@@ -133,7 +137,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err != nil {
 			return nil, err
 		}
-		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_referencing_symbols", args)
+		raw, err := e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "find_referencing_symbols", args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrapMCPToolResult(raw)
 	case codeintelligence.MethodDiagnostics:
 		var request codeintelligence.DiagnosticsRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
@@ -146,7 +154,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err != nil {
 			return nil, err
 		}
-		return e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "get_diagnostics_for_file", args)
+		raw, err := e.bridge.CallTool(ctx, sessionForWorkspace(request.Workspace), "get_diagnostics_for_file", args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrapMCPToolResult(raw)
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
@@ -206,6 +218,40 @@ func (e *Extension) combinedOutput(ctx context.Context, workspace codeintelligen
 		return nil, fmt.Errorf("serena: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+func unwrapMCPToolResult(raw json.RawMessage) (json.RawMessage, error) {
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		StructuredContent struct {
+			Result string `json:"result"`
+		} `json:"structuredContent"`
+		IsError bool `json:"isError,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return append(json.RawMessage(nil), raw...), nil
+	}
+
+	text := strings.TrimSpace(result.StructuredContent.Result)
+	if text == "" && len(result.Content) != 0 {
+		text = strings.TrimSpace(result.Content[0].Text)
+	}
+	if result.IsError {
+		if text == "" {
+			text = "Serena MCP tool returned an error"
+		}
+		return nil, fmt.Errorf("%s", text)
+	}
+	if text != "" && json.Valid([]byte(text)) {
+		return json.RawMessage(text), nil
+	}
+	if text != "" {
+		return json.Marshal(text)
+	}
+	return append(json.RawMessage(nil), raw...), nil
 }
 
 func sessionForWorkspace(workspace codeintelligence.Workspace) agentsdk.Session {

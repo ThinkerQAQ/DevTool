@@ -71,3 +71,25 @@ func writeFixture(t *testing.T, script string) string {
 	}
 	return path
 }
+
+func TestUnwrapMCPToolResultPrefersStructuredResult(t *testing.T) {
+	raw := json.RawMessage(`{
+		"content":[{"type":"text","text":"[{\"name_path\":\"ProjectHost\"}]"}],
+		"isError":false,
+		"structuredContent":{"result":"[{\"name_path\":\"ProjectHost\"}]"}
+	}`)
+	got, err := unwrapMCPToolResult(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `[{"name_path":"ProjectHost"}]` {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestUnwrapMCPToolResultPropagatesToolError(t *testing.T) {
+	raw := json.RawMessage(`{"content":[{"type":"text","text":"boom"}],"isError":true}`)
+	if _, err := unwrapMCPToolResult(raw); err == nil {
+		t.Fatal("expected Serena tool error")
+	}
+}

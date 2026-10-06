@@ -340,3 +340,75 @@ For the fixed six-question Repository Understanding probe:
 The next phase should focus on result/context budget rather than adding more search
 primitives. The warm discovery provider time is already small compared with human/Agent
 reasoning and follow-up context consumption.
+
+
+## Phase 4 — Context/result budget
+
+### Before
+
+Serena returned the raw child-MCP tool envelope through the realtime service. The same
+semantic payload was commonly present twice:
+
+- once in `content[0].text`;
+- again in `structuredContent.result`.
+
+Representative pre-Phase-4 realtime service response sizes from the enriched
+`ProjectHost` probe:
+
+| Realtime operation | Before |
+| --- | ---: |
+| symbols | 957 bytes |
+| references | 5,051 bytes |
+| diagnostics | 703 bytes |
+| total realtime payload | 6,711 bytes |
+
+The duplicated MCP transport shape had no additional value to `code_context`.
+
+### Change
+
+The Serena provider now unwraps its child-MCP result before returning across the stable
+realtime service boundary.
+
+Preference order is deterministic:
+
+1. `structuredContent.result`;
+2. first textual content item;
+3. original payload only when no compact semantic result is available.
+
+JSON semantic results are returned as JSON. Provider-native MCP envelope metadata is not
+forwarded to the Agent.
+
+No source body is added by this change, and `include_body=false` remains respected.
+
+### After
+
+Measured realtime service response sizes:
+
+| Realtime operation | Before | After | Reduction |
+| --- | ---: | ---: | ---: |
+| symbols | 957 B | 132 B | 86% |
+| references | 5,051 B | 2,251 B | 55% |
+| diagnostics | 703 B | 256 B | 64% |
+| total realtime payload | 6,711 B | 2,639 B | 61% |
+
+Warm enriched latency remained provider-bound:
+
+- measured warm call: 0.375 s;
+- symbols: 0.103 s;
+- references: 0.140 s;
+- diagnostics: 0.130 s.
+
+The indexed result was intentionally not truncated beyond the caller's existing `limit`.
+The existing request contract therefore remains the context budget control.
+
+Cross-provider semantic de-duplication was not implemented by teaching the capability
+CodeGraph- or Serena-specific response fields. Doing that would violate replaceable-provider
+boundaries. Discovery candidates are already deterministically de-duplicated inside the
+indexed provider, while the realtime provider now removes exact duplicate MCP envelope
+representations before they cross the service boundary.
+
+### Phase 4 conclusion
+
+The largest measured result-budget waste was transport duplication inside the realtime
+provider. Removing it cuts realtime response bytes by ~61% without changing Agent tools,
+provider selection, or requesting additional source bodies.
