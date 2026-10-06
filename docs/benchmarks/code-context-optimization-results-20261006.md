@@ -236,3 +236,107 @@ to ~4 ms, while realtime work dominates the remaining ~0.26–0.36 s.
 
 This phase therefore improves the causal path without claiming a large warm-path gain
 that the measurements do not support.
+
+
+## Phase 3 — Objective-only repository discovery
+
+### Before
+
+Objective-only `code_context` forwarded the full natural-language objective directly to
+`codegraph_symbol_search`. On the six fixed IDFlow architecture questions this produced
+useful top-8 candidates for 4/6 questions.
+
+The weak cases were:
+
+- control-plane discovery: the top results were dominated by unrelated symbols containing
+  "control";
+- minimal migration surface: the top results did not include the development-control-plane
+  files that actually define the migration boundary.
+
+Measured on a fresh fixed-SHA IDFlow harness after Phase 2:
+
+| Question | Latency | Useful top-8 candidate |
+| --- | ---: | --- |
+| control-plane entry | 7.495 s cold | no |
+| legacy/bootstrap | 0.004 s warm | yes |
+| build/verify/package | 0.005 s warm | yes |
+| Project Extension boundary | 0.003 s warm | yes |
+| provider responsibility | 0.003 s warm | yes |
+| minimal migration surface | 0.004 s warm | no |
+
+Useful candidate hit rate: **4/6 (67%)**.
+
+### Change
+
+Objective-only requests now mark indexed search as repository discovery while preserving
+the same `code_context` Agent tool.
+
+The CodeGraph provider adapts that internal service intent using existing CodeGraph
+primitives:
+
+- focused symbol search;
+- repository pattern search;
+- entry-point discovery when the objective indicates entry/start/control/bootstrap;
+- deterministic candidate scoring, de-duplication, and test-file penalty.
+
+No provider-native tool is exposed to the Agent.
+
+Query normalization is generic token/stop-word normalization; there is no IDFlow-specific
+path, symbol, or benchmark-answer table.
+
+The first focused symbol query intentionally precedes the broader pattern query. Measurement
+showed pattern search is a more expensive CodeGraph cold path; symbol search warms the
+persistent provider first and avoids making repository-pattern indexing the first operation.
+
+### After
+
+On the same six fixed IDFlow questions, the top-8 candidates now include relevant
+development-boundary files for all six questions.
+
+Representative hits:
+
+- control-plane: `go/cmd/devtool/main.go:printUsage` ranked #1;
+- legacy/bootstrap: `code_tools.go:runCodeBootstrap` and
+  `extension.go:extensionBootstrap`;
+- build/verify/package: `validation.go:runBuild`;
+- Project Extension boundary: `extension.go` and project-root helpers;
+- provider responsibility: `main.go:runCapabilities` plus local code-intelligence
+  bootstrap symbols;
+- migration surface: `code.go:runCodeStatus` appears in the top-8 candidate set,
+  providing a development-control-plane anchor for follow-up refinement.
+
+Useful candidate hit rate: **6/6 (100%)**.
+
+Warm provider timings after discovery is initialized:
+
+| Question | Latency |
+| --- | ---: |
+| control-plane entry | 0.684 s first process call on an existing index |
+| legacy/bootstrap | 0.016 s |
+| build/verify/package | 0.017 s |
+| Project Extension boundary | 0.014 s |
+| provider responsibility | 0.015 s |
+| minimal migration surface | 0.017 s |
+
+A separate fresh-root measurement recorded the first discovery call at **8.461 s** versus
+the Phase-2 fresh-root symbol-search baseline of **7.495 s**. The cold path therefore
+regresses by ~0.97 s. This is accepted for this phase because the optimization target is the
+persistent warm development node, and candidate quality rises from 67% to 100% while warm
+discovery remains tens of milliseconds.
+
+### Phase 3 conclusion
+
+Objective-only discovery now returns repository-level candidates rather than treating a
+natural-language architecture question as one symbol name.
+
+For the fixed six-question Repository Understanding probe:
+
+- Agent-visible calls needed: 6 objective-only calls;
+- useful top-8 hit rate: 4/6 -> 6/6;
+- provider-native Agent tools: 0;
+- raw file/grep fallback required for candidate discovery: 0;
+- wrong-turn questions at candidate-discovery level: 2 -> 0.
+
+The next phase should focus on result/context budget rather than adding more search
+primitives. The warm discovery provider time is already small compared with human/Agent
+reasoning and follow-up context consumption.

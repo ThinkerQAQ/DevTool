@@ -220,3 +220,36 @@ func writeFixture(t *testing.T, script string) string {
 	}
 	return path
 }
+
+func TestDiscoveryKeywordsRemoveGenericInstructionWords(t *testing.T) {
+	got := discoveryKeywords("Which code is legacy/bootstrap that should be deleted after migration?")
+	joined := strings.Join(got, ",")
+	for _, want := range []string{"legacy", "bootstrap", "migration"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("keywords = %v; missing %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{"code", "deleted", "should", "after", "which"} {
+		for _, keyword := range got {
+			if keyword == unwanted {
+				t.Fatalf("keywords = %v; contains generic word %q", got, unwanted)
+			}
+		}
+	}
+}
+
+func TestPatternDiscoveryRewardsMultipleObjectiveTerms(t *testing.T) {
+	raw := json.RawMessage(`{"matches":[
+		{"name":"printUsage","kind":"function","path":"go/cmd/devtool/main.go","line_start":10,"matched_in":"body","matched_text":"development operations use this control plane entry"},
+		{"name":"handleControl","kind":"function","path":"go/browser/control.go","line_start":20,"matched_in":"name","matched_text":"control request"}
+	]}`)
+	candidates := map[string]discoveryCandidate{}
+	keywords := []string{"development", "control", "plane", "entry"}
+	mergePatternCandidates(candidates, raw, keywords)
+
+	main := candidates["go/cmd/devtool/main.go\x00printUsage"]
+	other := candidates["go/browser/control.go\x00handleControl"]
+	if main.Score <= other.Score {
+		t.Fatalf("multi-term score %.1f <= single-term score %.1f", main.Score, other.Score)
+	}
+}

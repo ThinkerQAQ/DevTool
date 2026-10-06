@@ -107,6 +107,7 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 		Workspace: workspace,
 		Query:     query,
 		Limit:     input.Limit,
+		Discovery: symbol == "",
 	}
 
 	var indexed json.RawMessage

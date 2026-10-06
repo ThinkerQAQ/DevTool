@@ -180,3 +180,45 @@ func TestCodeContextParallelBranchesRespectCancellation(t *testing.T) {
 		t.Fatalf("canceled code_context took %s", elapsed)
 	}
 }
+
+func TestObjectiveOnlyCodeContextRequestsRepositoryDiscovery(t *testing.T) {
+	var realtimeCalls int
+	reg := &fakeRegistrar{services: map[string]service.Invoker{
+		"code-indexed": service.Func(func(_ context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
+			if method != "search" {
+				t.Fatalf("indexed method = %q", method)
+			}
+			var request struct {
+				Query     string `json:"query"`
+				Discovery bool   `json:"discovery"`
+			}
+			if err := json.Unmarshal(payload, &request); err != nil {
+				return nil, err
+			}
+			if request.Query != "where is the control plane?" || !request.Discovery {
+				t.Fatalf("request = %#v", request)
+			}
+			return json.RawMessage(`{"results":[]}`), nil
+		}),
+		"code-realtime": service.Func(func(_ context.Context, _ string, _ json.RawMessage) (json.RawMessage, error) {
+			realtimeCalls++
+			return json.RawMessage(`{}`), nil
+		}),
+	}}
+	e := New()
+	if err := e.Register(reg); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.CallTool(
+		context.Background(),
+		agentsdk.Session{ProjectRoot: "/workspace"},
+		"code_context",
+		json.RawMessage(`{"objective":"where is the control plane?"}`),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if realtimeCalls != 0 {
+		t.Fatalf("objective-only discovery invoked realtime provider %d times", realtimeCalls)
+	}
+}

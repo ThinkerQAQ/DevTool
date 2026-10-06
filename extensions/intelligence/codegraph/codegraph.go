@@ -9,9 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
 	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/envexec"
@@ -119,6 +122,9 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if limit <= 0 {
 			limit = 20
 		}
+		if request.Discovery {
+			return e.discover(ctx, request.Workspace, query, limit)
+		}
 		args, err := json.Marshal(map[string]any{
 			"query":   query,
 			"limit":   limit,
@@ -131,6 +137,279 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
+}
+
+type discoveryCandidate struct {
+	Path        string  `json:"path"`
+	Name        string  `json:"name"`
+	Kind        string  `json:"kind,omitempty"`
+	Line        int     `json:"line,omitempty"`
+	Score       float64 `json:"score"`
+	MatchReason string  `json:"match_reason"`
+	Snippet     string  `json:"snippet,omitempty"`
+}
+
+func (e *Extension) discover(ctx context.Context, workspace codeintelligence.Workspace, query string, limit int) (json.RawMessage, error) {
+	keywords := discoveryKeywords(query)
+	candidates := map[string]discoveryCandidate{}
+
+	if len(keywords) != 0 {
+		// Symbol search has the cheaper cold-start path in CodeGraph and warms
+		// the persistent graph session. Run one focused symbol query first,
+		// then use repository-wide pattern discovery against the warm provider.
+		if err := e.mergeSymbolSearch(ctx, workspace, candidates, keywords[0], limit); err != nil {
+			return nil, err
+		}
+
+		patternParts := make([]string, 0, len(keywords))
+		for _, keyword := range keywords {
+			patternParts = append(patternParts, regexp.QuoteMeta(keyword))
+		}
+		args, err := json.Marshal(map[string]any{
+			"pattern": strings.Join(patternParts, "|"),
+			"scope":   "any",
+			"limit":   max(limit*3, 20),
+		})
+		if err != nil {
+			return nil, err
+		}
+		raw, err := e.runTool(ctx, workspace, "codegraph_search_by_pattern", args)
+		if err != nil {
+			return nil, err
+		}
+		mergePatternCandidates(candidates, raw, keywords)
+
+		for _, keyword := range keywords[1:min(len(keywords), 6)] {
+			if err := e.mergeSymbolSearch(ctx, workspace, candidates, keyword, limit); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if needsEntryPointDiscovery(keywords) || len(candidates) < min(limit, 5) {
+		args, _ := json.Marshal(map[string]any{
+			"entryType": "main",
+			"limit":     max(limit, 10),
+			"compact":   true,
+		})
+		raw, err := e.runTool(ctx, workspace, "codegraph_find_entry_points", args)
+		if err == nil {
+			mergeEntryCandidates(candidates, raw, keywords)
+		}
+	}
+
+	pathText := map[string]string{}
+	for _, candidate := range candidates {
+		pathText[candidate.Path] += " " + candidate.Name + " " + candidate.Snippet
+	}
+	for key, candidate := range candidates {
+		hits := keywordHits(strings.ToLower(candidate.Path+" "+pathText[candidate.Path]), keywords)
+		if hits >= 2 {
+			candidate.Score += float64(hits) * 15
+		}
+		lowerPath := strings.ToLower(filepath.ToSlash(candidate.Path))
+		if strings.Contains(lowerPath, "_test.") || strings.Contains(lowerPath, "/test/") || strings.Contains(lowerPath, "/tests/") {
+			candidate.Score -= 80
+		}
+		candidates[key] = candidate
+	}
+
+	ordered := make([]discoveryCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		ordered = append(ordered, candidate)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Score != ordered[j].Score {
+			return ordered[i].Score > ordered[j].Score
+		}
+		if ordered[i].Path != ordered[j].Path {
+			return ordered[i].Path < ordered[j].Path
+		}
+		return ordered[i].Name < ordered[j].Name
+	})
+	if len(ordered) > limit {
+		ordered = ordered[:limit]
+	}
+	return json.Marshal(map[string]any{
+		"query":   query,
+		"results": ordered,
+	})
+}
+
+func discoveryKeywords(query string) []string {
+	stop := map[string]struct{}{
+		"a": {}, "an": {}, "and": {}, "are": {}, "as": {}, "at": {}, "be": {}, "by": {},
+		"after": {}, "before": {}, "belongs": {}, "code": {}, "current": {}, "currently": {},
+		"delete": {}, "deleted": {}, "does": {}, "do": {}, "for": {}, "from": {}, "how": {}, "in": {},
+		"is": {}, "minimal": {}, "of": {}, "on": {}, "or": {}, "responsibility": {}, "should": {},
+		"that": {}, "the": {}, "this": {}, "through": {}, "to": {}, "what": {}, "where": {}, "which": {}, "with": {},
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	lowerQuery := strings.ToLower(query)
+	for _, token := range strings.FieldsFunc(lowerQuery, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'
+	}) {
+		if len([]rune(token)) < 3 {
+			continue
+		}
+		if _, ok := stop[token]; ok {
+			continue
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		out = append(out, token)
+	}
+	return out
+}
+
+func needsEntryPointDiscovery(keywords []string) bool {
+	for _, keyword := range keywords {
+		switch keyword {
+		case "entry", "entrypoint", "main", "start", "startup", "command", "control", "bootstrap":
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Extension) mergeSymbolSearch(ctx context.Context, workspace codeintelligence.Workspace, dst map[string]discoveryCandidate, keyword string, limit int) error {
+	args, err := json.Marshal(map[string]any{
+		"query":   keyword,
+		"limit":   max(limit, 10),
+		"compact": true,
+	})
+	if err != nil {
+		return err
+	}
+	raw, err := e.runTool(ctx, workspace, "codegraph_symbol_search", args)
+	if err != nil {
+		return err
+	}
+	mergeSymbolCandidates(dst, raw, keyword)
+	return nil
+}
+
+func mergePatternCandidates(dst map[string]discoveryCandidate, raw json.RawMessage, keywords []string) {
+	var response struct {
+		Matches []struct {
+			Name        string `json:"name"`
+			Kind        string `json:"kind"`
+			Path        string `json:"path"`
+			LineStart   int    `json:"line_start"`
+			MatchedIn   string `json:"matched_in"`
+			MatchedText string `json:"matched_text"`
+		} `json:"matches"`
+	}
+	if json.Unmarshal(raw, &response) != nil {
+		return
+	}
+	for _, match := range response.Matches {
+		nameHits := keywordHits(strings.ToLower(match.Name), keywords)
+		pathHits := keywordHits(strings.ToLower(match.Path), keywords)
+		snippetHits := keywordHits(strings.ToLower(match.MatchedText), keywords)
+		score := 40.0 + float64(nameHits)*40 + float64(pathHits)*20 + float64(snippetHits)*5
+		if snippetHits >= 2 {
+			score += 80 + float64(snippetHits)*20
+		}
+		if match.MatchedIn == "name" {
+			score += 20
+		}
+		addCandidate(dst, discoveryCandidate{
+			Path: match.Path, Name: match.Name, Kind: match.Kind, Line: match.LineStart,
+			Score: score, MatchReason: "pattern:" + match.MatchedIn, Snippet: compactSnippet(match.MatchedText),
+		})
+	}
+}
+
+func mergeSymbolCandidates(dst map[string]discoveryCandidate, raw json.RawMessage, keyword string) {
+	var response struct {
+		Results []struct {
+			Score       float64 `json:"score"`
+			MatchReason string  `json:"match_reason"`
+			Symbol      struct {
+				Name     string `json:"name"`
+				Kind     string `json:"kind"`
+				Location struct {
+					File string `json:"file"`
+					Line int    `json:"line"`
+				} `json:"location"`
+			} `json:"symbol"`
+		} `json:"results"`
+	}
+	if json.Unmarshal(raw, &response) != nil {
+		return
+	}
+	for _, result := range response.Results {
+		score := 100.0 + result.Score*20
+		name := strings.ToLower(result.Symbol.Name)
+		if strings.EqualFold(result.Symbol.Name, keyword) {
+			score += 80
+		} else if strings.Contains(name, strings.ToLower(keyword)) {
+			score += 50
+		}
+		addCandidate(dst, discoveryCandidate{
+			Path: result.Symbol.Location.File, Name: result.Symbol.Name, Kind: result.Symbol.Kind,
+			Line: result.Symbol.Location.Line, Score: score, MatchReason: "symbol:" + result.MatchReason,
+		})
+	}
+}
+
+func mergeEntryCandidates(dst map[string]discoveryCandidate, raw json.RawMessage, keywords []string) {
+	var entries []struct {
+		EntryType string `json:"entry_type"`
+		Symbol    struct {
+			Name     string `json:"name"`
+			Kind     string `json:"kind"`
+			Location struct {
+				File string `json:"file"`
+				Line int    `json:"line"`
+			} `json:"location"`
+		} `json:"symbol"`
+	}
+	if json.Unmarshal(raw, &entries) != nil {
+		return
+	}
+	for _, entry := range entries {
+		haystack := strings.ToLower(entry.Symbol.Name + " " + entry.Symbol.Location.File)
+		score := 50.0 + float64(keywordHits(haystack, keywords))*20
+		addCandidate(dst, discoveryCandidate{
+			Path: entry.Symbol.Location.File, Name: entry.Symbol.Name, Kind: entry.Symbol.Kind,
+			Line: entry.Symbol.Location.Line, Score: score, MatchReason: "entry:" + entry.EntryType,
+		})
+	}
+}
+
+func addCandidate(dst map[string]discoveryCandidate, candidate discoveryCandidate) {
+	if candidate.Path == "" || candidate.Name == "" {
+		return
+	}
+	key := candidate.Path + "\x00" + candidate.Name
+	if current, ok := dst[key]; !ok || candidate.Score > current.Score {
+		dst[key] = candidate
+	}
+}
+
+func keywordHits(haystack string, keywords []string) int {
+	hits := 0
+	for _, keyword := range keywords {
+		if strings.Contains(haystack, keyword) {
+			hits++
+		}
+	}
+	return hits
+}
+
+func compactSnippet(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	const maxRunes = 220
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 func (e *Extension) doctor(ctx context.Context, workspace codeintelligence.Workspace) (json.RawMessage, error) {
