@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 type CommandFactory func(context.Context, agentsdk.Session) (*exec.Cmd, error)
@@ -61,7 +62,7 @@ func (p *Provider) ListTools(ctx context.Context, session agentsdk.Session) ([]a
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.request("tools/list", map[string]any{})
+	raw, err := c.request(ctx, "tools/list", map[string]any{})
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +99,7 @@ func (p *Provider) CallTool(ctx context.Context, session agentsdk.Session, name 
 			return nil, fmt.Errorf("decode tool arguments: %w", err)
 		}
 	}
-	return c.request("tools/call", map[string]any{
+	return c.request(ctx, "tools/call", map[string]any{
 		"name":      name,
 		"arguments": arguments,
 	})
@@ -111,30 +112,50 @@ func (p *Provider) ensureClient(ctx context.Context, session agentsdk.Session) (
 	keyBytes, _ := json.Marshal(session)
 	key := string(keyBytes)
 
+	_, lockSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:  "MCP lock_wait",
+		Layer: "bridge",
+	})
 	p.mu.Lock()
+	lockSpan.End(0, nil)
 	defer p.mu.Unlock()
 	if p.closed {
 		return nil, fmt.Errorf("MCP bridge is closed")
 	}
 	if p.client != nil && p.sessionID == key {
+		_, reuseSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
+			Name:   "MCP provider lifecycle",
+			Layer:  "bridge",
+			Method: "warm_reuse",
+		})
+		reuseSpan.End(0, nil)
 		return p.client, nil
 	}
 	if p.client != nil {
 		_ = p.client.close()
 		p.client = nil
 	}
+	_, coldSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:   "MCP provider lifecycle",
+		Layer:  "bridge",
+		Method: "cold_start",
+	})
 	cmd, err := p.factory(p.lifecycleCtx, session)
 	if err != nil {
+		coldSpan.End(0, err)
 		return nil, err
 	}
 	c, err := startClient(cmd)
 	if err != nil {
+		coldSpan.End(0, err)
 		return nil, err
 	}
-	if err := c.initialize(); err != nil {
+	if err := c.initialize(ctx); err != nil {
 		_ = c.close()
+		coldSpan.End(0, err)
 		return nil, err
 	}
+	coldSpan.End(0, nil)
 	p.client = c
 	p.sessionID = key
 	return c, nil
@@ -175,8 +196,8 @@ func startClient(cmd *exec.Cmd) (*client, error) {
 	}, nil
 }
 
-func (c *client) initialize() error {
-	if _, err := c.request("initialize", map[string]any{
+func (c *client) initialize(ctx context.Context) error {
+	if _, err := c.request(ctx, "initialize", map[string]any{
 		"protocolVersion": "2025-06-18",
 		"capabilities":    map[string]any{},
 		"clientInfo": map[string]any{
@@ -189,9 +210,22 @@ func (c *client) initialize() error {
 	return c.notify("notifications/initialized", map[string]any{})
 }
 
-func (c *client) request(method string, params any) (json.RawMessage, error) {
+func (c *client) request(ctx context.Context, method string, params any) (result json.RawMessage, err error) {
+	_, lockSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:   "MCP request lock_wait",
+		Layer:  "bridge",
+		Method: method,
+	})
 	c.mu.Lock()
+	lockSpan.End(0, nil)
 	defer c.mu.Unlock()
+
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:   "MCP request",
+		Layer:  "bridge",
+		Method: method,
+	})
+	defer func() { span.End(len(result), err) }()
 
 	c.nextID++
 	id := c.nextID
