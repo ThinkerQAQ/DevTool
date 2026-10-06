@@ -515,3 +515,94 @@ dominant factor.
 This satisfies the stop condition for further code-path complexity: the remaining large
 round-trip cost measured in this environment is external Remote Connector infrastructure,
 not the stable capability or provider composition.
+
+
+## Architecture review
+
+The final branch was reviewed against `AGENTS.md` and
+`docs/architecture/principles.md`.
+
+### Minimal Core
+
+The only Core change in this series is generic MCP bridge latency instrumentation.
+Objective discovery, provider lifecycle, indexing, and Serena result compaction stay
+outside Core.
+
+No project-specific behavior was added to Core.
+
+### Extensible / replaceable providers
+
+The Agent-facing capability still depends only on the stable
+`code-indexed` / `code-realtime` service contracts.
+
+A configuration replacement check with:
+
+```text
+DEVTOOL_PROFILES=sourcegraph
+```
+
+resolved:
+
+```text
+code-indexed  -> intelligence.sourcegraph
+code-realtime -> intelligence.lsp.serena
+```
+
+without editing the capability or Core.
+
+### Configuration-driven
+
+Provider selection remains entirely in `.devtool.toml` / profiles. No provider switch
+or benchmark-specific path was added to code.
+
+### Stable capability / not an API proxy
+
+The final Agent tool surface remains:
+
+```text
+code_context
+project_build
+project_package
+project_verify
+scm_checkpoint
+scm_publish
+```
+
+No CodeGraph, Serena, gopls, Sourcegraph, or transport-native tool is exposed to the
+Agent.
+
+Repository discovery is implemented as provider behavior behind the indexed-service
+contract rather than as a second Agent search API. Serena result compaction similarly
+remains a provider-side transport concern.
+
+### No IDFlow specialization
+
+The Go code diff contains no `IDFlow` / `idflow` special case. IDFlow is used only as
+the fixed benchmark fixture documented in benchmark results.
+
+### Verification
+
+Final verification completed successfully:
+
+- `go test ./...`: PASS
+- DevTool configured self-host verification: PASS
+- provider replacement by configuration: PASS
+- stable Agent tool surface inspection: PASS
+- Phase-2 cancellation tests: PASS
+- Phase-1 source-change freshness validation: PASS
+- benchmark branch worktree: clean
+
+### Review conclusion
+
+The performance changes preserve the microkernel boundary:
+
+```text
+Agent intent
+  -> stable capability
+  -> generic service contract
+  -> configured provider
+  -> provider-owned lifecycle/search/transport details
+```
+
+No extra proxy layer, second gateway, second code-intelligence control plane, or
+project-specific optimization was introduced.
