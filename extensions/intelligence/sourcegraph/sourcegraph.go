@@ -8,10 +8,11 @@ import (
 	"strings"
 
 	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
-	service "github.com/thinkerqaq/devtool/sdk/service"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	"github.com/thinkerqaq/devtool/sdk/readiness"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 )
 
 const ExtensionID = "intelligence.sourcegraph"
@@ -34,14 +35,56 @@ func New() *Extension {
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
-		ID:       ExtensionID,
-		Kind:     extensioncontract.KindCodeIntelligence,
-		Provides: []string{codeintelligence.IndexedServiceName},
+		ID:        ExtensionID,
+		Kind:      extensioncontract.KindCodeIntelligence,
+		Provides:  []string{codeintelligence.IndexedServiceName},
+		Readiness: true,
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	return reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke))
+}
+
+func (e *Extension) CheckReadiness(ctx context.Context, _ readiness.Request) (readiness.Report, error) {
+	report := readiness.Report{Provider: ExtensionID}
+	if strings.TrimSpace(e.endpoint) == "" {
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:        readiness.KindConfigurationRequired,
+			Resource:    "SOURCEGRAPH_MCP_URL",
+			Message:     "Sourcegraph MCP endpoint is not configured",
+			Remediation: "Configure SOURCEGRAPH_MCP_URL for the selected Sourcegraph provider, then rerun devtool init.",
+		})
+		return report, nil
+	}
+
+	tools, err := e.listTools(ctx)
+	if err != nil {
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:        readiness.KindProviderUnavailable,
+			Resource:    e.endpoint,
+			Message:     err.Error(),
+			Remediation: "Repair Sourcegraph MCP connectivity or credentials, then rerun devtool init.",
+		})
+		return report, nil
+	}
+	for _, tool := range tools {
+		if tool.Name == "keyword_search" {
+			report.Ready = true
+			report.Details = map[string]string{
+				"endpoint": e.endpoint,
+				"tool":     "keyword_search",
+			}
+			return report, nil
+		}
+	}
+	report.Issues = append(report.Issues, readiness.Issue{
+		Kind:        readiness.KindVerificationFailed,
+		Resource:    "keyword_search",
+		Message:     "Sourcegraph MCP does not expose required tool keyword_search",
+		Remediation: "Use a compatible Sourcegraph MCP endpoint, then rerun devtool init.",
+	})
+	return report, nil
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {

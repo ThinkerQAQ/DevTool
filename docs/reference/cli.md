@@ -6,6 +6,23 @@ Project-specific commands are discovered dynamically from the configured Project
 
 ## Core commands
 
+### `devtool init`
+
+Resolve active provider readiness before starting real development work.
+
+```bash
+devtool init
+devtool init --json
+```
+
+The command aggregates readiness only from active selected providers that opt into the generic readiness contract. Checks can report missing dependencies, configuration requirements, authorization requirements, provider availability, and verification failures.
+
+`--json` is intended for Agent workflows. DevTool does not install missing system dependencies itself: the Agent/operator remediates the returned issues and reruns `init`. Provider-owned project preparation, such as index/workspace verification, can occur inside the provider's readiness check.
+
+A non-ready project returns a non-zero exit status after printing the full report.
+
+---
+
 ### `devtool project inspect`
 
 Inspect the resolved project and Project Extension.

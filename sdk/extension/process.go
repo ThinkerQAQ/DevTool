@@ -7,10 +7,11 @@ import (
 	"io"
 	"os"
 
-	contract "github.com/thinkerqaq/devtool/sdk/contract"
-	service "github.com/thinkerqaq/devtool/sdk/service"
 	"github.com/thinkerqaq/devtool/protocol"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
+	contract "github.com/thinkerqaq/devtool/sdk/contract"
+	"github.com/thinkerqaq/devtool/sdk/readiness"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 )
 
 type ProcessProvider interface {
@@ -92,6 +93,16 @@ func serveExtension(ext Extension, in io.Reader, out io.Writer) error {
 				return nil, fmt.Errorf("extension %q does not provide service %q", ext.Descriptor().ID, request.Service)
 			}
 			return invoker.Invoke(ctx, request.Method, request.Payload)
+		case protocol.MethodExtensionReadiness:
+			provider, ok := ext.(ReadinessProvider)
+			if !ok {
+				return nil, fmt.Errorf("extension %q does not expose readiness", ext.Descriptor().ID)
+			}
+			var request readiness.Request
+			if err := json.Unmarshal(envelope.Payload, &request); err != nil {
+				return nil, err
+			}
+			return provider.CheckReadiness(ctx, request)
 		case protocol.MethodAgentToolsList:
 			if reg.tools == nil {
 				return nil, fmt.Errorf("extension %q does not expose agent tools", ext.Descriptor().ID)
@@ -218,6 +229,16 @@ func serveProcess(provider ProcessProvider, in io.Reader, out io.Writer) error {
 				return nil, err
 			}
 			return provider.InvokeService(ctx, request.Service, request.Method, request.Payload)
+		case protocol.MethodExtensionReadiness:
+			readinessProvider, ok := provider.(ReadinessProvider)
+			if !ok {
+				return nil, fmt.Errorf("extension %q does not expose readiness", provider.Descriptor().ID)
+			}
+			var request readiness.Request
+			if err := json.Unmarshal(envelope.Payload, &request); err != nil {
+				return nil, err
+			}
+			return readinessProvider.CheckReadiness(ctx, request)
 		case protocol.MethodAgentToolsList:
 			toolProvider, ok := provider.(agentsdk.ToolProvider)
 			if !ok {

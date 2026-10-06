@@ -15,6 +15,7 @@ import (
 
 	credentialcontract "github.com/thinkerqaq/devtool/sdk/credential"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	"github.com/thinkerqaq/devtool/sdk/readiness"
 	"github.com/thinkerqaq/devtool/sdk/scm"
 	service "github.com/thinkerqaq/devtool/sdk/service"
 )
@@ -32,15 +33,93 @@ func New() *Extension {
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
-		ID:       ExtensionID,
-		Kind:     extensioncontract.KindInfrastructure,
-		Provides: []string{scm.ServiceName},
+		ID:        ExtensionID,
+		Kind:      extensioncontract.KindInfrastructure,
+		Provides:  []string{scm.ServiceName},
+		Requires:  []string{credentialcontract.ServiceName},
+		Readiness: true,
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	e.services = reg
 	return reg.ProvideService(scm.ServiceName, ExtensionID, service.Func(e.Invoke))
+}
+
+func (e *Extension) CheckReadiness(ctx context.Context, request readiness.Request) (readiness.Report, error) {
+	report := readiness.Report{Provider: ExtensionID}
+	root := strings.TrimSpace(request.Root)
+	if root == "" {
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:     readiness.KindConfigurationRequired,
+			Resource: "project-root",
+			Message:  "project root is required for SCM readiness",
+		})
+		return report, nil
+	}
+
+	if _, err := gitOutput(ctx, root, "config", "--get", "user.name"); err != nil {
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:        readiness.KindConfigurationRequired,
+			Resource:    "git.user.name",
+			Message:     "Git commit identity user.name is not configured",
+			Remediation: "Configure git user.name for this environment, then rerun devtool init.",
+		})
+	}
+	if _, err := gitOutput(ctx, root, "config", "--get", "user.email"); err != nil {
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:        readiness.KindConfigurationRequired,
+			Resource:    "git.user.email",
+			Message:     "Git commit identity user.email is not configured",
+			Remediation: "Configure git user.email for this environment, then rerun devtool init.",
+		})
+	}
+
+	doctor := e.doctor(ctx, root)
+	if doctor.Remote != "" {
+		if report.Details == nil {
+			report.Details = map[string]string{}
+		}
+		report.Details["remote"] = doctor.Remote
+	}
+	if doctor.Authorization != nil {
+		authorization := doctor.Authorization
+		kind := readiness.KindAuthorizationRequired
+		if authorization.Status == "configuration_required" {
+			kind = readiness.KindConfigurationRequired
+		}
+		details := map[string]string{"status": authorization.Status}
+		if authorization.VerificationURI != "" {
+			details["verification_uri"] = authorization.VerificationURI
+		}
+		if authorization.UserCode != "" {
+			details["user_code"] = authorization.UserCode
+		}
+		if authorization.ExpiresAt != 0 {
+			details["expires_at"] = fmt.Sprint(authorization.ExpiresAt)
+		}
+		message := authorization.Reason
+		if strings.TrimSpace(message) == "" {
+			message = "GitHub authorization is required"
+		}
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:        kind,
+			Resource:    "github.com",
+			Message:     message,
+			Remediation: "Complete or repair GitHub authorization, then rerun devtool init.",
+			Details:     details,
+		})
+	} else if doctor.Reason != "" {
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:        readiness.KindProviderUnavailable,
+			Resource:    "github.com",
+			Message:     doctor.Reason,
+			Remediation: "Repair Git/GitHub connectivity or credentials, then rerun devtool init.",
+		})
+	}
+
+	report.Ready = doctor.Ready && len(report.Issues) == 0
+	return report, nil
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {

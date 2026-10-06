@@ -14,6 +14,7 @@ import (
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	"github.com/thinkerqaq/devtool/sdk/readiness"
 	service "github.com/thinkerqaq/devtool/sdk/service"
 	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
@@ -43,16 +44,65 @@ func (e *Extension) Close() error {
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
-		ID:       ExtensionID,
-		Kind:     extensioncontract.KindCodeIntelligence,
-		Provides: []string{codeintelligence.RealtimeServiceName},
-		Requires: []string{environmentcontract.ServiceName},
+		ID:        ExtensionID,
+		Kind:      extensioncontract.KindCodeIntelligence,
+		Provides:  []string{codeintelligence.RealtimeServiceName},
+		Requires:  []string{environmentcontract.ServiceName},
+		Readiness: true,
 	}
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	e.services = reg
 	return reg.ProvideService(codeintelligence.RealtimeServiceName, ExtensionID, service.Func(e.Invoke))
+}
+
+func (e *Extension) CheckReadiness(ctx context.Context, request readiness.Request) (readiness.Report, error) {
+	workspace := codeintelligence.Workspace{Root: request.Root, Workspaces: request.Workspaces}
+	report := readiness.Report{Provider: ExtensionID}
+
+	raw, err := e.doctor(ctx, workspace)
+	if err != nil {
+		kind := readiness.KindProviderUnavailable
+		resource := ExtensionID
+		if strings.Contains(err.Error(), "executable file not found") || strings.Contains(err.Error(), "not found in $PATH") {
+			kind = readiness.KindMissingDependency
+			resource = "serena"
+		}
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:        kind,
+			Resource:    resource,
+			Message:     err.Error(),
+			Remediation: "Make serena and its language-server dependencies available in the configured environment, then rerun devtool init.",
+		})
+		return report, nil
+	}
+
+	var doctor codeintelligence.DoctorResponse
+	if err := json.Unmarshal(raw, &doctor); err == nil {
+		report.Details = map[string]string{
+			"executable": doctor.Executable,
+			"version":    doctor.Version,
+		}
+	}
+
+	if _, err := e.verify(ctx, workspace); err != nil {
+		kind := readiness.KindVerificationFailed
+		resource := "serena-workspace"
+		if strings.Contains(err.Error(), "gopls") && (strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "executable")) {
+			kind = readiness.KindMissingDependency
+			resource = "gopls"
+		}
+		report.Issues = append(report.Issues, readiness.Issue{
+			Kind:        kind,
+			Resource:    resource,
+			Message:     err.Error(),
+			Remediation: "Repair the realtime language-server environment and rerun devtool init.",
+		})
+		return report, nil
+	}
+	report.Ready = true
+	return report, nil
 }
 
 func (e *Extension) agentMCPCommand(ctx context.Context, session agentsdk.Session) (*exec.Cmd, error) {
