@@ -5,11 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
 	"github.com/thinkerqaq/devtool/extensions/intelligence/internal/envexec"
+	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
@@ -24,9 +30,26 @@ type Extension struct {
 	// is resolved through the configured Environment service.
 	executable string
 	services   extensioncontract.Registrar
+
+	mu               sync.Mutex
+	bridge           *mcpbridge.Provider
+	workspaceVersion uint64
+	persistent       bool
 }
 
-func New() *Extension { return &Extension{} }
+func New() *Extension { return &Extension{persistent: true} }
+
+func (e *Extension) Close() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.bridge == nil {
+		return nil
+	}
+	err := e.bridge.Close()
+	e.bridge = nil
+	e.workspaceVersion = 0
+	return err
+}
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
@@ -40,6 +63,19 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
 	e.services = reg
 	return reg.ProvideService(codeintelligence.IndexedServiceName, ExtensionID, service.Func(e.Invoke))
+}
+
+func (e *Extension) mcpCommand(ctx context.Context, session agentsdk.Session) (*exec.Cmd, error) {
+	workspace := codeintelligence.Workspace{
+		Root:       session.ProjectRoot,
+		Workspaces: session.Workspaces,
+	}
+	base, err := graphBaseArgs(workspace, e.executable == "")
+	if err != nil {
+		return nil, err
+	}
+	args := append([]string{"--mcp"}, base...)
+	return e.command(ctx, workspace, args...)
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (result json.RawMessage, err error) {
@@ -111,6 +147,102 @@ func (e *Extension) doctor(ctx context.Context, workspace codeintelligence.Works
 }
 
 func (e *Extension) runTool(ctx context.Context, workspace codeintelligence.Workspace, tool string, toolArgs json.RawMessage) (json.RawMessage, error) {
+	if e.persistent {
+		return e.runPersistentTool(ctx, workspace, tool, toolArgs)
+	}
+	return e.runOneShotTool(ctx, workspace, tool, toolArgs)
+}
+
+func (e *Extension) runPersistentTool(ctx context.Context, workspace codeintelligence.Workspace, tool string, toolArgs json.RawMessage) (json.RawMessage, error) {
+	version, err := workspaceFingerprint(workspace)
+	if err != nil {
+		return nil, err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.bridge == nil || e.workspaceVersion != version {
+		if e.bridge != nil {
+			_ = e.bridge.Close()
+		}
+		e.bridge = mcpbridge.New(e.mcpCommand)
+		e.workspaceVersion = version
+	}
+
+	session := agentsdk.Session{
+		ProjectRoot: workspace.Root,
+		Workspaces:  append([]string(nil), workspace.Workspaces...),
+		Context:     "codegraph",
+	}
+	raw, err := e.bridge.CallTool(ctx, session, tool, toolArgs)
+	if err != nil {
+		return nil, fmt.Errorf("CodeGraph %s: %w", tool, err)
+	}
+	return unwrapMCPToolResult(raw)
+}
+
+func workspaceFingerprint(workspace codeintelligence.Workspace) (uint64, error) {
+	root := strings.TrimSpace(workspace.Root)
+	if root == "" {
+		return 0, fmt.Errorf("CodeGraph workspace root is required")
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return 0, fmt.Errorf("resolve CodeGraph root: %w", err)
+	}
+	workspaces := workspace.Workspaces
+	if len(workspaces) == 0 {
+		workspaces = []string{root}
+	}
+
+	h := fnv.New64a()
+	for _, item := range workspaces {
+		if !filepath.IsAbs(item) {
+			item = filepath.Join(root, item)
+		}
+		item = filepath.Clean(item)
+		if _, err := os.Stat(item); err != nil {
+			return 0, fmt.Errorf("stat CodeGraph workspace %s: %w", item, err)
+		}
+		if err := filepath.WalkDir(item, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() && path != item && ignoredFingerprintDir(entry.Name()) {
+				return filepath.SkipDir
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			_, _ = h.Write([]byte(filepath.ToSlash(rel)))
+			_, _ = h.Write([]byte{0})
+			_, _ = h.Write([]byte(strconv.FormatInt(info.Size(), 10)))
+			_, _ = h.Write([]byte{0})
+			_, _ = h.Write([]byte(strconv.FormatInt(info.ModTime().UnixNano(), 10)))
+			_, _ = h.Write([]byte{0})
+			return nil
+		}); err != nil {
+			return 0, fmt.Errorf("fingerprint CodeGraph workspace %s: %w", item, err)
+		}
+	}
+	return h.Sum64(), nil
+}
+
+func ignoredFingerprintDir(name string) bool {
+	switch name {
+	case ".git", ".devtool", ".cache", "node_modules", "dist", "coverage":
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *Extension) runOneShotTool(ctx context.Context, workspace codeintelligence.Workspace, tool string, toolArgs json.RawMessage) (json.RawMessage, error) {
 	args, err := graphBaseArgs(workspace, e.executable == "")
 	if err != nil {
 		return nil, err
@@ -131,6 +263,30 @@ func (e *Extension) runTool(ctx context.Context, workspace codeintelligence.Work
 		return append(json.RawMessage(nil), raw...), nil
 	}
 	return json.Marshal(string(raw))
+}
+
+func unwrapMCPToolResult(raw json.RawMessage) (json.RawMessage, error) {
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || len(result.Content) == 0 {
+		return append(json.RawMessage(nil), raw...), nil
+	}
+	text := strings.TrimSpace(result.Content[0].Text)
+	if result.IsError {
+		if text == "" {
+			text = "CodeGraph MCP tool returned an error"
+		}
+		return nil, fmt.Errorf("%s", text)
+	}
+	if text != "" && json.Valid([]byte(text)) {
+		return json.RawMessage(text), nil
+	}
+	return append(json.RawMessage(nil), raw...), nil
 }
 
 func graphBaseArgs(workspace codeintelligence.Workspace, environmentPaths bool) ([]string, error) {

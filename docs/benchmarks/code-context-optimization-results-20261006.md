@@ -108,3 +108,84 @@ MCP lock wait was effectively zero in all observed single-client requests.
 7. MCP mutex contention is not material in this workload.
 
 These measurements justify inspecting CodeGraph lifecycle/process reuse and then parallel composition. They do not justify transport/mutex optimization.
+
+## Phase 1 — Provider lifecycle reuse
+
+### Before
+
+CodeGraph executed every indexed search as a new one-shot process:
+
+`codegraph-server --graph-only --run-tool ...`
+
+Measured warm CodeGraph search was typically 0.61–0.74 s.
+
+Serena/LSP already reused its child MCP process correctly inside the ProjectHost
+lifetime, so no Serena lifecycle rewrite was needed.
+
+### Change
+
+CodeGraph now uses one persistent internal MCP bridge for the provider lifetime.
+
+The Agent surface is unchanged:
+
+`code_context -> code-indexed service -> intelligence.codegraph`
+
+The CodeGraph MCP tool surface remains provider-private.
+
+To prevent stale state, the provider computes a lightweight workspace fingerprint
+(path, size, and mtime metadata while excluding generated/cache directories). A changed
+worktree causes the provider-owned CodeGraph bridge to restart and rebuild from current
+workspace state. A clean unchanged worktree reuses the resident process.
+
+### After
+
+Objective-only repeated calls:
+
+| Call | Before | After |
+| --- | ---: | ---: |
+| cold objective | ~0.64–0.69 s | 1.607 s |
+| first warm objective | ~0.64–0.65 s | 0.004 s |
+| repeated warm objective | ~0.64–0.65 s | 0.004 s |
+
+The cold objective call regressed because persistent MCP startup/index ownership moved
+into the first request. The target workload is warm; subsequent indexed searches fell
+from ~0.65 s to ~3–4 ms.
+
+Enriched calls:
+
+| Call | Before Phase 1 | After Phase 1 |
+| --- | ---: | ---: |
+| cold enriched | 7.869 s | 7.100 s |
+| warm enriched | 0.964 s | 0.264 s |
+| repeated warm enriched | ~0.865–1.066 s | 0.364 s |
+
+Provider detail on the measured warm enriched call:
+
+- CodeGraph search: 3.396 ms
+- Serena symbols: 97.748 ms
+- Serena references: 34.975 ms
+- Serena diagnostics: 124.013 ms
+- code_context total: 263.495 ms
+
+### Freshness validation
+
+A unique source symbol was added after the provider was warm:
+
+`PhaseOneFreshnessProbeUnique`
+
+The next `code_context` call discovered it after the workspace fingerprint forced a
+provider restart.
+
+The file was then deleted. A subsequent call restarted the provider again and the
+indexed result no longer contained the deleted symbol.
+
+Therefore provider reuse does not silently retain stale source state across controlled
+worktree changes.
+
+### Phase 1 conclusion
+
+Provider lifecycle reuse is a material warm-path optimization.
+
+The next measured bottleneck is capability composition: indexed and realtime work still
+runs sequentially even though user-supplied symbol/path hints make the two branches
+independent.

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 )
 
@@ -95,6 +96,77 @@ printf '{"ok":true}'
 	}
 	if response.Provider != ExtensionID || !strings.Contains(response.Output, `"ok":true`) {
 		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestMCPCommandUsesPersistentGraphMode(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "root")
+	if err := os.MkdirAll(filepath.Join(root, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e := New()
+	e.executable = "codegraph-fixture"
+	t.Cleanup(func() { _ = e.Close() })
+
+	cmd, err := e.mcpCommand(context.Background(), agentsdk.Session{
+		ProjectRoot: root,
+		Workspaces:  []string{root, "child"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd.Args[1:], " ")
+	for _, want := range []string{"--mcp", "--graph-only", "--workspace " + root, "--workspace " + filepath.Join(root, "child")} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args = %q; missing %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "--run-tool") {
+		t.Fatalf("persistent MCP command unexpectedly uses one-shot mode: %q", joined)
+	}
+}
+
+func TestWorkspaceFingerprintChangesWithSourceState(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "probe.go")
+	if err := os.WriteFile(path, []byte("package probe\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := codeintelligence.Workspace{Root: root}
+	first, err := workspaceFingerprint(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package probe\nfunc Changed() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspaceFingerprint(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("fingerprint did not change after source edit")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	third, err := workspaceFingerprint(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == third {
+		t.Fatal("fingerprint did not change after source deletion")
+	}
+}
+
+func TestUnwrapMCPToolResult(t *testing.T) {
+	raw := json.RawMessage(`{"content":[{"type":"text","text":"{\"results\":[]}"}]}`)
+	got, err := unwrapMCPToolResult(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"results":[]}` {
+		t.Fatalf("got = %s", got)
 	}
 }
 
