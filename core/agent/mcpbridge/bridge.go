@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
@@ -122,7 +123,7 @@ func (p *Provider) ensureClient(ctx context.Context, session agentsdk.Session) (
 	if p.closed {
 		return nil, fmt.Errorf("MCP bridge is closed")
 	}
-	if p.client != nil && p.sessionID == key {
+	if p.client != nil && p.sessionID == key && p.client.usable() {
 		_, reuseSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
 			Name:   "MCP provider lifecycle",
 			Layer:  "bridge",
@@ -164,11 +165,13 @@ func (p *Provider) ensureClient(ctx context.Context, session agentsdk.Session) (
 type client struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
+	stdout  io.ReadCloser
 	scanner *bufio.Scanner
 	encoder *json.Encoder
 
 	mu     sync.Mutex
 	nextID int64
+	dead   atomic.Bool
 }
 
 func startClient(cmd *exec.Cmd) (*client, error) {
@@ -191,9 +194,14 @@ func startClient(cmd *exec.Cmd) (*client, error) {
 	return &client{
 		cmd:     cmd,
 		stdin:   stdin,
+		stdout:  stdout,
 		scanner: scanner,
 		encoder: json.NewEncoder(stdin),
 	}, nil
+}
+
+func (c *client) usable() bool {
+	return c != nil && !c.dead.Load()
 }
 
 func (c *client) initialize(ctx context.Context) error {
@@ -220,6 +228,13 @@ func (c *client) request(ctx context.Context, method string, params any) (result
 	lockSpan.End(0, nil)
 	defer c.mu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !c.usable() {
+		return nil, fmt.Errorf("child MCP is unavailable")
+	}
+
 	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
 		Name:   "MCP request",
 		Layer:  "bridge",
@@ -235,9 +250,40 @@ func (c *client) request(ctx context.Context, method string, params any) (result
 		"method":  method,
 		"params":  params,
 	}); err != nil {
+		c.dead.Store(true)
 		return nil, fmt.Errorf("write child MCP request: %w", err)
 	}
 
+	type response struct {
+		result json.RawMessage
+		err    error
+		dead   bool
+	}
+	done := make(chan response, 1)
+	go func() {
+		raw, scanErr, dead := c.scanResponse(id, method)
+		done <- response{result: raw, err: scanErr, dead: dead}
+	}()
+
+	select {
+	case response := <-done:
+		if response.dead {
+			c.dead.Store(true)
+		}
+		return response.result, response.err
+	case <-ctx.Done():
+		c.dead.Store(true)
+		_ = c.stdout.Close()
+		_ = c.stdin.Close()
+		if c.cmd.Process != nil {
+			_ = c.cmd.Process.Kill()
+		}
+		<-done
+		return nil, ctx.Err()
+	}
+}
+
+func (c *client) scanResponse(id int64, method string) (json.RawMessage, error, bool) {
 	for c.scanner.Scan() {
 		line := append([]byte(nil), c.scanner.Bytes()...)
 		var envelope struct {
@@ -260,17 +306,17 @@ func (c *client) request(ctx context.Context, method string, params any) (result
 			continue
 		}
 		if envelope.Error != nil {
-			return nil, fmt.Errorf("child MCP %s error %d: %s", method, envelope.Error.Code, envelope.Error.Message)
+			return nil, fmt.Errorf("child MCP %s error %d: %s", method, envelope.Error.Code, envelope.Error.Message), false
 		}
 		if len(envelope.Result) == 0 {
-			return json.RawMessage(`null`), nil
+			return json.RawMessage(`null`), nil, false
 		}
-		return append(json.RawMessage(nil), envelope.Result...), nil
+		return append(json.RawMessage(nil), envelope.Result...), nil, false
 	}
 	if err := c.scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read child MCP response: %w", err)
+		return nil, fmt.Errorf("read child MCP response: %w", err), true
 	}
-	return nil, fmt.Errorf("child MCP exited while waiting for %s", method)
+	return nil, fmt.Errorf("child MCP exited while waiting for %s", method), true
 }
 
 func (c *client) notify(method string, params any) error {
@@ -284,7 +330,9 @@ func (c *client) notify(method string, params any) error {
 }
 
 func (c *client) close() error {
+	c.dead.Store(true)
 	_ = c.stdin.Close()
+	_ = c.stdout.Close()
 	if c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
 	}

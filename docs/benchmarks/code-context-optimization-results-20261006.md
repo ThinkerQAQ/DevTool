@@ -606,3 +606,32 @@ Agent intent
 
 No extra proxy layer, second gateway, second code-intelligence control plane, or
 project-specific optimization was introduced.
+
+
+## Merge review follow-up — real child-MCP cancellation
+
+Final merge review found one concrete gap between the Phase-2 cancellation contract and
+the real child-MCP bridge: capability-level cancellation was propagated correctly, but a
+blocked child MCP request could remain stuck in Scanner.Scan() until the provider
+responded or exited.
+
+The bridge now treats cancellation as a provider-session invalidation event:
+
+1. cancel/timeout closes the child stdout/stdin and kills the blocked child process;
+2. the request returns the original context error promptly;
+3. the client is marked unusable;
+4. the next request recreates the provider through the existing provider lifecycle.
+
+This remains a generic lifecycle mechanism in core/agent/mcpbridge; no provider or
+project special case was added.
+
+A real child-process test verifies:
+
+- a stalled child request returns context.DeadlineExceeded in bounded time;
+- the invalidated child session is not reused;
+- the next request starts a fresh child MCP session and succeeds.
+
+Focused validation:
+
+- go test ./core/agent/mcpbridge: PASS
+- go test -race ./core/agent/mcpbridge: PASS
