@@ -189,3 +189,50 @@ Provider lifecycle reuse is a material warm-path optimization.
 The next measured bottleneck is capability composition: indexed and realtime work still
 runs sequentially even though user-supplied symbol/path hints make the two branches
 independent.
+
+## Phase 2 — Parallel independent indexed/realtime branches
+
+### Before
+
+With provider lifecycle reuse already applied, enriched `code_context` still executed:
+
+`indexed search -> symbols -> references -> diagnostics`
+
+sequentially.
+
+Measured Phase 1:
+
+- cold enriched: 7.100 s
+- warm enriched: 0.264 s
+- repeated warm enriched: 0.364 s
+
+### Change
+
+When the caller already supplies a symbol and/or path, the indexed search and realtime
+branch are semantically independent. They now start concurrently and merge only after
+both branches complete.
+
+Realtime operations remain sequential internally; this phase changes only the
+independent indexed-vs-realtime composition layer.
+
+The output schema and provider selection are unchanged.
+
+Cancellation is propagated through a derived context. Both branch result channels are
+buffered, so completion cannot leak a goroutine while the caller is collecting results.
+
+### After
+
+| Call | Phase 1 | Phase 2 |
+| --- | ---: | ---: |
+| cold enriched | 7.100 s | 6.818 s |
+| warm enriched | 0.264 s | 0.263 s |
+| repeated warm enriched | 0.364 s | 0.360 s |
+
+Cold-call savings are visible because CodeGraph startup/search (~0.636 s) now overlaps
+Serena initialization and first-use realtime work.
+
+Warm-call improvement is intentionally small: Phase 1 had already reduced warm CodeGraph
+to ~4 ms, while realtime work dominates the remaining ~0.26–0.36 s.
+
+This phase therefore improves the causal path without claiming a large warm-path gain
+that the measurements do not support.
