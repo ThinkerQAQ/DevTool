@@ -1,9 +1,12 @@
 package extension
 
 import (
-	contract "github.com/thinkerqaq/devtool/sdk/contract"
-	service "github.com/thinkerqaq/devtool/sdk/service"
+	"context"
+
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
+	contract "github.com/thinkerqaq/devtool/sdk/contract"
+	"github.com/thinkerqaq/devtool/sdk/readiness"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 )
 
 type Kind string
@@ -25,6 +28,7 @@ type Descriptor struct {
 	Provides   []string `json:"provides,omitempty"`
 	Requires   []string `json:"requires,omitempty"`
 	AgentTools bool     `json:"agent_tools,omitempty"`
+	Readiness  bool     `json:"readiness,omitempty"`
 }
 
 type Registrar interface {
@@ -43,6 +47,9 @@ type Extension interface {
 	Register(Registrar) error
 }
 
+type ReadinessProvider interface {
+	CheckReadiness(context.Context, readiness.Request) (readiness.Report, error)
+}
 
 type Configurable interface {
 	Configure(map[string]any) error

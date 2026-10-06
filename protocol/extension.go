@@ -6,6 +6,7 @@ const (
 	MethodExtensionDescribe  = "extension.describe"
 	MethodExtensionConfigure = "extension.configure"
 	MethodExtensionInvoke    = "extension.invoke"
+	MethodExtensionReadiness = "extension.readiness"
 	MethodAgentToolsList     = "agent.tools.list"
 	MethodAgentToolCall      = "agent.tools.call"
 )

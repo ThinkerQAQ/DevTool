@@ -16,6 +16,7 @@ import (
 	"github.com/thinkerqaq/devtool/protocol"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	"github.com/thinkerqaq/devtool/sdk/readiness"
 )
 
 type ProcessExtension struct {
@@ -111,6 +112,20 @@ func (p *ProcessExtension) invokeService(ctx context.Context, serviceName, metho
 		return nil, err
 	}
 	return result, nil
+}
+
+func (p *ProcessExtension) CheckReadiness(ctx context.Context, request readiness.Request) (readiness.Report, error) {
+	if !p.descriptor.Readiness {
+		return readiness.Report{}, fmt.Errorf("extension %q does not expose readiness", p.descriptor.ID)
+	}
+	var report readiness.Report
+	if err := p.client.call(ctx, protocol.MethodExtensionReadiness, request, &report); err != nil {
+		return readiness.Report{}, err
+	}
+	if strings.TrimSpace(report.Provider) == "" {
+		report.Provider = p.descriptor.ID
+	}
+	return report, nil
 }
 
 func (p *ProcessExtension) ListTools(ctx context.Context, session agentsdk.Session) ([]agentsdk.Tool, error) {

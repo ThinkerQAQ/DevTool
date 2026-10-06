@@ -12,9 +12,16 @@ import (
 	"github.com/thinkerqaq/devtool/core/project"
 	"github.com/thinkerqaq/devtool/core/registry"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	"github.com/thinkerqaq/devtool/sdk/readiness"
 )
 
 type ExecutableResolver func(context.Context, project.Project, string, config.Extension) (string, error)
+
+type ReadinessProviderEntry struct {
+	ExtensionID string
+	Provides    []string
+	Checker     readiness.Checker
+}
 
 type ProjectHost struct {
 	Project    project.Project
@@ -23,6 +30,7 @@ type ProjectHost struct {
 	Registry   *registry.Registry
 	process    *coreextension.ProjectProcess
 	closers    []io.Closer
+	readiness  []ReadinessProviderEntry
 }
 
 func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) (*ProjectHost, error) {
@@ -41,6 +49,7 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 	reg := registry.New()
 	var descriptors []extensioncontract.Descriptor
 	var closers []io.Closer
+	var readinessProviders []ReadinessProviderEntry
 	keepExtensions := false
 	defer func() {
 		if keepExtensions {
@@ -70,6 +79,13 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		descriptor := ext.Descriptor()
 		descriptors = append(descriptors, descriptor)
 		closers = append(closers, ext)
+		if descriptor.Readiness {
+			readinessProviders = append(readinessProviders, ReadinessProviderEntry{
+				ExtensionID: descriptor.ID,
+				Provides:    append([]string(nil), descriptor.Provides...),
+				Checker:     ext,
+			})
+		}
 		if err := ext.Register(reg); err != nil {
 			return nil, fmt.Errorf("register extension %q: %w", ext.Descriptor().ID, err)
 		}
@@ -132,10 +148,33 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		Registry:   reg,
 		process:    process,
 		closers:    closers,
+		readiness:  readinessProviders,
 	}
 	keepProjectProcess = true
 	keepExtensions = true
 	return h, nil
+}
+
+func (h *ProjectHost) ReadinessProviders() []ReadinessProviderEntry {
+	if h == nil {
+		return nil
+	}
+	out := make([]ReadinessProviderEntry, 0, len(h.readiness))
+	for _, entry := range h.readiness {
+		active := len(entry.Provides) == 0
+		for _, serviceName := range entry.Provides {
+			provider, ok := h.Registry.ServiceProvider(serviceName)
+			if ok && provider == entry.ExtensionID {
+				active = true
+				break
+			}
+		}
+		if active {
+			out = append(out, entry)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ExtensionID < out[j].ExtensionID })
+	return out
 }
 
 func (h *ProjectHost) Close() error {
