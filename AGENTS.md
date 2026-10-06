@@ -9,11 +9,11 @@ The goal of this file is operational: an agent should be able to enter the repos
 From the repository root:
 
 ```bash
-go run ./cmd/devtool config validate
+go run ./cmd/devtool init --json
 go run ./cmd/devtool project inspect --json
-go run ./cmd/devtool code doctor
-go run ./cmd/devtool code verify
 ```
+
+Treat `devtool init --json` as the readiness feedback loop. If it returns structured issues such as a missing executable, missing configuration, or authorization requirement, remediate them with the available environment/account tools and rerun `init` until the required providers are ready. DevTool reports readiness; the Agent performs remediation rather than turning DevTool Core into a package manager.
 
 For DevTool's own Stage 0 bootstrap, `go run ./cmd/devtool ...` is the minimal allowed entry point. It launches DevTool itself; it is not a parallel project control plane.
 

@@ -12,20 +12,23 @@ go run ./cmd/devtool ...
 
 That command is Stage 0 bootstrap for DevTool itself. It still loads the same project configuration, Project Extension, services and providers used by a built DevTool binary.
 
-## 2. Validate configuration
+## 2. Initialize project readiness
+
+```bash
+go run ./cmd/devtool init
+go run ./cmd/devtool init --json
+```
+
+`init` resolves the configured providers and asks each active readiness-capable provider to check or prepare the project state it owns. Typical issues include missing executables, missing configuration, unavailable providers, and authorization requirements.
+
+DevTool does not install system dependencies. An Agent or operator should remediate the structured issues using the current environment, then rerun `init`. Provider-owned project state such as a CodeGraph index or Serena workspace health check may be prepared during readiness.
+
+Configuration-only checks remain available with:
 
 ```bash
 go run ./cmd/devtool config validate
 go run ./cmd/devtool config path
 ```
-
-Expected result:
-
-```text
-VALID <repository>/.devtool.toml
-```
-
-The repository configuration is the source of truth for extension loading and service/provider selection.
 
 ## 3. Inspect the project contract
 

@@ -22,12 +22,12 @@ Human / Agent / CI
 From the DevTool repository:
 
 ```bash
-go run ./cmd/devtool config validate
+go run ./cmd/devtool init --json
 go run ./cmd/devtool project inspect --json
-go run ./cmd/devtool code doctor
-go run ./cmd/devtool code verify
 go run ./cmd/devtool build
 ```
+
+`devtool init` resolves the active providers and reports project readiness before real work starts. It does not become a package manager: missing dependencies, credentials, or configuration are returned as structured issues for the operator or Agent to remediate, then `init` is rerun.
 
 This is DevTool bootstrapping itself through the same Project Extension and service/provider graph used by a built binary.
 
