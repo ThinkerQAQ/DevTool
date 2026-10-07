@@ -10,6 +10,13 @@ loader = "go"
 module = "./devcontrol"
 package = "./cmd/provider"
 
+[extension.workspace]
+loader = "go"
+
+[extension.workspace.loader_config]
+module = "."
+package = "./extensions/workspace/git/cmd/provider"
+
 [extension.environment]
 loader = "go"
 
@@ -33,6 +40,13 @@ loader = "go"
 [extension.code-capability.loader_config]
 module = "."
 package = "./extensions/capability/code/cmd/provider"
+
+[extension.workspace-capability]
+loader = "go"
+
+[extension.workspace-capability.loader_config]
+module = "."
+package = "./extensions/capability/workspace/cmd/provider"
 
 [extension.codegraph]
 loader = "go"
@@ -82,6 +96,9 @@ loader = "go"
 [extension.scm.loader_config]
 module = "."
 package = "./extensions/scm/github/cmd/provider"
+
+[service.workspace]
+provider = "workspace.git"
 
 [service.environment]
 provider = "environment.docker"

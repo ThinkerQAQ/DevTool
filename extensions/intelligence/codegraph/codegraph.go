@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -29,29 +28,41 @@ import (
 
 const ExtensionID = "intelligence.codegraph"
 
+type revisionState struct {
+	Head string
+	Tree string
+}
+
 type Extension struct {
 	// executable exists only for isolated adapter tests. Production execution
 	// is resolved through the configured Environment service.
 	executable string
 	services   extensioncontract.Registrar
 
-	mu               sync.Mutex
-	bridge           *mcpbridge.Provider
-	workspaceVersion uint64
-	persistent       bool
+	mu                sync.Mutex
+	bridge            *mcpbridge.Provider
+	workspaceIdentity uint64
+	persistent        bool
+
+	revisionMu sync.Mutex
+	revisions  map[uint64]revisionState
 }
 
 func New() *Extension { return &Extension{persistent: true} }
 
 func (e *Extension) Close() error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.bridge == nil {
-		return nil
+	var err error
+	if e.bridge != nil {
+		err = e.bridge.Close()
 	}
-	err := e.bridge.Close()
 	e.bridge = nil
-	e.workspaceVersion = 0
+	e.workspaceIdentity = 0
+	e.mu.Unlock()
+
+	e.revisionMu.Lock()
+	e.revisions = nil
+	e.revisionMu.Unlock()
 	return err
 }
 
@@ -99,7 +110,7 @@ func (e *Extension) CheckReadiness(ctx context.Context, request readiness.Reques
 		}
 	}
 
-	if _, err := e.runTool(ctx, workspace, "codegraph_reindex_workspace", json.RawMessage(`{"force":false}`)); err != nil {
+	if _, err := e.refreshIndex(ctx, workspace, false); err != nil {
 		report.Issues = append(report.Issues, readiness.Issue{
 			Kind:        readiness.KindVerificationFailed,
 			Resource:    "codegraph-index",
@@ -108,6 +119,7 @@ func (e *Extension) CheckReadiness(ctx context.Context, request readiness.Reques
 		})
 		return report, nil
 	}
+	e.rememberRevision(ctx, workspace)
 	report.Ready = true
 	return report, nil
 }
@@ -148,10 +160,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err := json.Unmarshal(payload, &request); err != nil {
 			return nil, fmt.Errorf("decode CodeGraph verify request: %w", err)
 		}
-		raw, err := e.runTool(ctx, request, "codegraph_reindex_workspace", json.RawMessage(`{"force":false}`))
+		raw, err := e.refreshIndex(ctx, request, true)
 		if err != nil {
 			return nil, err
 		}
+		e.rememberRevision(ctx, request)
 		return json.Marshal(codeintelligence.VerifyResponse{Provider: ExtensionID, Output: strings.TrimSpace(string(raw))})
 	case codeintelligence.MethodSearch:
 		var request codeintelligence.SearchRequest
@@ -167,7 +180,9 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			limit = 20
 		}
 		if request.Discovery {
-			return e.discover(ctx, request.Workspace, query, limit)
+			return e.guardSearchResult(ctx, request.Workspace, func() (json.RawMessage, error) {
+				return e.discover(ctx, request.Workspace, query, limit)
+			})
 		}
 		args, err := json.Marshal(map[string]any{
 			"query":   query,
@@ -177,10 +192,280 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err != nil {
 			return nil, err
 		}
-		return e.runTool(ctx, request.Workspace, "codegraph_symbol_search", args)
+		return e.searchSymbols(ctx, request.Workspace, args)
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
+}
+
+func (e *Extension) searchSymbols(ctx context.Context, workspace codeintelligence.Workspace, args json.RawMessage) (json.RawMessage, error) {
+	return e.guardSearchResult(ctx, workspace, func() (json.RawMessage, error) {
+		return e.runTool(ctx, workspace, "codegraph_symbol_search", args)
+	})
+}
+
+func (e *Extension) guardSearchResult(
+	ctx context.Context,
+	workspace codeintelligence.Workspace,
+	query func() (json.RawMessage, error),
+) (json.RawMessage, error) {
+	if err := e.ensureFresh(ctx, workspace); err != nil {
+		return nil, err
+	}
+	raw, err := query()
+	if err != nil {
+		return nil, err
+	}
+	filtered, stale, err := filterSearchResultPaths(workspace, raw)
+	if err != nil {
+		return nil, err
+	}
+	if !stale {
+		return filtered, nil
+	}
+	if err := e.forceReindex(ctx, workspace); err != nil {
+		return nil, err
+	}
+	raw, err = query()
+	if err != nil {
+		return nil, err
+	}
+	filtered, _, err = filterSearchResultPaths(workspace, raw)
+	return filtered, err
+}
+
+func (e *Extension) forceReindex(ctx context.Context, workspace codeintelligence.Workspace) error {
+	if _, err := e.refreshIndex(ctx, workspace, true); err != nil {
+		return fmt.Errorf("force CodeGraph reindex after stale result: %w", err)
+	}
+	e.rememberRevision(ctx, workspace)
+	return nil
+}
+
+func (e *Extension) refreshIndex(
+	ctx context.Context,
+	workspace codeintelligence.Workspace,
+	force bool,
+) (json.RawMessage, error) {
+	args, err := json.Marshal(map[string]bool{"force": force})
+	if err != nil {
+		return nil, err
+	}
+	return e.runTool(ctx, workspace, "codegraph_reindex_workspace", args)
+}
+
+func (e *Extension) ensureFresh(
+	ctx context.Context,
+	workspace codeintelligence.Workspace,
+) error {
+	identity, err := codeGraphWorkspaceIdentity(workspace)
+	if err != nil {
+		return err
+	}
+	current, available := gitRevisionState(ctx, workspace.Root)
+
+	e.revisionMu.Lock()
+	previous, seen := e.revisions[identity]
+	e.revisionMu.Unlock()
+
+	force := revisionRefreshRequired(previous, seen, current, available)
+	if _, err := e.refreshIndex(ctx, workspace, force); err != nil {
+		return err
+	}
+	if available {
+		e.recordRevision(identity, current)
+	}
+	return nil
+}
+
+func (e *Extension) rememberRevision(
+	ctx context.Context,
+	workspace codeintelligence.Workspace,
+) {
+	identity, err := codeGraphWorkspaceIdentity(workspace)
+	if err != nil {
+		return
+	}
+	current, available := gitRevisionState(ctx, workspace.Root)
+	if !available {
+		return
+	}
+	e.recordRevision(identity, current)
+}
+
+func (e *Extension) recordRevision(identity uint64, revision revisionState) {
+	e.revisionMu.Lock()
+	defer e.revisionMu.Unlock()
+	if e.revisions == nil {
+		e.revisions = map[uint64]revisionState{}
+	}
+	e.revisions[identity] = revision
+}
+
+func revisionRefreshRequired(
+	previous revisionState,
+	seen bool,
+	current revisionState,
+	available bool,
+) bool {
+	if !available {
+		return false
+	}
+	return !seen || previous != current
+}
+
+func gitRevisionState(ctx context.Context, root string) (revisionState, bool) {
+	root, err := canonicalWorkspaceRoot(root)
+	if err != nil {
+		return revisionState{}, false
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "HEAD", "HEAD^{tree}")
+	out, err := cmd.Output()
+	if err != nil {
+		return revisionState{}, false
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return revisionState{}, false
+	}
+	return revisionState{Head: fields[0], Tree: fields[1]}, true
+}
+
+func filterSearchResultPaths(
+	workspace codeintelligence.Workspace,
+	raw json.RawMessage,
+) (json.RawMessage, bool, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, false, fmt.Errorf("decode CodeGraph search result: %w", err)
+	}
+
+	resultsRaw, ok := envelope["results"]
+	if !ok {
+		return append(json.RawMessage(nil), raw...), false, nil
+	}
+
+	var results []json.RawMessage
+	if err := json.Unmarshal(resultsRaw, &results); err != nil {
+		return nil, false, fmt.Errorf("decode CodeGraph search results: %w", err)
+	}
+
+	filtered := make([]json.RawMessage, 0, len(results))
+	stale := false
+	for _, result := range results {
+		path, ok, err := codeGraphResultPath(result)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok && !workspaceFileExists(workspace, path) {
+			stale = true
+			continue
+		}
+		filtered = append(filtered, result)
+	}
+
+	encoded, err := json.Marshal(filtered)
+	if err != nil {
+		return nil, false, err
+	}
+	envelope["results"] = encoded
+	out, err := json.Marshal(envelope)
+	return out, stale, err
+}
+
+func codeGraphResultPath(raw json.RawMessage) (string, bool, error) {
+	var result struct {
+		Path   string `json:"path"`
+		Symbol struct {
+			Location struct {
+				File string `json:"file"`
+			} `json:"location"`
+		} `json:"symbol"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", false, fmt.Errorf("decode CodeGraph result path: %w", err)
+	}
+	if path := strings.TrimSpace(result.Path); path != "" {
+		return path, true, nil
+	}
+	if path := strings.TrimSpace(result.Symbol.Location.File); path != "" {
+		return path, true, nil
+	}
+	return "", false, nil
+}
+
+func workspaceFileExists(workspace codeintelligence.Workspace, candidate string) bool {
+	path, ok := resolveWorkspacePath(workspace, candidate)
+	if !ok {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func resolveWorkspacePath(
+	workspace codeintelligence.Workspace,
+	candidate string,
+) (string, bool) {
+	root := strings.TrimSpace(workspace.Root)
+	if root == "" {
+		return "", false
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	root = filepath.Clean(root)
+
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return "", false
+	}
+	path := filepath.Clean(filepath.FromSlash(candidate))
+	if !filepath.IsAbs(path) {
+		return pathWithinRoot(root, filepath.Join(root, path))
+	}
+	if resolved, ok := pathWithinRoot(root, path); ok {
+		return resolved, true
+	}
+
+	return resolveEnvironmentAbsolutePath(root, path)
+}
+
+func resolveEnvironmentAbsolutePath(root, candidate string) (string, bool) {
+	volume := filepath.VolumeName(candidate)
+	trimmed := strings.TrimPrefix(candidate, volume)
+	trimmed = strings.TrimLeft(trimmed, string(filepath.Separator))
+	if trimmed == "" {
+		return "", false
+	}
+	parts := strings.Split(trimmed, string(filepath.Separator))
+	var match string
+	for index := range parts {
+		suffix := filepath.Join(parts[index:]...)
+		path, ok := pathWithinRoot(root, filepath.Join(root, suffix))
+		if !ok {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if match != "" && match != path {
+			return "", false
+		}
+		match = path
+	}
+	return match, match != ""
+}
+
+func pathWithinRoot(root, candidate string) (string, bool) {
+	candidate = filepath.Clean(candidate)
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return candidate, true
 }
 
 type discoveryCandidate struct {
@@ -477,19 +762,19 @@ func (e *Extension) runTool(ctx context.Context, workspace codeintelligence.Work
 }
 
 func (e *Extension) runPersistentTool(ctx context.Context, workspace codeintelligence.Workspace, tool string, toolArgs json.RawMessage) (json.RawMessage, error) {
-	version, err := workspaceFingerprint(workspace)
+	identity, err := codeGraphWorkspaceIdentity(workspace)
 	if err != nil {
 		return nil, err
 	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.bridge == nil || e.workspaceVersion != version {
+	if e.bridge == nil || e.workspaceIdentity != identity {
 		if e.bridge != nil {
 			_ = e.bridge.Close()
 		}
 		e.bridge = mcpbridge.New(e.mcpCommand)
-		e.workspaceVersion = version
+		e.workspaceIdentity = identity
 	}
 
 	session := agentsdk.Session{
@@ -504,65 +789,97 @@ func (e *Extension) runPersistentTool(ctx context.Context, workspace codeintelli
 	return unwrapMCPToolResult(raw)
 }
 
-func workspaceFingerprint(workspace codeintelligence.Workspace) (uint64, error) {
-	root := strings.TrimSpace(workspace.Root)
-	if root == "" {
-		return 0, fmt.Errorf("CodeGraph workspace root is required")
-	}
-	root, err := filepath.Abs(root)
+func codeGraphWorkspaceIdentity(workspace codeintelligence.Workspace) (uint64, error) {
+	root, err := canonicalWorkspaceRoot(workspace.Root)
 	if err != nil {
-		return 0, fmt.Errorf("resolve CodeGraph root: %w", err)
+		return 0, err
 	}
+
 	workspaces := workspace.Workspaces
 	if len(workspaces) == 0 {
 		workspaces = []string{root}
 	}
-
-	h := fnv.New64a()
+	normalized := make([]string, 0, len(workspaces))
 	for _, item := range workspaces {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return 0, fmt.Errorf("CodeGraph workspace cannot be empty")
+		}
 		if !filepath.IsAbs(item) {
 			item = filepath.Join(root, item)
 		}
-		item = filepath.Clean(item)
+		item, err = canonicalWorkspaceRoot(item)
+		if err != nil {
+			return 0, err
+		}
 		if _, err := os.Stat(item); err != nil {
 			return 0, fmt.Errorf("stat CodeGraph workspace %s: %w", item, err)
 		}
-		if err := filepath.WalkDir(item, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() && path != item && ignoredFingerprintDir(entry.Name()) {
-				return filepath.SkipDir
-			}
-			info, err := entry.Info()
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			_, _ = h.Write([]byte(filepath.ToSlash(rel)))
-			_, _ = h.Write([]byte{0})
-			_, _ = h.Write([]byte(strconv.FormatInt(info.Size(), 10)))
-			_, _ = h.Write([]byte{0})
-			_, _ = h.Write([]byte(strconv.FormatInt(info.ModTime().UnixNano(), 10)))
-			_, _ = h.Write([]byte{0})
-			return nil
-		}); err != nil {
-			return 0, fmt.Errorf("fingerprint CodeGraph workspace %s: %w", item, err)
-		}
+		normalized = append(normalized, item)
+	}
+	sort.Strings(normalized)
+
+	h := fnv.New64a()
+	writeIdentityPart(h, root)
+	writeIdentityPart(h, gitWorktreeIdentity(root))
+	for _, item := range normalized {
+		writeIdentityPart(h, item)
 	}
 	return h.Sum64(), nil
 }
 
-func ignoredFingerprintDir(name string) bool {
-	switch name {
-	case ".git", ".devtool", ".cache", "node_modules", "dist", "coverage":
-		return true
-	default:
-		return false
+func canonicalWorkspaceRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("CodeGraph workspace root is required")
 	}
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve CodeGraph root: %w", err)
+	}
+	absolute = filepath.Clean(absolute)
+	if resolved, err := filepath.EvalSymlinks(absolute); err == nil {
+		absolute = filepath.Clean(resolved)
+	}
+	return absolute, nil
+}
+
+func gitWorktreeIdentity(root string) string {
+	path := filepath.Join(root, ".git")
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	if info.IsDir() {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return filepath.Clean(resolved)
+		}
+		return filepath.Clean(path)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	value := strings.TrimSpace(string(raw))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(strings.ToLower(value), prefix) {
+		return ""
+	}
+	gitDir := strings.TrimSpace(value[len(prefix):])
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(root, gitDir)
+	}
+	gitDir = filepath.Clean(gitDir)
+	if resolved, err := filepath.EvalSymlinks(gitDir); err == nil {
+		gitDir = filepath.Clean(resolved)
+	}
+	return gitDir
+}
+
+func writeIdentityPart(h interface{ Write([]byte) (int, error) }, value string) {
+	_, _ = h.Write([]byte(filepath.ToSlash(value)))
+	_, _ = h.Write([]byte{0})
 }
 
 func (e *Extension) runOneShotTool(ctx context.Context, workspace codeintelligence.Workspace, tool string, toolArgs json.RawMessage) (json.RawMessage, error) {
