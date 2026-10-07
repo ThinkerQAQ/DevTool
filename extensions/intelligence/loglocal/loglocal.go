@@ -1,0 +1,285 @@
+package loglocal
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	logintelligence "github.com/thinkerqaq/devtool/sdk/logintelligence"
+	service "github.com/thinkerqaq/devtool/sdk/service"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
+)
+
+const ExtensionID = "intelligence.log.local"
+
+const (
+	defaultLimit = 20
+	maxLimit     = 100
+	maxLineBytes = 4 * 1024 * 1024
+)
+
+var (
+	levelPattern  = regexp.MustCompile(`(?i)\b(trace|debug|info|warn(?:ing)?|error|fatal|panic)\b`)
+	numberPattern = regexp.MustCompile(`\b\d+\b`)
+	hexPattern    = regexp.MustCompile(`(?i)\b(?:0x)?[0-9a-f]{8,}\b`)
+	uuidPattern   = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	secretPattern = regexp.MustCompile(`(?i)\b(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*([^\s,;]+)`)
+	bearerPattern = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`)
+)
+
+type Extension struct{}
+
+func New() *Extension { return &Extension{} }
+
+func (e *Extension) Descriptor() extensioncontract.Descriptor {
+	return extensioncontract.Descriptor{
+		ID:       ExtensionID,
+		Kind:     extensioncontract.KindLogIntelligence,
+		Provides: []string{logintelligence.ServiceName},
+	}
+}
+
+func (e *Extension) Register(reg extensioncontract.Registrar) error {
+	return reg.ProvideService(logintelligence.ServiceName, ExtensionID, service.Func(e.Invoke))
+}
+
+func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (result json.RawMessage, err error) {
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name:         "local-log",
+		Layer:        "provider",
+		Service:      logintelligence.ServiceName,
+		Provider:     ExtensionID,
+		Method:       method,
+		RequestBytes: len(payload),
+	})
+	defer func() { span.End(len(result), err) }()
+
+	if method != logintelligence.MethodAnalyze {
+		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
+	}
+	var request logintelligence.AnalyzeRequest
+	if err := json.Unmarshal(payload, &request); err != nil {
+		return nil, fmt.Errorf("decode local log analysis request: %w", err)
+	}
+	response, err := analyze(request)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(response)
+}
+
+type patternState struct {
+	count  int
+	sample string
+}
+
+func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeResponse, error) {
+	path, err := resolvePath(request.Root, request.Path)
+	if err != nil {
+		return logintelligence.AnalyzeResponse{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return logintelligence.AnalyzeResponse{}, fmt.Errorf("stat log file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return logintelligence.AnalyzeResponse{}, fmt.Errorf("log path %q is not a regular file", request.Path)
+	}
+
+	limit := request.Limit
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit > maxLimit {
+		return logintelligence.AnalyzeResponse{}, fmt.Errorf("log analysis limit must not exceed %d", maxLimit)
+	}
+	query := strings.ToLower(strings.TrimSpace(request.Query))
+
+	file, err := os.Open(path)
+	if err != nil {
+		return logintelligence.AnalyzeResponse{}, fmt.Errorf("open log file: %w", err)
+	}
+	defer file.Close()
+
+	response := logintelligence.AnalyzeResponse{
+		Provider: ExtensionID,
+		Source:   request.Path,
+		Format:   "plain",
+		Levels:   map[string]int{},
+		Summary: logintelligence.Summary{
+			Bytes: info.Size(),
+		},
+	}
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
+	patterns := map[string]*patternState{}
+	firstContentSeen := false
+
+	for scanner.Scan() {
+		response.Summary.Lines++
+		lineNo := int(response.Summary.Lines)
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if !firstContentSeen && trimmed != "" {
+			firstContentSeen = true
+			if looksJSON(trimmed) {
+				response.Format = "json"
+			}
+		}
+
+		level := detectLevel(line)
+		if level != "" {
+			response.Levels[level]++
+			switch level {
+			case "error", "fatal", "panic":
+				response.Summary.Errors++
+				recordPattern(patterns, line)
+			case "warn":
+				response.Summary.Warnings++
+			}
+		}
+
+		matchesQuery := query != "" && strings.Contains(strings.ToLower(line), query)
+		if matchesQuery {
+			response.Summary.Matched++
+			if len(response.Matches) < limit {
+				response.Matches = append(response.Matches, logintelligence.Evidence{
+					Line:  lineNo,
+					Level: level,
+					Text:  redact(line),
+				})
+			}
+		}
+
+		if shouldKeepEvidence(level, matchesQuery) && len(response.Evidence) < limit {
+			response.Evidence = append(response.Evidence, logintelligence.Evidence{
+				Line:  lineNo,
+				Level: level,
+				Text:  redact(line),
+			})
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return logintelligence.AnalyzeResponse{}, fmt.Errorf("scan log file: %w", err)
+	}
+
+	response.Patterns = topPatterns(patterns, 10)
+	response.Summary.Truncated = response.Summary.Errors+response.Summary.Warnings > len(response.Evidence)
+	return response, nil
+}
+
+func resolvePath(root, name string) (string, error) {
+	root = strings.TrimSpace(root)
+	name = strings.TrimSpace(name)
+	if root == "" {
+		return "", fmt.Errorf("log analysis project root is required")
+	}
+	if name == "" {
+		return "", fmt.Errorf("log analysis path is required")
+	}
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve log analysis root: %w", err)
+	}
+	candidate := name
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(absoluteRoot, candidate)
+	}
+	candidate, err = filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve log path: %w", err)
+	}
+	rel, err := filepath.Rel(absoluteRoot, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("log path %q is outside project root", name)
+	}
+	return filepath.Clean(candidate), nil
+}
+
+func detectLevel(line string) string {
+	match := levelPattern.FindStringSubmatch(line)
+	if len(match) < 2 {
+		return ""
+	}
+	level := strings.ToLower(match[1])
+	if level == "warning" {
+		return "warn"
+	}
+	return level
+}
+
+func looksJSON(line string) bool {
+	if !strings.HasPrefix(line, "{") {
+		return false
+	}
+	var value map[string]any
+	return json.Unmarshal([]byte(line), &value) == nil
+}
+
+func shouldKeepEvidence(level string, query bool) bool {
+	if query {
+		return true
+	}
+	switch level {
+	case "warn", "error", "fatal", "panic":
+		return true
+	default:
+		return false
+	}
+}
+
+func recordPattern(patterns map[string]*patternState, line string) {
+	normalized := normalizePattern(line)
+	state := patterns[normalized]
+	if state == nil {
+		state = &patternState{sample: redact(line)}
+		patterns[normalized] = state
+	}
+	state.count++
+}
+
+func normalizePattern(line string) string {
+	line = redact(strings.TrimSpace(line))
+	line = uuidPattern.ReplaceAllString(line, "<uuid>")
+	line = hexPattern.ReplaceAllString(line, "<hex>")
+	line = numberPattern.ReplaceAllString(line, "<n>")
+	if len(line) > 240 {
+		line = line[:240]
+	}
+	return line
+}
+
+func topPatterns(states map[string]*patternState, limit int) []logintelligence.Pattern {
+	out := make([]logintelligence.Pattern, 0, len(states))
+	for pattern, state := range states {
+		out = append(out, logintelligence.Pattern{
+			Pattern: pattern,
+			Count:   state.count,
+			Sample:  state.sample,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count == out[j].Count {
+			return out[i].Pattern < out[j].Pattern
+		}
+		return out[i].Count > out[j].Count
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func redact(line string) string {
+	line = secretPattern.ReplaceAllString(line, "$1=[REDACTED]")
+	line = bearerPattern.ReplaceAllString(line, "Bearer [REDACTED]")
+	return line
+}
