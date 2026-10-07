@@ -60,17 +60,45 @@ Ask for the engineering context you need, not a provider method.
 
 Use `document_context`.
 
-The normal long-document workflow is outline-first:
+The normal long-document workflow uses deterministic review traversal:
 
 ```text
-document_context(path=document)
-  -> frontmatter + complete outline + exact section ranges
+document_context(path=document, review=true)
+  -> frontmatter + complete outline
+  -> explicit remaining coverage
+  -> next_cursor
 
-document_context(path=document, section="...", include_content=true)
-  -> one bounded source section
+document_context(path=document, review=true, cursor=next_cursor)
+  -> exactly one top-level section body
+  -> covered sections
+  -> remaining sections
+  -> next_cursor
+
+repeat until complete=true
 ```
 
-Review the relevant sections before making whole-document conclusions. The agent should not depend on Goldmark, Marksman, Serena, or another concrete document provider.
+For a focused lookup, keep using direct section selection:
+
+```text
+document_context(path=document, section="...", include_content=true)
+  -> one exact source section
+```
+
+Review mode is stateless: the continuation cursor carries traversal position and is rejected if the document structure changes.
+
+When the review depends on series/project/note context, request deterministic relationships on the initial call:
+
+```text
+document_context(path=document, review=true, related=true)
+  -> document outline + review coverage
+  -> parent series/project
+  -> ordered sibling documents
+  -> explicit related notes / configured note scopes
+```
+
+The relationship graph discovers source-of-truth links; it does not automatically ingest every related body. Read only the related documents needed for the objective.
+
+The agent should not depend on Goldmark, the configured relation provider, Marksman, Serena, or another concrete provider.
 
 ### Execute project operations
 
