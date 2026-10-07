@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -251,5 +252,126 @@ func TestPatternDiscoveryRewardsMultipleObjectiveTerms(t *testing.T) {
 	other := candidates["go/browser/control.go\x00handleControl"]
 	if main.Score <= other.Score {
 		t.Fatalf("multi-term score %.1f <= single-term score %.1f", main.Score, other.Score)
+	}
+}
+
+func TestFilterSearchResultPathsMapsEnvironmentWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	fresh := filepath.Join(root, "go", "fresh.go")
+	if err := os.MkdirAll(filepath.Dir(fresh), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fresh, []byte("package fresh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	raw := json.RawMessage(`{
+		"results": [
+			{"path": "/workspace/go/fresh.go", "name": "Fresh"},
+			{"path": "/workspace/go/deleted.go", "name": "Deleted"}
+		]
+	}`)
+	filtered, stale, err := filterSearchResultPaths(
+		codeintelligence.Workspace{Root: root},
+		raw,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale {
+		t.Fatal("expected deleted workspace path to mark the index stale")
+	}
+
+	var response struct {
+		Results []struct {
+			Name string `json:"name"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(filtered, &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Results) != 1 || response.Results[0].Name != "Fresh" {
+		t.Fatalf("filtered results = %#v", response.Results)
+	}
+}
+
+func TestSearchRepairsDeletedFileStaleIndex(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("CodeGraph integration fixture uses unix workspace paths")
+	}
+	executable, err := exec.LookPath("codegraph-server")
+	if err != nil {
+		t.Skip("codegraph-server is not available")
+	}
+
+	root := t.TempDir()
+	keep := filepath.Join(root, "keep.go")
+	deleted := filepath.Join(root, "deleted.go")
+	if err := os.WriteFile(keep, []byte("package demo\nfunc KeepMe() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(deleted, []byte("package demo\nfunc DeleteMeUniqueXYZ() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := codeintelligence.Workspace{Root: root}
+	e := &Extension{executable: executable}
+	workspacePayload, _ := json.Marshal(workspace)
+	if _, err := e.Invoke(context.Background(), codeintelligence.MethodVerify, workspacePayload); err != nil {
+		t.Fatal(err)
+	}
+
+	search := codeintelligence.SearchRequest{
+		Workspace: workspace,
+		Query:     "DeleteMeUniqueXYZ",
+		Limit:     5,
+	}
+	searchPayload, _ := json.Marshal(search)
+	before, err := e.Invoke(context.Background(), codeintelligence.MethodSearch, searchPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(before), "DeleteMeUniqueXYZ") {
+		t.Fatalf("expected symbol before deletion, got %s", before)
+	}
+
+	if err := os.Remove(deleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.runTool(
+		context.Background(),
+		workspace,
+		"codegraph_reindex_workspace",
+		json.RawMessage(`{"force":false}`),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	args, _ := json.Marshal(map[string]any{
+		"query":   "DeleteMeUniqueXYZ",
+		"limit":   5,
+		"compact": true,
+	})
+	upstream, err := e.runTool(
+		context.Background(),
+		workspace,
+		"codegraph_symbol_search",
+		args,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(upstream), "DeleteMeUniqueXYZ") {
+		t.Log("reproduced CodeGraph deleted-file stale symbol before provider guard")
+	} else {
+		t.Log("CodeGraph upstream already reconciled the deleted file")
+	}
+
+	after, err := e.Invoke(context.Background(), codeintelligence.MethodSearch, searchPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(after), "DeleteMeUniqueXYZ") {
+		t.Fatalf("deleted symbol leaked through CodeGraph provider: %s", after)
 	}
 }

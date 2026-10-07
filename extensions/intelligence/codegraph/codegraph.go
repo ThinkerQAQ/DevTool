@@ -329,12 +329,34 @@ func resolveWorkspacePath(
 		return resolved, true
 	}
 
-	environmentRoot := filepath.Clean(filepath.FromSlash(environmentcontract.WorkspaceRoot))
-	rel, err := filepath.Rel(environmentRoot, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	return resolveEnvironmentAbsolutePath(root, path)
+}
+
+func resolveEnvironmentAbsolutePath(root, candidate string) (string, bool) {
+	volume := filepath.VolumeName(candidate)
+	trimmed := strings.TrimPrefix(candidate, volume)
+	trimmed = strings.TrimLeft(trimmed, string(filepath.Separator))
+	if trimmed == "" {
 		return "", false
 	}
-	return pathWithinRoot(root, filepath.Join(root, rel))
+	parts := strings.Split(trimmed, string(filepath.Separator))
+	var match string
+	for index := range parts {
+		suffix := filepath.Join(parts[index:]...)
+		path, ok := pathWithinRoot(root, filepath.Join(root, suffix))
+		if !ok {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if match != "" && match != path {
+			return "", false
+		}
+		match = path
+	}
+	return match, match != ""
 }
 
 func pathWithinRoot(root, candidate string) (string, bool) {
