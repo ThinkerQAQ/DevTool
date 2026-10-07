@@ -159,7 +159,7 @@ provider = "workspace.git"
 provider = "environment.docker"
 
 [service.tooling-environment]
-provider = "environment.local"
+provider = "environment.docker"
 
 [service.portable-runtime]
 provider = "runtime.dagger"
@@ -194,7 +194,16 @@ provider = "scm.github"
 [code]
 workspaces = ["."]
 
+[profile.local.service.environment]
+provider = "environment.local"
+
+[profile.local.service.tooling-environment]
+provider = "environment.local"
+
 [profile.railway.service.environment]
+provider = "environment.local"
+
+[profile.railway.service.tooling-environment]
 provider = "environment.local"
 
 [profile.sourcegraph.service.code-indexed]

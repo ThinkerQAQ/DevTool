@@ -252,11 +252,20 @@ Profiles override extension and service wiring without mutating the base configu
 Example:
 
 ```toml
+[profile.local.service.environment]
+provider = "environment.local"
+
+[profile.local.service.tooling-environment]
+provider = "environment.local"
+
 [profile.railway.service.environment]
+provider = "environment.local"
+
+[profile.railway.service.tooling-environment]
 provider = "environment.local"
 ```
 
-The base DevTool configuration already loads `environment.local` for `tooling-environment`, so the Railway profile only changes the selected project `environment` provider. It does not load a duplicate local extension.
+The base configuration keeps project execution and tooling as separate service contracts even when both select `environment.docker`. Profiles may switch either service independently without changing the intelligence providers.
 
 Activate:
 
@@ -294,7 +303,7 @@ environment
   -> environment.docker
 
 tooling-environment
-  -> environment.local
+  -> environment.docker
 
 portable-runtime
   -> runtime.dagger
@@ -316,7 +325,9 @@ code-indexed
   -> intelligence.sourcegraph
 ```
 
-The `railway` profile changes only the project `environment` service selection to `environment.local` because the Railway deployment is already inside the remote runtime container. `tooling-environment` remains local in both profiles, so CodeGraph/Serena do not depend on Docker availability.
+The default profile selects the shared DevEnvironment container for both project execution and developer tooling, while keeping `environment` and `tooling-environment` as independent services. This lets CI obtain CodeGraph/Serena from the configured DevEnvironment without coupling their contracts.
+
+The `local` and `railway` profiles select `environment.local` for both services. Use `local` when the required developer tools are installed on the host; use `railway` when the Railway runtime already provides them.
 
 These are provider choices, not Project Extension changes.
 

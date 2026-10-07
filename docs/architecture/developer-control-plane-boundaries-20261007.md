@@ -683,11 +683,11 @@ Implemented wiring:
 ```text
 project build / verify / package
   -> service.environment
-  -> environment.docker
+  -> configured environment provider
 
 CodeGraph / Serena / LSP
   -> service.tooling-environment
-  -> environment.local
+  -> configured tooling environment provider
 ```
 
 Both services use the same Environment Contract and remain provider-replaceable. A deployment may select a different provider for either service through configuration.
@@ -885,8 +885,9 @@ The important consequence is:
 - keep the existing extension-process reuse inside one DevTool host lifecycle;
 - add `tooling-environment` as a separate stable Environment service selection;
 - run CodeGraph/Serena through `tooling-environment`;
-- select `environment.local` for DevTool tooling by default;
-- retain `environment.docker` / Dagger for reproducible project execution;
+- select the tooling provider by profile rather than hard-coding local execution;
+- keep the default/CI profile on the shared DevEnvironment container and provide an explicit `local` profile for host-installed tooling;
+- retain Docker/Dagger for reproducible project execution where selected;
 - treat repeated whole-DV2 cold starts as a later Remote Gateway optimization, not a Provider cache problem.
 
 ### Phase 3 — broaden log sources
