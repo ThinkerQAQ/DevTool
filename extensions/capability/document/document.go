@@ -67,6 +67,20 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 					"type":        "string",
 					"description": "Opaque continuation cursor returned by a previous review-mode call.",
 				},
+				"related": map[string]any{
+					"type":        "boolean",
+					"description": "Include deterministic cross-document relationship context from the configured relation provider.",
+				},
+				"relation_depth": map[string]any{
+					"type":        "integer",
+					"minimum":     1,
+					"description": "Optional relationship traversal depth. Defaults to the provider/capability standard.",
+				},
+				"relation_limit": map[string]any{
+					"type":        "integer",
+					"minimum":     1,
+					"description": "Optional maximum number of relation nodes returned.",
+				},
 			},
 			[]string{"objective", "path"},
 		),
@@ -80,6 +94,9 @@ type documentContextInput struct {
 	IncludeContent bool   `json:"include_content,omitempty"`
 	Review         bool   `json:"review,omitempty"`
 	Cursor         string `json:"cursor,omitempty"`
+	Related        bool   `json:"related,omitempty"`
+	RelationDepth  int    `json:"relation_depth,omitempty"`
+	RelationLimit  int    `json:"relation_limit,omitempty"`
 }
 
 type reviewCursor struct {
@@ -138,6 +155,15 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 	if input.Review && input.IncludeContent {
 		return nil, fmt.Errorf("document_context review mode controls section content; omit include_content")
 	}
+	if input.Cursor != "" && input.Related {
+		return nil, fmt.Errorf("document_context related context is only available on the initial review call")
+	}
+	if !input.Related && (input.RelationDepth > 0 || input.RelationLimit > 0) {
+		return nil, fmt.Errorf("document_context relation_depth/relation_limit require related=true")
+	}
+	if input.RelationDepth < 0 || input.RelationLimit < 0 {
+		return nil, fmt.Errorf("document_context relation depth/limit must be positive")
+	}
 
 	invoker, ok := e.services.Service(documentcontract.ServiceName)
 	if !ok {
@@ -161,10 +187,18 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 		return nil, fmt.Errorf("build document context: %w", err)
 	}
 
-	return toolResult(map[string]any{
+	result := map[string]any{
 		"objective": input.Objective,
 		"document":  decodeResult(raw),
-	})
+	}
+	if input.Related {
+		relations, err := e.resolveRelations(ctx, session, input)
+		if err != nil {
+			return nil, err
+		}
+		result["relations"] = relations
+	}
+	return toolResult(result)
 }
 
 func (e *Extension) callReview(
@@ -215,11 +249,19 @@ func (e *Extension) callReview(
 		if err != nil {
 			return nil, err
 		}
-		return toolResult(map[string]any{
+		result := map[string]any{
 			"objective": input.Objective,
 			"document":  document,
 			"review":    state,
-		})
+		}
+		if input.Related {
+			relations, err := e.resolveRelations(ctx, session, input)
+			if err != nil {
+				return nil, err
+			}
+			result["relations"] = relations
+		}
+		return toolResult(result)
 	}
 	if continuation.Signature != signature {
 		return nil, fmt.Errorf("document_context review cursor is stale because the document structure changed")
@@ -269,6 +311,38 @@ func inspectDocument(
 	var response documentcontract.InspectResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return documentcontract.InspectResponse{}, fmt.Errorf("decode document structure response: %w", err)
+	}
+	return response, nil
+}
+
+func (e *Extension) resolveRelations(
+	ctx context.Context,
+	session agentsdk.Session,
+	input documentContextInput,
+) (documentcontract.RelationsResponse, error) {
+	invoker, ok := e.services.Service(documentcontract.RelationsServiceName)
+	if !ok {
+		return documentcontract.RelationsResponse{}, fmt.Errorf(
+			"service %q is not configured; related document context requires a relation provider",
+			documentcontract.RelationsServiceName,
+		)
+	}
+	payload, err := json.Marshal(documentcontract.RelationsRequest{
+		Root:     session.ProjectRoot,
+		Path:     input.Path,
+		Depth:    input.RelationDepth,
+		MaxNodes: input.RelationLimit,
+	})
+	if err != nil {
+		return documentcontract.RelationsResponse{}, err
+	}
+	raw, err := invoker.Invoke(ctx, documentcontract.MethodResolveRelations, payload)
+	if err != nil {
+		return documentcontract.RelationsResponse{}, fmt.Errorf("build related document context: %w", err)
+	}
+	var response documentcontract.RelationsResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return documentcontract.RelationsResponse{}, fmt.Errorf("decode document relations response: %w", err)
 	}
 	return response, nil
 }
