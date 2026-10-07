@@ -32,8 +32,10 @@ func (Provider) ProjectDescriptor() contract.ProjectDescriptor {
 	return contract.ProjectDescriptor{
 		Identity: contract.ProjectIdentity{Name: "DevTool"},
 		Commands: []contract.CommandDescriptor{
+			{ID: "activate", Title: "Activate", Description: "Atomically activate the verified DevTool candidate in the user PATH installation.", SideEffect: contract.SideEffectWrite},
 			{ID: "build", Title: "Build", Description: "Build the next DevTool binary in the configured development environment.", SideEffect: contract.SideEffectWrite},
 			{ID: "package", Title: "Package", Description: "Package a verified DevTool binary in the configured development environment.", SideEffect: contract.SideEffectWrite},
+			{ID: "rollback", Title: "Rollback", Description: "Atomically restore the previously activated DevTool version.", SideEffect: contract.SideEffectWrite},
 			{ID: "verify", Title: "Verify", Description: "Run DevTool self-host verification in the configured development environment.", SideEffect: contract.SideEffectWrite},
 		},
 		Resources: []contract.ResourceDescriptor{
@@ -47,6 +49,8 @@ func (Provider) ProjectDescriptor() contract.ProjectDescriptor {
 				Actions: []contract.ActionDescriptor{
 					{CommandID: "build", Label: "Build"},
 					{CommandID: "verify", Label: "Verify"},
+					{CommandID: "activate", Label: "Activate"},
+					{CommandID: "rollback", Label: "Rollback"},
 					{CommandID: "package", Label: "Package"},
 				},
 			},
@@ -64,10 +68,14 @@ func (Provider) Execute(ctx project.Context, command string, _ map[string]any) e
 	}
 
 	switch command {
+	case "activate":
+		return activate(ctx, workspace)
 	case "build":
 		return build(ctx, workspace)
 	case "verify":
 		return verify(ctx, workspace)
+	case "rollback":
+		return rollback(ctx)
 	case "package":
 		return packageArtifact(ctx, workspace)
 	default:
