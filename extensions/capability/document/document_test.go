@@ -284,6 +284,138 @@ func TestDocumentReviewRejectsCrossDocumentCursor(t *testing.T) {
 	}
 }
 
+func TestDocumentContextIncludesRelatedContext(t *testing.T) {
+	var relationsRequest documentcontract.RelationsRequest
+	reg := &fakeRegistrar{services: map[string]service.Invoker{
+		documentcontract.ServiceName: service.Func(func(_ context.Context, _ string, payload json.RawMessage) (json.RawMessage, error) {
+			var request documentcontract.InspectRequest
+			if err := json.Unmarshal(payload, &request); err != nil {
+				return nil, err
+			}
+			return json.Marshal(documentcontract.InspectResponse{
+				Path:      request.Path,
+				Format:    "markdown",
+				LineCount: 20,
+				Outline:   []documentcontract.Section{{Key: "1", Title: "1. Intro", Level: 2, StartLine: 1, EndLine: 20}},
+			})
+		}),
+		documentcontract.RelationsServiceName: service.Func(func(_ context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
+			if method != documentcontract.MethodResolveRelations {
+				return nil, fmt.Errorf("unexpected method %q", method)
+			}
+			if err := json.Unmarshal(payload, &relationsRequest); err != nil {
+				return nil, err
+			}
+			return json.Marshal(documentcontract.RelationsResponse{
+				RootNode: documentcontract.RelationNode{
+					Key:   "article:src/content/articles/a.md",
+					Kind:  "article",
+					ID:    "a",
+					Path:  "src/content/articles/a.md",
+					Title: "A",
+				},
+				Nodes: []documentcontract.RelationNode{
+					{Key: "article:src/content/articles/a.md", Kind: "article", ID: "a", Path: "src/content/articles/a.md", Title: "A"},
+					{Key: "series:src/content/series/s.md", Kind: "series", ID: "s", Path: "src/content/series/s.md", Title: "S"},
+				},
+				Edges: []documentcontract.RelationEdge{
+					{Type: "member_of_series", From: "article:src/content/articles/a.md", To: "series:src/content/series/s.md", Source: "series"},
+				},
+			})
+		}),
+	}}
+	e := New()
+	if err := e.Register(reg); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := e.CallTool(
+		context.Background(),
+		agentsdk.Session{ProjectRoot: "/workspace"},
+		"document_context",
+		json.RawMessage("{\"objective\":\"review article and related context\",\"path\":\"src/content/articles/a.md\",\"related\":true,\"relation_depth\":3,\"relation_limit\":50}"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := decodeToolPayload(t, raw)
+	relations := mustMap(t, payload["relations"])
+	if root := mustMap(t, relations["root_node"]); root["id"] != "a" {
+		t.Fatalf("relation root = %#v", root)
+	}
+	if relationsRequest.Root != "/workspace" || relationsRequest.Path != "src/content/articles/a.md" {
+		t.Fatalf("relations request = %#v", relationsRequest)
+	}
+	if relationsRequest.Depth != 3 || relationsRequest.MaxNodes != 50 {
+		t.Fatalf("relations limits = %#v", relationsRequest)
+	}
+}
+
+func TestDocumentReviewInitialCallCanIncludeRelatedContext(t *testing.T) {
+	reg := &fakeRegistrar{services: map[string]service.Invoker{
+		documentcontract.ServiceName: service.Func(func(_ context.Context, _ string, payload json.RawMessage) (json.RawMessage, error) {
+			var request documentcontract.InspectRequest
+			if err := json.Unmarshal(payload, &request); err != nil {
+				return nil, err
+			}
+			return json.Marshal(documentcontract.InspectResponse{
+				Path:      request.Path,
+				Format:    "markdown",
+				LineCount: 10,
+				Outline: []documentcontract.Section{
+					{Key: "1", Title: "1. Intro", Level: 2, StartLine: 1, EndLine: 10},
+				},
+			})
+		}),
+		documentcontract.RelationsServiceName: service.Func(func(_ context.Context, _ string, payload json.RawMessage) (json.RawMessage, error) {
+			return json.Marshal(documentcontract.RelationsResponse{
+				RootNode: documentcontract.RelationNode{Key: "article:a", Kind: "article", ID: "a", Path: "a.md"},
+			})
+		}),
+	}}
+	e := New()
+	if err := e.Register(reg); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := e.CallTool(
+		context.Background(),
+		agentsdk.Session{ProjectRoot: "/workspace"},
+		"document_context",
+		json.RawMessage("{\"objective\":\"review whole article and graph\",\"path\":\"a.md\",\"review\":true,\"related\":true}"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := decodeToolPayload(t, raw)
+	if _, ok := payload["review"]; !ok {
+		t.Fatal("review context missing")
+	}
+	if _, ok := payload["relations"]; !ok {
+		t.Fatal("related context missing")
+	}
+}
+
+func TestDocumentContextRelatedRequiresConfiguredProvider(t *testing.T) {
+	reg := &fakeRegistrar{services: map[string]service.Invoker{
+		documentcontract.ServiceName: service.Func(func(_ context.Context, _ string, payload json.RawMessage) (json.RawMessage, error) {
+			return json.Marshal(documentcontract.InspectResponse{Path: "a.md", Format: "markdown"})
+		}),
+	}}
+	e := New()
+	if err := e.Register(reg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CallTool(
+		context.Background(),
+		agentsdk.Session{ProjectRoot: "/workspace"},
+		"document_context",
+		json.RawMessage("{\"objective\":\"review relations\",\"path\":\"a.md\",\"related\":true}"),
+	); err == nil {
+		t.Fatal("expected missing relation provider to fail")
+	}
+}
+
 func TestDocumentContextValidatesIntentAndReviewArguments(t *testing.T) {
 	e := New()
 	reg := &fakeRegistrar{services: map[string]service.Invoker{
@@ -302,6 +434,11 @@ func TestDocumentContextValidatesIntentAndReviewArguments(t *testing.T) {
 		"{\"objective\":\"review\",\"path\":\"article.md\",\"cursor\":\"abc\"}",
 		"{\"objective\":\"review\",\"path\":\"article.md\",\"review\":true,\"section\":\"1\"}",
 		"{\"objective\":\"review\",\"path\":\"article.md\",\"review\":true,\"include_content\":true}",
+		"{\"objective\":\"review\",\"path\":\"article.md\",\"review\":true,\"cursor\":\"abc\",\"related\":true}",
+		"{\"objective\":\"review\",\"path\":\"article.md\",\"relation_depth\":2}",
+		"{\"objective\":\"review\",\"path\":\"article.md\",\"relation_limit\":10}",
+		"{\"objective\":\"review\",\"path\":\"article.md\",\"related\":true,\"relation_depth\":-1}",
+		"{\"objective\":\"review\",\"path\":\"article.md\",\"related\":true,\"relation_limit\":-1}",
 	}
 	for _, raw := range cases {
 		if _, err := e.CallTool(context.Background(), session, "document_context", json.RawMessage(raw)); err == nil {
