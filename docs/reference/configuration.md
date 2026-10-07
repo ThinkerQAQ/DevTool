@@ -133,8 +133,18 @@ For document intelligence, a content repository can wire the stable service inde
 [extension.document-capability]
 loader = "go-module"
 
+[extension.document-capability.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/capability/document/cmd/provider"
+
 [extension.document-markdown]
 loader = "go-module"
+
+[extension.document-markdown.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/document/markdown/cmd/provider"
 
 [extension.document-markdown.settings]
 roots = ["src/content"]
@@ -151,13 +161,19 @@ A content-only repository can use the reusable `project.workspace` Project Exten
 [project]
 name = "Docs"
 
+[extension.project]
+loader = "go-module"
+
+[extension.project.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/project/workspace/cmd/provider"
+
 [extension.project.settings]
 name = "Docs"
 ```
 
 ---
-
-
 
 ## `[code]`
 
@@ -259,9 +275,6 @@ code-realtime
 
 scm
   -> scm.github
-
-document-structure
-  -> document.markdown.goldmark
 ```
 
 The `sourcegraph` profile replaces only `code-indexed`:
