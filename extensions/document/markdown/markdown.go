@@ -132,8 +132,14 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 		Outline:     outline,
 	}
 
-	if selector := strings.TrimSpace(request.Section); selector != "" {
-		selected, err := selectSection(flat, selector)
+	selector := strings.TrimSpace(request.Section)
+	if selector != "" || request.SectionStartLine > 0 {
+		var selected flatSection
+		if request.SectionStartLine > 0 {
+			selected, err = selectSectionByStartLine(flat, request.SectionStartLine)
+		} else {
+			selected, err = selectSection(flat, selector)
+		}
 		if err != nil {
 			return documentcontract.InspectResponse{}, err
 		}
@@ -315,6 +321,18 @@ func selectSection(sections []flatSection, selector string) (flatSection, error)
 	default:
 		return flatSection{}, fmt.Errorf("document section %q is ambiguous", selector)
 	}
+}
+
+func selectSectionByStartLine(sections []flatSection, startLine int) (flatSection, error) {
+	if startLine <= 0 {
+		return flatSection{}, fmt.Errorf("document section start line must be positive")
+	}
+	for _, section := range sections {
+		if section.StartLine == startLine {
+			return section, nil
+		}
+	}
+	return flatSection{}, fmt.Errorf("document section starting at line %d was not found", startLine)
 }
 
 func sourceLineStarts(source []byte) []int {

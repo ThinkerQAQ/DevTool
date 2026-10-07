@@ -88,6 +88,46 @@ func TestInspectBuildsOutlineAndExactSection(t *testing.T) {
 	}
 }
 
+func TestInspectSelectsSectionByExactStartLine(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "article.md")
+	source := "## Repeat\n\nFirst.\n\n## Repeat\n\nSecond.\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ext := New()
+	if err := ext.Configure(map[string]any{"roots": []any{"."}}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(documentcontract.InspectRequest{
+		Root: root, Path: "article.md", SectionStartLine: 5, IncludeContent: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := ext.Invoke(t.Context(), documentcontract.MethodInspect, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response documentcontract.InspectResponse
+	if err := json.Unmarshal(result, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SelectedSection == nil {
+		t.Fatal("selected section is nil")
+	}
+	if response.SelectedSection.StartLine != 5 {
+		t.Fatalf("start line = %d, want 5", response.SelectedSection.StartLine)
+	}
+	if !strings.Contains(response.SelectedSection.Content, "Second.") {
+		t.Fatalf("selected content = %q", response.SelectedSection.Content)
+	}
+	if strings.Contains(response.SelectedSection.Content, "First.") {
+		t.Fatalf("selected content crossed into the first duplicate heading: %q", response.SelectedSection.Content)
+	}
+}
+
 func TestInspectRejectsPathOutsideConfiguredRoots(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "src", "content"), 0o755); err != nil {
