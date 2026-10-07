@@ -112,6 +112,40 @@ func TestAnalyzeRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestDetectLevelIgnoresSeverityWordsDeepInPayload(t *testing.T) {
+	line := strings.Repeat("x", levelProbeBytes+20) + " panic should not be treated as a level"
+	if got := detectLevel(line); got != "" {
+		t.Fatalf("level = %q, want empty", got)
+	}
+	if got := detectLevel("2026-10-07T12:00:00Z service ERROR request failed"); got != "error" {
+		t.Fatalf("level = %q, want error", got)
+	}
+}
+
+func TestBoundedRedactCapsEvidence(t *testing.T) {
+	input := "token=secret " + strings.Repeat("x", maxEvidenceBytes*2)
+	got := boundedRedact(input)
+	if len(got) > maxEvidenceBytes {
+		t.Fatalf("evidence length = %d, limit = %d", len(got), maxEvidenceBytes)
+	}
+	if strings.Contains(got, "secret") {
+		t.Fatalf("secret was not redacted: %q", got)
+	}
+	if !strings.HasSuffix(got, "...[truncated]") {
+		t.Fatalf("bounded evidence did not mark truncation: %q", got[len(got)-32:])
+	}
+}
+
+func TestParseLnavFormat(t *testing.T) {
+	format, err := parseLnavFormat([]byte("log_format,count\ngeneric_log,42\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != "generic_log" {
+		t.Fatalf("format = %q, want generic_log", format)
+	}
+}
+
 func TestInvokeRejectsUnknownMethod(t *testing.T) {
 	ext := New()
 	payload, _ := json.Marshal(logintelligence.AnalyzeRequest{Root: t.TempDir(), Path: "missing.log"})

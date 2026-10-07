@@ -3,13 +3,16 @@ package loglocal
 import (
 	"bufio"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	logintelligence "github.com/thinkerqaq/devtool/sdk/logintelligence"
@@ -20,9 +23,11 @@ import (
 const ExtensionID = "intelligence.log.local"
 
 const (
-	defaultLimit = 20
-	maxLimit     = 100
-	maxLineBytes = 4 * 1024 * 1024
+	defaultLimit     = 20
+	maxLimit         = 100
+	maxLineBytes     = 4 * 1024 * 1024
+	maxEvidenceBytes = 2 * 1024
+	levelProbeBytes  = 160
 )
 
 var (
@@ -73,12 +78,82 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	if err != nil {
 		return nil, err
 	}
+	if format, ok := detectLnavFormat(ctx, request); ok {
+		response.LnavUsed = true
+		if format != "generic_log" || response.Format == "plain" {
+			response.Format = format
+		}
+	}
 	return json.Marshal(response)
 }
 
 type patternState struct {
 	count  int
 	sample string
+}
+
+func detectLnavFormat(ctx context.Context, request logintelligence.AnalyzeRequest) (string, bool) {
+	executable, err := exec.LookPath("lnav")
+	if err != nil {
+		return "", false
+	}
+	path, err := resolvePath(request.Root, request.Path)
+	if err != nil {
+		return "", false
+	}
+
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	output, err := exec.CommandContext(
+		queryCtx,
+		executable,
+		"-n",
+		"-N",
+		"-q",
+		"-c",
+		";select log_format, count(*) as count from all_logs group by log_format order by count desc",
+		"-c",
+		":write-csv-to -",
+		path,
+	).Output()
+	if err != nil {
+		return "", false
+	}
+	format, err := parseLnavFormat(output)
+	if err != nil || format == "" {
+		return "", false
+	}
+	return format, true
+}
+
+func parseLnavFormat(raw []byte) (string, error) {
+	records, err := csv.NewReader(strings.NewReader(string(raw))).ReadAll()
+	if err != nil {
+		return "", err
+	}
+	if len(records) < 2 || len(records[0]) < 1 {
+		return "", nil
+	}
+	formatColumn := -1
+	for i, name := range records[0] {
+		if strings.TrimSpace(name) == "log_format" {
+			formatColumn = i
+			break
+		}
+	}
+	if formatColumn < 0 {
+		return "", nil
+	}
+	for _, record := range records[1:] {
+		if formatColumn >= len(record) {
+			continue
+		}
+		if format := strings.TrimSpace(record[formatColumn]); format != "" {
+			return format, nil
+		}
+	}
+	return "", nil
 }
 
 func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeResponse, error) {
@@ -158,7 +233,7 @@ func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeRes
 				response.Matches = append(response.Matches, logintelligence.Evidence{
 					Line:  lineNo,
 					Level: level,
-					Text:  redact(line),
+					Text:  boundedRedact(line),
 				})
 			}
 		}
@@ -169,7 +244,7 @@ func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeRes
 				response.Evidence = append(response.Evidence, logintelligence.Evidence{
 					Line:  lineNo,
 					Level: level,
-					Text:  redact(line),
+					Text:  boundedRedact(line),
 				})
 				continuationIndex = len(response.Evidence) - 1
 				continuationRemaining = 4
@@ -178,7 +253,10 @@ func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeRes
 				continuationRemaining = 0
 			}
 		} else if continuationIndex >= 0 && continuationRemaining > 0 && isContinuation(line) {
-			response.Evidence[continuationIndex].Text += "\n" + redact(line)
+			response.Evidence[continuationIndex].Text = appendBounded(
+				response.Evidence[continuationIndex].Text,
+				boundedRedact(line),
+			)
 			continuationRemaining--
 		} else if trimmed != "" {
 			continuationIndex = -1
@@ -231,7 +309,11 @@ func resolvePath(root, name string) (string, error) {
 }
 
 func detectLevel(line string) string {
-	match := levelPattern.FindStringSubmatch(line)
+	probe := line
+	if len(probe) > levelProbeBytes {
+		probe = probe[:levelProbeBytes]
+	}
+	match := levelPattern.FindStringSubmatch(probe)
 	if len(match) < 2 {
 		return ""
 	}
@@ -282,7 +364,7 @@ func recordPattern(patterns map[string]*patternState, line string) {
 	normalized := normalizePattern(line)
 	state := patterns[normalized]
 	if state == nil {
-		state = &patternState{sample: redact(line)}
+		state = &patternState{sample: boundedRedact(line)}
 		patterns[normalized] = state
 	}
 	state.count++
@@ -319,6 +401,28 @@ func topPatterns(states map[string]*patternState, limit int) []logintelligence.P
 		out = out[:limit]
 	}
 	return out
+}
+
+func boundedRedact(line string) string {
+	return boundText(redact(line), maxEvidenceBytes)
+}
+
+func appendBounded(existing, continuation string) string {
+	if existing == "" {
+		return boundText(continuation, maxEvidenceBytes)
+	}
+	return boundText(existing+"\n"+continuation, maxEvidenceBytes)
+}
+
+func boundText(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	const suffix = "...[truncated]"
+	if limit <= len(suffix) {
+		return value[:limit]
+	}
+	return value[:limit-len(suffix)] + suffix
 }
 
 func redact(line string) string {

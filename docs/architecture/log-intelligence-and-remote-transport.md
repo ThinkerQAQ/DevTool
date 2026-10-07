@@ -224,10 +224,15 @@ Rules:
 
 ### Stage L1 — lnav enrichment
 
-- detect lnav
-- add recognized-format/query enrichment
-- preserve deterministic fallback
-- benchmark large-file behavior
+Implemented in the local provider:
+
+- detect lnav from PATH and use it opportunistically in headless mode;
+- use lnav's format recognition to enrich the response (`lnav_used=true`);
+- keep deterministic Go parsing as the fallback and as the bounded evidence path;
+- cap each returned evidence/sample item so a single huge journal message cannot flood agent context;
+- only treat severity words near the log prefix as levels, avoiding false positives from embedded source code and command payloads.
+
+Remaining work is benchmark-driven: add deeper lnav query enrichment only when it materially improves arbitrary-log analysis.
 
 ### Stage L2 — controlled-system observability
 
