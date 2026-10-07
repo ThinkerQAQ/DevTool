@@ -26,5 +26,8 @@ func runVersion(args []string, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "DevTool %s\n", info.Version)
 	fmt.Fprintf(out, "Commit: %s\n", info.Commit)
+	if info.Dirty {
+		fmt.Fprintln(out, "Dirty: true")
+	}
 	return nil
 }

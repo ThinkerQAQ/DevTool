@@ -1,7 +1,11 @@
 package devcontrol
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,6 +83,9 @@ func build(ctx project.Context, workspace string) error {
 	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "out"), 0o755); err != nil {
 		return fmt.Errorf("create DevTool output directory: %w", err)
 	}
+	if err := removeVerificationManifest(workspace); err != nil {
+		return err
+	}
 	if err := ctx.Emit("progress", fmt.Sprintf("Building DevTool %s (%s) N+1 in configured environment", metadata.Version, shortCommit(metadata.Commit))); err != nil {
 		return err
 	}
@@ -100,6 +107,9 @@ func verify(ctx project.Context, workspace string) error {
 	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "out"), 0o755); err != nil {
 		return fmt.Errorf("create DevTool output directory: %w", err)
 	}
+	if err := removeVerificationManifest(workspace); err != nil {
+		return err
+	}
 	if err := ctx.Emit("progress", "Verifying DevTool self-hosting in configured environment"); err != nil {
 		return err
 	}
@@ -115,15 +125,17 @@ func verify(ctx project.Context, workspace string) error {
 			Executable: ".devtool/out/" + nextBinaryName(),
 			Args:       []string{"project", "inspect", "--json"},
 		},
-		{
-			Executable: ".devtool/out/" + nextBinaryName(),
-			Args:       []string{"version", "--json"},
-		},
 	}
 	for _, step := range steps {
 		if err := runEnvironment(ctx, workspace, step); err != nil {
 			return err
 		}
+	}
+	if err := verifyCandidateMetadata(ctx, workspace, metadata); err != nil {
+		return err
+	}
+	if err := writeVerificationManifest(workspace, metadata); err != nil {
+		return err
 	}
 	return ctx.Emit("result", "DevTool self-host verification passed in configured environment")
 }
@@ -153,6 +165,11 @@ func packageArtifact(ctx project.Context, workspace string) error {
 }
 
 func runEnvironment(ctx project.Context, workspace string, request environmentcontract.CommandRequest) error {
+	_, err := runEnvironmentResult(ctx, workspace, request)
+	return err
+}
+
+func runEnvironmentResult(ctx project.Context, workspace string, request environmentcontract.CommandRequest) (environmentcontract.RunResult, error) {
 	request.Root = workspace
 
 	var result environmentcontract.RunResult
@@ -162,7 +179,7 @@ func runEnvironment(ctx project.Context, workspace string, request environmentco
 		request,
 		&result,
 	); err != nil {
-		return err
+		return environmentcontract.RunResult{}, err
 	}
 	if result.ExitCode != 0 {
 		message := strings.TrimSpace(result.Stderr)
@@ -172,9 +189,90 @@ func runEnvironment(ctx project.Context, workspace string, request environmentco
 		if message == "" {
 			message = fmt.Sprintf("exit code %d", result.ExitCode)
 		}
-		return fmt.Errorf("%s failed: %s", request.Executable, message)
+		return result, fmt.Errorf("%s failed: %s", request.Executable, message)
+	}
+	return result, nil
+}
+
+func verifyCandidateMetadata(ctx project.Context, workspace string, metadata buildMetadata) error {
+	result, err := runEnvironmentResult(ctx, workspace, environmentcontract.CommandRequest{
+		Executable: ".devtool/out/" + nextBinaryName(),
+		Args:       []string{"version", "--json"},
+	})
+	if err != nil {
+		return err
+	}
+	var got struct {
+		Version string `json:"version"`
+		Commit  string `json:"commit"`
+		Dirty   bool   `json:"dirty"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &got); err != nil {
+		return fmt.Errorf("decode DevTool candidate version: %w", err)
+	}
+	if got.Version != metadata.Version || got.Commit != metadata.Commit || got.Dirty != metadata.Dirty {
+		return fmt.Errorf(
+			"DevTool candidate metadata mismatch: got version=%s commit=%s dirty=%t, want version=%s commit=%s dirty=%t",
+			got.Version, got.Commit, got.Dirty, metadata.Version, metadata.Commit, metadata.Dirty,
+		)
 	}
 	return nil
+}
+
+func verificationManifestPath(workspace string) string {
+	return filepath.Join(workspace, ".devtool", "out", nextBinaryName()+".verified.json")
+}
+
+func removeVerificationManifest(workspace string) error {
+	path := verificationManifestPath(workspace)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale DevTool verification manifest: %w", err)
+	}
+	return nil
+}
+
+func writeVerificationManifest(workspace string, metadata buildMetadata) error {
+	binaryPath := filepath.Join(workspace, ".devtool", "out", nextBinaryName())
+	digest, err := sha256File(binaryPath)
+	if err != nil {
+		return err
+	}
+	manifest := verificationManifest{
+		SchemaVersion: 1,
+		Version:       metadata.Version,
+		Commit:        metadata.Commit,
+		Dirty:         metadata.Dirty,
+		SHA256:        digest,
+		Binary:        nextBinaryName(),
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	path := verificationManifestPath(workspace)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return fmt.Errorf("write DevTool verification manifest: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("activate DevTool verification manifest: %w", err)
+	}
+	return nil
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash %s: %w", path, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func selfHostTestEnv() []string {
@@ -199,6 +297,16 @@ func nextBinaryName() string {
 type buildMetadata struct {
 	Version string
 	Commit  string
+	Dirty   bool
+}
+
+type verificationManifest struct {
+	SchemaVersion int    `json:"schema_version"`
+	Version       string `json:"version"`
+	Commit        string `json:"commit"`
+	Dirty         bool   `json:"dirty"`
+	SHA256        string `json:"sha256"`
+	Binary        string `json:"binary"`
 }
 
 func loadBuildMetadata(workspace string) (buildMetadata, error) {
@@ -220,13 +328,19 @@ func loadBuildMetadata(workspace string) (buildMetadata, error) {
 	if commit == "" {
 		return buildMetadata{}, fmt.Errorf("resolve DevTool source commit: empty commit")
 	}
-	return buildMetadata{Version: version, Commit: commit}, nil
+	dirtyCmd := exec.Command("git", "-C", workspace, "status", "--porcelain")
+	rawDirty, err := dirtyCmd.CombinedOutput()
+	if err != nil {
+		return buildMetadata{}, fmt.Errorf("inspect DevTool source status: %w: %s", err, strings.TrimSpace(string(rawDirty)))
+	}
+	return buildMetadata{Version: version, Commit: commit, Dirty: len(strings.TrimSpace(string(rawDirty))) != 0}, nil
 }
 
 func devtoolBuildArgs(output string, metadata buildMetadata, strip bool) []string {
 	ldflags := []string{
 		"-X", "github.com/thinkerqaq/devtool/internal/buildinfo.Version=" + metadata.Version,
 		"-X", "github.com/thinkerqaq/devtool/internal/buildinfo.Commit=" + metadata.Commit,
+		"-X", fmt.Sprintf("github.com/thinkerqaq/devtool/internal/buildinfo.Dirty=%t", metadata.Dirty),
 	}
 	if strip {
 		ldflags = append([]string{"-s", "-w"}, ldflags...)

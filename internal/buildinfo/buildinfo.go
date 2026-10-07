@@ -5,11 +5,13 @@ import "strings"
 var (
 	Version = "dev"
 	Commit  = "unknown"
+	Dirty   = "false"
 )
 
 type Info struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
+	Dirty   bool   `json:"dirty"`
 }
 
 func Current() Info {
@@ -21,5 +23,5 @@ func Current() Info {
 	if commit == "" {
 		commit = "unknown"
 	}
-	return Info{Version: version, Commit: commit}
+	return Info{Version: version, Commit: commit, Dirty: strings.EqualFold(strings.TrimSpace(Dirty), "true")}
 }
