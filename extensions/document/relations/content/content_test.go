@@ -128,6 +128,46 @@ topic: JVM
 	}
 }
 
+func TestResolveDirectNoteReferenceUsesNormalizedSourcePath(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "src/content/articles/a.md"), `---
+title: A
+relatedNotes:
+  - java/JUC/3.volatile/3.volatile
+---
+`)
+	mustWrite(t, filepath.Join(root, "src/content/notes/java/JUC/3.volatile/3.volatile.md"), `---
+title: volatile
+sourcePath: Java/JUC/3.volatile/3.volatile.md
+category: java
+topic: JUC
+---
+`)
+
+	ext := New()
+	raw, _ := json.Marshal(documentcontract.RelationsRequest{
+		Root: root, Path: "src/content/articles/a.md",
+	})
+	result, err := ext.Invoke(t.Context(), documentcontract.MethodResolveRelations, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response documentcontract.RelationsResponse
+	if err := json.Unmarshal(result, &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Warnings) != 0 {
+		t.Fatalf("warnings = %#v", response.Warnings)
+	}
+	edges := edgesOfType(response.Edges, "related_note")
+	if len(edges) != 1 {
+		t.Fatalf("related note edges = %d, want 1", len(edges))
+	}
+	if got := nodeKey(response.Nodes, "note", "3.volatile"); got == "" {
+		t.Fatal("directly related note node missing")
+	}
+}
+
 func TestResolveSkipsEnglishArticleCopies(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "src/content/articles/a.md"), `---
