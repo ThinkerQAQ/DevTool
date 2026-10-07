@@ -286,10 +286,16 @@ func snapshotExistingActive(layout installLayout) (*releaseRef, error) {
 			Version string `json:"version"`
 			Commit  string `json:"commit"`
 		}
-		if json.Unmarshal(raw, &info) == nil && strings.TrimSpace(info.Version) != "" {
-			ref.Version = strings.TrimSpace(info.Version)
-			ref.Commit = strings.TrimSpace(info.Commit)
-			ref.ID = releaseID(ref.Version, ref.Commit)
+		version := strings.TrimSpace(info.Version)
+		commit := strings.TrimSpace(info.Commit)
+		if json.Unmarshal(raw, &info) == nil {
+			version = strings.TrimSpace(info.Version)
+			commit = strings.TrimSpace(info.Commit)
+			if validVersion(version) && commit != "" {
+				ref.Version = version
+				ref.Commit = commit
+				ref.ID = releaseID(ref.Version, ref.Commit)
+			}
 		}
 	}
 	target := filepath.Join(layout.VersionsDir, ref.ID, ref.Binary)

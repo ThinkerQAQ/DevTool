@@ -323,8 +323,8 @@ func loadBuildMetadata(workspace string) (buildMetadata, error) {
 		return buildMetadata{}, fmt.Errorf("read DevTool VERSION: %w", err)
 	}
 	version := strings.TrimSpace(string(rawVersion))
-	if version == "" {
-		return buildMetadata{}, fmt.Errorf("DevTool VERSION is empty")
+	if !validVersion(version) {
+		return buildMetadata{}, fmt.Errorf("DevTool VERSION %q is invalid; use letters, numbers, dot, plus and hyphen", version)
 	}
 
 	cmd := exec.Command("git", "-C", workspace, "rev-parse", "HEAD")
@@ -342,6 +342,25 @@ func loadBuildMetadata(workspace string) (buildMetadata, error) {
 		return buildMetadata{}, fmt.Errorf("inspect DevTool source status: %w: %s", err, strings.TrimSpace(string(rawDirty)))
 	}
 	return buildMetadata{Version: version, Commit: commit, Dirty: len(strings.TrimSpace(string(rawDirty))) != 0}, nil
+}
+
+func validVersion(version string) bool {
+	version = strings.TrimSpace(version)
+	if version == "" || len(version) > 64 {
+		return false
+	}
+	for _, r := range version {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		switch r {
+		case '.', '+', '-':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func devtoolBuildArgs(output string, metadata buildMetadata, strip bool) []string {
