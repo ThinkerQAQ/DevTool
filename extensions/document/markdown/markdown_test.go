@@ -106,6 +106,34 @@ func TestInspectRejectsPathOutsideConfiguredRoots(t *testing.T) {
 	}
 }
 
+
+
+func TestInspectRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	contentRoot := filepath.Join(root, "src", "content")
+	if err := os.MkdirAll(contentRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	target := filepath.Join(outside, "outside.md")
+	if err := os.WriteFile(target, []byte("# outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(contentRoot, "linked.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink is unavailable: %v", err)
+	}
+
+	ext := New()
+	if err := ext.Configure(map[string]any{"roots": []any{"src/content"}}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(documentcontract.InspectRequest{Root: root, Path: "src/content/linked.md"})
+	if _, err := ext.Invoke(t.Context(), documentcontract.MethodInspect, raw); err == nil {
+		t.Fatal("expected symlink escape to fail")
+	}
+}
+
 func TestSelectSectionRejectsAmbiguousPrefix(t *testing.T) {
 	sections := []flatSection{
 		{Title: "Alpha One", Level: 2},
