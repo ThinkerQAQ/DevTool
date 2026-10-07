@@ -65,7 +65,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --tool-args)
       shift
-      [ "$1" = '{"force":false}' ] && found_args=1
+      [ "$1" = '{"force":true}' ] && found_args=1
       ;;
   esac
   shift

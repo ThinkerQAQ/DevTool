@@ -148,7 +148,7 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err := json.Unmarshal(payload, &request); err != nil {
 			return nil, fmt.Errorf("decode CodeGraph verify request: %w", err)
 		}
-		raw, err := e.runTool(ctx, request, "codegraph_reindex_workspace", json.RawMessage(`{"force":false}`))
+		raw, err := e.runTool(ctx, request, "codegraph_reindex_workspace", json.RawMessage(`{"force":true}`))
 		if err != nil {
 			return nil, err
 		}
