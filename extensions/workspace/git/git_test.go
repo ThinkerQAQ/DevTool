@@ -129,6 +129,79 @@ func TestWorkspaceLifecycle(t *testing.T) {
 	}
 }
 
+func TestParallelWorktreesAreIsolated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("worktree fixture expects unix-like paths")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+
+	base := t.TempDir()
+	root := filepath.Join(base, "repo")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, root, "init", "-q")
+	runTestGit(t, root, "config", "user.name", "DevTool Test")
+	runTestGit(t, root, "config", "user.email", "devtool@example.test")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, root, "add", "README.md")
+	runTestGit(t, root, "commit", "-q", "-m", "initial")
+
+	extension := New()
+	ctx := context.Background()
+	create := func(name string) workspacecontract.Descriptor {
+		raw := invokeWorkspace(t, extension, ctx, workspacecontract.MethodCreate, workspacecontract.CreateRequest{
+			Root:     root,
+			Name:     name,
+			Revision: "HEAD",
+		})
+		var response workspacecontract.CreateResponse
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Workspace
+	}
+
+	first := create("feature/parallel-a")
+	second := create("feature/parallel-b")
+	if first.Identity.RepositoryID != second.Identity.RepositoryID {
+		t.Fatalf("repository identities differ: %q != %q", first.Identity.RepositoryID, second.Identity.RepositoryID)
+	}
+	if first.Identity.WorkspaceID == second.Identity.WorkspaceID {
+		t.Fatalf("parallel worktrees share workspace identity: %q", first.Identity.WorkspaceID)
+	}
+	if first.Identity.Root == second.Identity.Root {
+		t.Fatalf("parallel worktrees share root: %q", first.Identity.Root)
+	}
+
+	invokeWorkspace(t, extension, ctx, workspacecontract.MethodRemove, workspacecontract.RemoveRequest{
+		Root:        root,
+		WorkspaceID: first.Identity.WorkspaceID,
+	})
+	if _, err := os.Stat(first.Identity.Root); !os.IsNotExist(err) {
+		t.Fatalf("removed first worktree still exists: %v", err)
+	}
+	if _, err := os.Stat(second.Identity.Root); err != nil {
+		t.Fatalf("second worktree was affected by first removal: %v", err)
+	}
+	if branch := runTestGit(t, second.Identity.Root, "branch", "--show-current"); branch != "feature/parallel-b" {
+		t.Fatalf("second branch = %q", branch)
+	}
+
+	listRaw := invokeWorkspace(t, extension, ctx, workspacecontract.MethodList, workspacecontract.ListRequest{Root: root})
+	var listed workspacecontract.ListResponse
+	if err := json.Unmarshal(listRaw, &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Workspaces) != 2 {
+		t.Fatalf("workspaces after first removal = %#v", listed.Workspaces)
+	}
+}
+
 func TestWorktreeDirectoryNameIsStableAndPathSafe(t *testing.T) {
 	first := worktreeDirectoryName("feature/ui/layout")
 	second := worktreeDirectoryName("feature/ui/layout")
