@@ -27,6 +27,13 @@ package = "./extensions/environment/docker/cmd/provider"
 [extension.environment.settings]
 image = "ghcr.io/thinkerqaq/dev-base@sha256:f922f24b2dd917faa87bfc090dd90321aaf82651cc9a2de320a22519c3b77a8e"
 
+[extension.tooling-environment]
+loader = "go"
+
+[extension.tooling-environment.loader_config]
+module = "."
+package = "./extensions/environment/local/cmd/provider"
+
 [extension.runtime]
 loader = "go"
 
@@ -151,6 +158,9 @@ provider = "workspace.git"
 [service.environment]
 provider = "environment.docker"
 
+[service.tooling-environment]
+provider = "environment.local"
+
 [service.portable-runtime]
 provider = "runtime.dagger"
 
@@ -183,13 +193,6 @@ provider = "scm.github"
 
 [code]
 workspaces = ["."]
-
-[profile.railway.extension.environment]
-loader = "go"
-
-[profile.railway.extension.environment.loader_config]
-module = "."
-package = "./extensions/environment/local/cmd/provider"
 
 [profile.railway.service.environment]
 provider = "environment.local"

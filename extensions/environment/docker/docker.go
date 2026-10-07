@@ -14,9 +14,9 @@ import (
 	"sync"
 
 	"github.com/thinkerqaq/devtool/extensions/environment/internal/commandexec"
-	service "github.com/thinkerqaq/devtool/sdk/service"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
+	service "github.com/thinkerqaq/devtool/sdk/service"
 )
 
 const ExtensionID = "environment.docker"
@@ -34,7 +34,7 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
 		ID:       ExtensionID,
 		Kind:     extensioncontract.KindInfrastructure,
-		Provides: []string{environmentcontract.ServiceName},
+		Provides: []string{environmentcontract.ServiceName, environmentcontract.ToolingServiceName},
 	}
 }
 
@@ -53,7 +53,10 @@ func (e *Extension) Configure(settings map[string]any) error {
 }
 
 func (e *Extension) Register(reg extensioncontract.Registrar) error {
-	return reg.ProvideService(environmentcontract.ServiceName, ExtensionID, service.Func(e.Invoke))
+	if err := reg.ProvideService(environmentcontract.ServiceName, ExtensionID, service.Func(e.Invoke)); err != nil {
+		return err
+	}
+	return reg.ProvideService(environmentcontract.ToolingServiceName, ExtensionID, service.Func(e.Invoke))
 }
 
 func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {

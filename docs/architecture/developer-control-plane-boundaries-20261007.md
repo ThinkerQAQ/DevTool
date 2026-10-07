@@ -10,7 +10,9 @@ Implementation status: Phase 1 is implemented on `refactor/capability-boundaries
 - `scm_checkpoint` is one stable SCM service operation;
 - `code_context` delegates to `service.code-context` / `context.code.composite`;
 - `document_context` delegates to `service.document-context` / `context.document.composite`;
-- Phase 2 provider lifecycle/environment work remains separate and is not claimed complete here.
+- Phase 2 environment decoupling is implemented with separate `environment` and `tooling-environment` service selections;
+- provider processes are already reused inside one DevTool host lifecycle, so no second provider-cache layer is being added;
+- repeated cold starts across Remote calls remain a later persistent-DevTool-endpoint problem.
 
 ## 1. One-sentence decision
 
@@ -667,38 +669,29 @@ This is one of the highest-leverage ways to prevent Capability inflation.
 
 ## 11. Provider lifecycle improvements
 
-The remote log audit also exposed repeated provider startup and readiness costs.
+The remote log audit exposed two different lifecycle concerns that must not be conflated.
 
-Target behavior:
+Within one DevTool `ProjectHost` / MCP process, loaded extension processes are already retained and reused. CodeGraph and Serena therefore do not need another DevTool-side provider cache.
 
-```text
-first use
-  -> lazy start provider
+The repeated cold starts observed in Remote Commander logs mainly come from repeatedly launching an entirely new `devtool agent mcp` process. That belongs to the later Remote Gateway / persistent DevTool endpoint benchmark.
 
-later calls
-  -> reuse provider session
-```
+The DevTool-side problem that **does** require a change is environment coupling. Code intelligence should not require the project Docker environment merely because build/runtime uses Docker.
 
-Priorities:
-
-- CodeGraph persistent/reused lifecycle;
-- Serena/LSP persistent/reused lifecycle;
-- language servers started only for relevant language/path;
-- provider dependency cache or preinstalled dependencies where runtime downloads are unreliable.
-
-Code intelligence should not require Docker merely because build/runtime uses Docker.
-
-Recommended wiring:
+Implemented wiring:
 
 ```text
-code intelligence
+project build / verify / package
+  -> service.environment
+  -> environment.docker
+
+CodeGraph / Serena / LSP
+  -> service.tooling-environment
   -> environment.local
-
-reproducible build/runtime
-  -> environment.docker / Dagger
 ```
 
-This separates "understand the code" from "build in an isolated reproducible environment."
+Both services use the same Environment Contract and remain provider-replaceable. A deployment may select a different provider for either service through configuration.
+
+This separates "understand the code" from "build in an isolated reproducible environment" without duplicating lifecycle management.
 
 ## 12. Log Intelligence follow-up
 
@@ -856,7 +849,7 @@ This refactor must distinguish between problems it **directly closes**, problems
 | Parameterized Project Commands disappear from Agent surface | DevTool | Generate MCP JSON Schema and dispatch typed arguments | Directly close |
 | Code intelligence depends on Docker even when isolation is unnecessary | DevTool | Bind intelligence providers to local environment by default; retain Docker/Dagger for reproducible execution | Directly close |
 | Arbitrary logs require ad-hoc reads and nested severity causes false attribution | DevTool | Add source adapters and envelope/nested event normalization behind log-analysis | Directly close in log phases |
-| CodeGraph / Serena repeatedly cold-start | DevTool Provider lifecycle | Introduce persistent/lazy provider reuse | Directly close when lifecycle phase lands |
+| CodeGraph / Serena appear to cold-start across Remote calls | Remote Gateway + persistent DevTool endpoint | DevTool already reuses providers within one host; benchmark reusing the whole DevTool endpoint across Remote calls | Enabled, not a Provider-cache change |
 | Remote transport logs full source/commands/tool output | Remote Gateway operation/config | Move toward metadata-first telemetry; do not move analysis into gateway | Requires gateway logging/config support |
 | `start_process -> read_process_output` creates many paid remote calls | Remote Gateway + persistent DevTool endpoint | Benchmark a persistent DevTool MCP path and remove shell/MCP nesting if it materially helps | Enabled, not automatically closed by Capability refactor |
 | Hosted Remote Commander relay is metered/paid | Remote Gateway | Keep current gateway now; self-host only if pricing/platform constraints justify it | Explicitly deferred |
@@ -886,13 +879,14 @@ The important consequence is:
 4. introduce `service.document-context`;
 5. use `capability.log` as the thin-adapter reference shape.
 
-### Phase 2 — fix provider lifecycle and environment coupling
+### Phase 2 — decouple tooling from project environment
 
-- reuse CodeGraph processes/sessions;
-- reuse Serena/LSP processes/sessions;
-- lazy-start language providers by relevant language/path;
-- run code intelligence in local environment by default;
-- reserve Docker/Dagger for reproducible execution where needed.
+- keep the existing extension-process reuse inside one DevTool host lifecycle;
+- add `tooling-environment` as a separate stable Environment service selection;
+- run CodeGraph/Serena through `tooling-environment`;
+- select `environment.local` for DevTool tooling by default;
+- retain `environment.docker` / Dagger for reproducible project execution;
+- treat repeated whole-DV2 cold starts as a later Remote Gateway optimization, not a Provider cache problem.
 
 ### Phase 3 — broaden log sources
 
@@ -919,7 +913,7 @@ The refactor is complete only when all of the following hold:
 1. Capability handlers do not implement multi-provider workflow orchestration.
 2. `code_context(path=<directory>)` does not fail because diagnostics require a file.
 3. Code context can return useful partial results when one intelligence provider fails.
-4. CodeGraph and Serena/LSP are not cold-started unnecessarily for every call.
+4. Within one DevTool host lifecycle, CodeGraph and Serena/LSP processes are reused rather than restarted for every capability call.
 5. Document review state/plan logic is outside the Capability adapter.
 6. SCM checkpoint composition is outside the Capability adapter.
 7. Parameterized Project Commands can become Agent tools without bespoke Capabilities.

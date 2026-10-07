@@ -252,16 +252,11 @@ Profiles override extension and service wiring without mutating the base configu
 Example:
 
 ```toml
-[profile.railway.extension.environment]
-loader = "go"
-
-[profile.railway.extension.environment.loader_config]
-module = "."
-package = "./extensions/environment/local/cmd/provider"
-
 [profile.railway.service.environment]
 provider = "environment.local"
 ```
+
+The base DevTool configuration already loads `environment.local` for `tooling-environment`, so the Railway profile only changes the selected project `environment` provider. It does not load a duplicate local extension.
 
 Activate:
 
@@ -298,6 +293,9 @@ The repository currently uses this service graph conceptually:
 environment
   -> environment.docker
 
+tooling-environment
+  -> environment.local
+
 portable-runtime
   -> runtime.dagger
 
@@ -318,7 +316,7 @@ code-indexed
   -> intelligence.sourcegraph
 ```
 
-The `railway` profile replaces the environment extension/service with `environment.local` because the Railway deployment is already inside the remote runtime container.
+The `railway` profile changes only the project `environment` service selection to `environment.local` because the Railway deployment is already inside the remote runtime container. `tooling-environment` remains local in both profiles, so CodeGraph/Serena do not depend on Docker availability.
 
 These are provider choices, not Project Extension changes.
 
@@ -385,6 +383,9 @@ package = "./extensions/scm/github/cmd/provider"
 
 [service.environment]
 provider = "environment.docker"
+
+[service.tooling-environment]
+provider = "environment.local"
 
 [service.portable-runtime]
 provider = "runtime.dagger"
