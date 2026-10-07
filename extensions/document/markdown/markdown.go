@@ -157,6 +157,11 @@ func (e *Extension) resolvePath(root, path string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+	realRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve document root: %w", err)
+	}
+
 	target := path
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(absRoot, target)
@@ -166,8 +171,17 @@ func (e *Extension) resolvePath(root, path string) (string, string, error) {
 		return "", "", err
 	}
 	rel, err := filepath.Rel(absRoot, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || outside(rel) {
 		return "", "", fmt.Errorf("document path %q is outside project root", path)
+	}
+
+	realTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve document path %q: %w", path, err)
+	}
+	realRel, err := filepath.Rel(realRoot, realTarget)
+	if err != nil || outside(realRel) {
+		return "", "", fmt.Errorf("document path %q resolves outside project root", path)
 	}
 
 	allowed := false
@@ -180,8 +194,12 @@ func (e *Extension) resolvePath(root, path string) (string, string, error) {
 		if err != nil {
 			return "", "", err
 		}
-		within, err := filepath.Rel(allowedRoot, target)
-		if err == nil && within != ".." && !strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+		realAllowedRoot, err := filepath.EvalSymlinks(allowedRoot)
+		if err != nil {
+			return "", "", fmt.Errorf("resolve configured document root %q: %w", configuredRoot, err)
+		}
+		within, err := filepath.Rel(realAllowedRoot, realTarget)
+		if err == nil && !outside(within) {
 			allowed = true
 			break
 		}
@@ -189,7 +207,11 @@ func (e *Extension) resolvePath(root, path string) (string, string, error) {
 	if !allowed {
 		return "", "", fmt.Errorf("document path %q is outside configured roots", path)
 	}
-	return target, rel, nil
+	return realTarget, rel, nil
+}
+
+func outside(relative string) bool {
+	return relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func collectSections(root ast.Node, source []byte, lineStarts []int, lineCount int) []flatSection {
