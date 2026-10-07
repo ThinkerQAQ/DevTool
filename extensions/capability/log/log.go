@@ -72,11 +72,13 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 						},
 						"since": map[string]any{
 							"type":        "string",
-							"description": "Optional journalctl-compatible start time.",
+							"format":      "date-time",
+							"description": "Optional RFC3339 start time.",
 						},
 						"until": map[string]any{
 							"type":        "string",
-							"description": "Optional journalctl-compatible end time.",
+							"format":      "date-time",
+							"description": "Optional RFC3339 end time.",
 						},
 						"max_entries": map[string]any{
 							"type":    "integer",

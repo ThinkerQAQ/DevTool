@@ -209,7 +209,7 @@ func (c *client) initialize(ctx context.Context) error {
 		"protocolVersion": "2025-06-18",
 		"capabilities":    map[string]any{},
 		"clientInfo": map[string]any{
-			"name":    "devtool-agent-bridge",
+			"name":    "devtool-mcp-bridge",
 			"version": "1",
 		},
 	}); err != nil {

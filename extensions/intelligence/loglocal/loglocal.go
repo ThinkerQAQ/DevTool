@@ -302,10 +302,14 @@ func openJournalSource(ctx context.Context, source logintelligence.Source) (sour
 	if scope == "user" {
 		args = append([]string{"--user"}, args...)
 	}
-	if since := strings.TrimSpace(source.Since); since != "" {
+	if since, err := normalizeSourceTime("since", source.Since); err != nil {
+		return sourceInput{}, err
+	} else if since != "" {
 		args = append(args, "--since", since)
 	}
-	if until := strings.TrimSpace(source.Until); until != "" {
+	if until, err := normalizeSourceTime("until", source.Until); err != nil {
+		return sourceInput{}, err
+	} else if until != "" {
 		args = append(args, "--until", until)
 	}
 	output, err := exec.CommandContext(ctx, "journalctl", args...).CombinedOutput()
@@ -320,6 +324,18 @@ func openJournalSource(ctx context.Context, source logintelligence.Source) (sour
 		bytes:      int64(len(output)),
 		maxEntries: maxEntries,
 	}, nil
+}
+
+func normalizeSourceTime(name, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return "", fmt.Errorf("journald source %s must be RFC3339: %w", name, err)
+	}
+	return parsed.Format(time.RFC3339Nano), nil
 }
 
 func parseRecord(kind, line string) normalizedRecord {

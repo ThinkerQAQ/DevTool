@@ -231,3 +231,16 @@ func TestJournalPriorityMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeSourceTimeUsesStableRFC3339Contract(t *testing.T) {
+	got, err := normalizeSourceTime("since", "2026-10-07T07:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "2026-10-07T07:00:00Z" {
+		t.Fatalf("normalized time = %q", got)
+	}
+	if _, err := normalizeSourceTime("since", "today"); err == nil {
+		t.Fatal("expected provider-specific journalctl time syntax to be rejected")
+	}
+}

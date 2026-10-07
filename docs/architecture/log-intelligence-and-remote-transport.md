@@ -147,8 +147,8 @@ source?:
   path?        # file
   unit?        # journald
   scope?       # user | system
-  since?
-  until?
+  since?       # RFC3339
+  until?       # RFC3339
   max_entries?
 
 query?         # optional literal hint
