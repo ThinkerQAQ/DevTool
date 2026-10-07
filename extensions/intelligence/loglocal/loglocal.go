@@ -122,6 +122,9 @@ func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeRes
 	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
 	patterns := map[string]*patternState{}
 	firstContentSeen := false
+	candidateEvidence := 0
+	continuationIndex := -1
+	continuationRemaining := 0
 
 	for scanner.Scan() {
 		response.Summary.Lines++
@@ -159,12 +162,26 @@ func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeRes
 			}
 		}
 
-		if shouldKeepEvidence(level, matchesQuery) && len(response.Evidence) < limit {
-			response.Evidence = append(response.Evidence, logintelligence.Evidence{
-				Line:  lineNo,
-				Level: level,
-				Text:  redact(line),
-			})
+		if shouldKeepEvidence(level, matchesQuery) {
+			candidateEvidence++
+			if len(response.Evidence) < limit {
+				response.Evidence = append(response.Evidence, logintelligence.Evidence{
+					Line:  lineNo,
+					Level: level,
+					Text:  redact(line),
+				})
+				continuationIndex = len(response.Evidence) - 1
+				continuationRemaining = 4
+			} else {
+				continuationIndex = -1
+				continuationRemaining = 0
+			}
+		} else if continuationIndex >= 0 && continuationRemaining > 0 && isContinuation(line) {
+			response.Evidence[continuationIndex].Text += "\n" + redact(line)
+			continuationRemaining--
+		} else if trimmed != "" {
+			continuationIndex = -1
+			continuationRemaining = 0
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -172,7 +189,7 @@ func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeRes
 	}
 
 	response.Patterns = topPatterns(patterns, 10)
-	response.Summary.Truncated = response.Summary.Errors+response.Summary.Warnings > len(response.Evidence)
+	response.Summary.Truncated = candidateEvidence > len(response.Evidence)
 	return response, nil
 }
 
@@ -189,6 +206,10 @@ func resolvePath(root, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve log analysis root: %w", err)
 	}
+	absoluteRoot, err = filepath.EvalSymlinks(absoluteRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve log analysis root symlinks: %w", err)
+	}
 	candidate := name
 	if !filepath.IsAbs(candidate) {
 		candidate = filepath.Join(absoluteRoot, candidate)
@@ -196,6 +217,10 @@ func resolvePath(root, name string) (string, error) {
 	candidate, err = filepath.Abs(candidate)
 	if err != nil {
 		return "", fmt.Errorf("resolve log path: %w", err)
+	}
+	candidate, err = filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve log path symlinks: %w", err)
 	}
 	rel, err := filepath.Rel(absoluteRoot, candidate)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -222,6 +247,22 @@ func looksJSON(line string) bool {
 	}
 	var value map[string]any
 	return json.Unmarshal([]byte(line), &value) == nil
+}
+
+func isContinuation(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+		return true
+	}
+	for _, prefix := range []string{"at ", "Caused by:", "Traceback ", "File \"", "... ", "goroutine "} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldKeepEvidence(level string, query bool) bool {
