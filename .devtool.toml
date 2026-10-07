@@ -41,6 +41,13 @@ loader = "go"
 module = "."
 package = "./extensions/capability/code/cmd/provider"
 
+[extension.workspace-capability]
+loader = "go"
+
+[extension.workspace-capability.loader_config]
+module = "."
+package = "./extensions/capability/workspace/cmd/provider"
+
 [extension.codegraph]
 loader = "go"
 
