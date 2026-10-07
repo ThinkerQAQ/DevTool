@@ -56,6 +56,22 @@ Understand how ProjectHost resolves configured services and routes them to exten
 
 Ask for the engineering context you need, not a provider method.
 
+### Understand documents
+
+Use `document_context`.
+
+The normal long-document workflow is outline-first:
+
+```text
+document_context(path=document)
+  -> frontmatter + complete outline + exact section ranges
+
+document_context(path=document, section="...", include_content=true)
+  -> one bounded source section
+```
+
+Review the relevant sections before making whole-document conclusions. The agent should not depend on Goldmark, Marksman, Serena, or another concrete document provider.
+
 ### Execute project operations
 
 Use `project_<command>` tools discovered from the Project Extension.
@@ -144,6 +160,7 @@ Good:
 
 ```text
 code_context
+document_context
 scm_publish
 project_verify
 ```
@@ -251,6 +268,7 @@ Before merge:
 - configuration validates;
 - project inspection resolves;
 - code intelligence verifies when relevant;
+- document intelligence is exercised on a representative document when relevant;
 - project verification passes;
 - self-host path passes for Core/runtime changes;
 - no provider-specific logic leaked into Core or Agent Gateway;

@@ -12,14 +12,15 @@ import (
 type Kind string
 
 const (
-	KindProject          Kind = "project"
-	KindRuntime          Kind = "runtime"
-	KindNative           Kind = "native"
-	KindInfrastructure   Kind = "infrastructure"
-	KindCodeIntelligence Kind = "code-intelligence"
-	KindCapability       Kind = "capability"
-	KindPolicy           Kind = "policy"
-	KindUI               Kind = "ui"
+	KindProject              Kind = "project"
+	KindRuntime              Kind = "runtime"
+	KindNative               Kind = "native"
+	KindInfrastructure       Kind = "infrastructure"
+	KindCodeIntelligence     Kind = "code-intelligence"
+	KindDocumentIntelligence Kind = "document-intelligence"
+	KindCapability           Kind = "capability"
+	KindPolicy               Kind = "policy"
+	KindUI                   Kind = "ui"
 )
 
 type Descriptor struct {

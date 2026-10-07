@@ -112,6 +112,9 @@ provider = "intelligence.lsp.serena"
 
 [service.scm]
 provider = "scm.github"
+
+[service.document-structure]
+provider = "document.markdown.goldmark"
 ```
 
 Fields:
@@ -123,6 +126,52 @@ Fields:
 This is the main replacement boundary.
 
 For an existing capability, switching providers should normally happen here or through a profile.
+
+For document intelligence, a content repository can wire the stable service independently of the concrete parser:
+
+```toml
+[extension.document-capability]
+loader = "go-module"
+
+[extension.document-capability.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/capability/document/cmd/provider"
+
+[extension.document-markdown]
+loader = "go-module"
+
+[extension.document-markdown.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/document/markdown/cmd/provider"
+
+[extension.document-markdown.settings]
+roots = ["src/content"]
+
+[service.document-structure]
+provider = "document.markdown.goldmark"
+```
+
+The Agent surface remains `document_context`; parser-specific behavior stays inside the selected provider.
+
+A content-only repository can use the reusable `project.workspace` Project Extension instead of creating a fake project-local build/runtime implementation:
+
+```toml
+[project]
+name = "Docs"
+
+[extension.project]
+loader = "go-module"
+
+[extension.project.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/project/workspace/cmd/provider"
+
+[extension.project.settings]
+name = "Docs"
+```
 
 ---
 

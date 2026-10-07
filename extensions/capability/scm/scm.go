@@ -39,7 +39,7 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 			"message": map[string]any{"type": "string", "description": "Commit message used when the worktree has changes."},
 		}, []string{"message"}),
 		tool("scm_publish", "Publish the current clean branch through the configured SCM provider and optionally merge it.", map[string]any{
-			"base":  map[string]any{"type": "string", "default": "main"},
+			"base":  map[string]any{"type": "string", "description": "Optional target branch. When omitted, the SCM provider resolves the repository default branch."},
 			"title": map[string]any{"type": "string"},
 			"body":  map[string]any{"type": "string"},
 			"merge": map[string]any{"type": "boolean", "default": false},
