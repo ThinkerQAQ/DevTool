@@ -6,6 +6,25 @@ Project-specific commands are discovered dynamically from the configured Project
 
 ## Core commands
 
+### `devtool version`
+
+Print the embedded DevTool build identity.
+
+```bash
+devtool version
+devtool version --json
+```
+
+A self-hosted or packaged binary embeds:
+
+- the release version from the repository `VERSION` file;
+- the exact source commit used for the build;
+- whether the source worktree was dirty.
+
+The current development line starts at `0.1.0-dev`. The commit remains part of the build identity, so two builds with the same release version are still distinguishable.
+
+---
+
 ### `devtool init`
 
 Resolve active provider readiness before starting real development work.
@@ -191,9 +210,50 @@ The current DevTool Project Extension verifies:
 - root Go tests;
 - `devcontrol` Go tests;
 - N+1 build;
-- N+1 project inspection.
+- N+1 project inspection;
+- embedded version/commit metadata;
+- the SHA-256 digest recorded in `.devtool/out/devtool-next.verified.json`.
+
+A successful verification manifest is invalidated by the next `devtool build`. Activation therefore requires an artifact that was verified after the current source commit became clean.
 
 Repository CI adds broader integration/self-host checks around this command.
+
+---
+
+### `devtool activate`
+
+Atomically install the verified N+1 candidate as the active user binary:
+
+```text
+~/.local/bin/devtool
+```
+
+Activation requires:
+
+- a clean source worktree;
+- a verification manifest for the current version and commit;
+- a candidate SHA-256 matching that manifest;
+- a successful `devtool version --json` smoke check.
+
+Versioned artifacts and install state are retained under:
+
+```text
+~/.local/share/devtool/
+```
+
+The previously active binary is retained for rollback.
+
+---
+
+### `devtool rollback`
+
+Atomically restore the previously activated DevTool artifact and keep the replaced version as the new rollback target.
+
+```bash
+devtool rollback
+```
+
+Native Windows activation is intentionally rejected for now; the supported Windows development path is WSL.
 
 ---
 
@@ -205,6 +265,12 @@ Output directory:
 
 ```text
 .devtool/artifacts/
+```
+
+Artifact names include the release version, for example:
+
+```text
+devtool-0.1.0-dev-linux-amd64
 ```
 
 ---

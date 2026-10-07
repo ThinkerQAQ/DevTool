@@ -68,20 +68,27 @@ The Project Extension routes the build through the configured `environment` serv
 .devtool/out/
 ```
 
-Inspect the next binary with:
+Inspect the next binary and its embedded identity with:
 
 ```bash
 ./.devtool/out/devtool-next project inspect --json
+./.devtool/out/devtool-next version --json
 ```
 
 On Windows use the `.exe` variant.
 
 ## 6. Run verification
 
-After a coherent batch of changes:
+After a coherent batch of changes is committed:
 
 ```bash
 go run ./cmd/devtool verify
+```
+
+Verification records the candidate version, source commit and SHA-256 digest in:
+
+```text
+.devtool/out/devtool-next.verified.json
 ```
 
 For packaging:
@@ -92,7 +99,36 @@ go run ./cmd/devtool package
 
 Project verification is intentionally a Project Extension command rather than an ad-hoc CI-only script.
 
-## 7. Connect an agent
+## 7. Activate an installed DevTool
+
+Once a normal DevTool binary already exists on `PATH`, updates follow the self-host path:
+
+```text
+installed DevTool N
+  -> build N+1
+  -> verify N+1
+  -> activate N+1
+```
+
+Run:
+
+```bash
+devtool build
+devtool verify
+devtool activate
+```
+
+The active binary is `~/.local/bin/devtool`. Versioned artifacts and the previous release are retained under `~/.local/share/devtool`.
+
+If the new version needs to be reverted:
+
+```bash
+devtool rollback
+```
+
+The repository `VERSION` file carries the release version; the exact Git commit is embedded separately into every self-hosted build.
+
+## 8. Connect an agent
 
 For a local MCP-capable agent:
 
@@ -111,7 +147,7 @@ The Agent Gateway exposes stable intent-level tools from configured extensions. 
 
 The gateway intentionally hides provider-native tools.
 
-## 8. Run the remote Agent Gateway
+## 9. Run the remote Agent Gateway
 
 For a remote runtime:
 
@@ -124,7 +160,7 @@ The HTTP MCP endpoint requires bearer-token authentication by default.
 
 `--allow-unauthenticated` is intended only for trusted local environments.
 
-## 9. Switch profiles without changing the base configuration
+## 10. Switch profiles without changing the base configuration
 
 DevTool profiles override configured extensions/services.
 
@@ -148,7 +184,7 @@ DEVTOOL_PROFILES=railway,sourcegraph go run ./cmd/devtool project inspect --json
 
 Later profiles override earlier profiles for the same extension or service key.
 
-## 10. Before editing Core
+## 11. Before editing Core
 
 Use this order:
 

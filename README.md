@@ -137,8 +137,21 @@ DevTool N
   -> configured services/providers
   -> build DevTool N+1
   -> inspect/verify N+1
+  -> activate N+1
   -> package
 ```
+
+The repository `VERSION` file provides the release version. Self-host builds additionally embed the exact source commit and record the verified binary SHA-256 before activation.
+
+Normal local updates use:
+
+```bash
+devtool build
+devtool verify
+devtool activate
+```
+
+and `devtool rollback` restores the previously activated version.
 
 Repository CI also validates N+1 to N+2 self-hosting.
 
