@@ -297,9 +297,40 @@ The graph only discovers deterministic relationships. The Agent requests bodies 
 
 ## Acceptance
 
-Use the real concurrency draft.
+The implementation was exercised against the real thread-scheduling draft through the configured DevTool path.
 
-Acceptance requires:
+Observed graph:
+
+```text
+root = article: concurrency-series-01-5-thread-scheduling
+
+nodes = 56
+├─ article = 10
+├─ series  = 1
+└─ note    = 45
+
+edges = 56
+warnings = 0
+```
+
+The ordered series resolved exactly as:
+
+```text
+0  concurrency-series-00
+1  concurrency-series-01-hardware
+2  concurrency-series-01-5-thread-scheduling
+3  concurrency-series-02-language-memory-model
+4  concurrency-series-03-mutex
+5  concurrency-series-04-mutex-implementation
+6  concurrency-series-05-atomic-cas
+7  concurrency-series-06-atomic-implementation
+8  concurrency-series-07-volatile
+9  concurrency-series-08-read-write-lock
+```
+
+The `Java · JUC` note scope resolved **45 source Markdown notes**. The same initial call also returned the existing whole-document review plan with all eight top-level review units.
+
+Acceptance status:
 
 - Core diff remains zero;
 - one Agent-facing tool remains `document_context`;
@@ -307,8 +338,8 @@ Acceptance requires:
 - series resolves ten ordered articles;
 - current draft order is correct;
 - JUC note scope resolves 45 source notes;
-- each note edge explains the matching scope;
-- direct focused document calls still work;
-- review traversal remains green;
+- each scoped note edge records `label=Java · JUC` and `source=relatedNoteScopes`;
+- direct focused document calls remain compatible;
+- review traversal remains compatible;
 - provider is selected by `.devtool.toml`;
 - Blog Content and its template remain configuration-only.
