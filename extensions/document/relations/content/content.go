@@ -235,7 +235,7 @@ func (e *Extension) buildCatalog(root string) (*contentCatalog, error) {
 func (c *contentCatalog) add(doc *contentDoc) {
 	c.docs = append(c.docs, doc)
 	c.byPath[doc.node.Path] = doc
-	key := doc.node.Kind + ":" + doc.node.ID
+	key := doc.node.Kind + ":" + normalizeID(doc.node.ID)
 	c.byKindID[key] = append(c.byKindID[key], doc)
 }
 
@@ -568,7 +568,7 @@ func normalizePath(path string) string {
 func normalizeID(value string) string {
 	value = filepath.ToSlash(strings.TrimSpace(value))
 	value = strings.TrimSuffix(value, filepath.Ext(value))
-	return strings.Trim(value, "/")
+	return strings.ToLower(strings.Trim(value, "/"))
 }
 
 func outside(relative string) bool {
