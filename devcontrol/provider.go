@@ -3,6 +3,7 @@ package devcontrol
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -71,21 +72,20 @@ func (Provider) Execute(ctx project.Context, command string, _ map[string]any) e
 }
 
 func build(ctx project.Context, workspace string) error {
+	metadata, err := loadBuildMetadata(workspace)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "out"), 0o755); err != nil {
 		return fmt.Errorf("create DevTool output directory: %w", err)
 	}
-	if err := ctx.Emit("progress", "Building DevTool N+1 in configured environment"); err != nil {
+	if err := ctx.Emit("progress", fmt.Sprintf("Building DevTool %s (%s) N+1 in configured environment", metadata.Version, shortCommit(metadata.Commit))); err != nil {
 		return err
 	}
 	if err := runEnvironment(ctx, workspace, environmentcontract.CommandRequest{
 		Executable: "go",
-		Args: []string{
-			"build",
-			"-trimpath",
-			"-o", ".devtool/out/" + nextBinaryName(),
-			"./cmd/devtool",
-		},
-		Env: targetEnv(),
+		Args:       devtoolBuildArgs(".devtool/out/"+nextBinaryName(), metadata, false),
+		Env:        targetEnv(),
 	}); err != nil {
 		return err
 	}
@@ -93,6 +93,10 @@ func build(ctx project.Context, workspace string) error {
 }
 
 func verify(ctx project.Context, workspace string) error {
+	metadata, err := loadBuildMetadata(workspace)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "out"), 0o755); err != nil {
 		return fmt.Errorf("create DevTool output directory: %w", err)
 	}
@@ -105,16 +109,15 @@ func verify(ctx project.Context, workspace string) error {
 		{Executable: "go", Args: []string{"-C", "devcontrol", "test", "./..."}, Env: selfHostTestEnv()},
 		{
 			Executable: "go",
-			Args: []string{
-				"build",
-				"-trimpath",
-				"-o", ".devtool/out/" + nextBinaryName(),
-				"./cmd/devtool",
-			},
+			Args:       devtoolBuildArgs(".devtool/out/"+nextBinaryName(), metadata, false),
 		},
 		{
 			Executable: ".devtool/out/" + nextBinaryName(),
 			Args:       []string{"project", "inspect", "--json"},
+		},
+		{
+			Executable: ".devtool/out/" + nextBinaryName(),
+			Args:       []string{"version", "--json"},
 		},
 	}
 	for _, step := range steps {
@@ -126,6 +129,10 @@ func verify(ctx project.Context, workspace string) error {
 }
 
 func packageArtifact(ctx project.Context, workspace string) error {
+	metadata, err := loadBuildMetadata(workspace)
+	if err != nil {
+		return err
+	}
 	if err := verify(ctx, workspace); err != nil {
 		return err
 	}
@@ -137,14 +144,8 @@ func packageArtifact(ctx project.Context, workspace string) error {
 	}
 	if err := runEnvironment(ctx, workspace, environmentcontract.CommandRequest{
 		Executable: "go",
-		Args: []string{
-			"build",
-			"-trimpath",
-			"-ldflags=-s -w",
-			"-o", ".devtool/artifacts/" + packageBinaryName(),
-			"./cmd/devtool",
-		},
-		Env: targetEnv(),
+		Args:       devtoolBuildArgs(".devtool/artifacts/"+packageBinaryName(metadata.Version), metadata, true),
+		Env:        targetEnv(),
 	}); err != nil {
 		return err
 	}
@@ -195,8 +196,60 @@ func nextBinaryName() string {
 	return "devtool-next"
 }
 
-func packageBinaryName() string {
-	name := fmt.Sprintf("devtool-%s-%s", runtime.GOOS, runtime.GOARCH)
+type buildMetadata struct {
+	Version string
+	Commit  string
+}
+
+func loadBuildMetadata(workspace string) (buildMetadata, error) {
+	rawVersion, err := os.ReadFile(filepath.Join(workspace, "VERSION"))
+	if err != nil {
+		return buildMetadata{}, fmt.Errorf("read DevTool VERSION: %w", err)
+	}
+	version := strings.TrimSpace(string(rawVersion))
+	if version == "" {
+		return buildMetadata{}, fmt.Errorf("DevTool VERSION is empty")
+	}
+
+	cmd := exec.Command("git", "-C", workspace, "rev-parse", "HEAD")
+	rawCommit, err := cmd.CombinedOutput()
+	if err != nil {
+		return buildMetadata{}, fmt.Errorf("resolve DevTool source commit: %w: %s", err, strings.TrimSpace(string(rawCommit)))
+	}
+	commit := strings.TrimSpace(string(rawCommit))
+	if commit == "" {
+		return buildMetadata{}, fmt.Errorf("resolve DevTool source commit: empty commit")
+	}
+	return buildMetadata{Version: version, Commit: commit}, nil
+}
+
+func devtoolBuildArgs(output string, metadata buildMetadata, strip bool) []string {
+	ldflags := []string{
+		"-X", "github.com/thinkerqaq/devtool/internal/buildinfo.Version=" + metadata.Version,
+		"-X", "github.com/thinkerqaq/devtool/internal/buildinfo.Commit=" + metadata.Commit,
+	}
+	if strip {
+		ldflags = append([]string{"-s", "-w"}, ldflags...)
+	}
+	return []string{
+		"build",
+		"-trimpath",
+		"-ldflags=" + strings.Join(ldflags, " "),
+		"-o", output,
+		"./cmd/devtool",
+	}
+}
+
+func shortCommit(commit string) string {
+	commit = strings.TrimSpace(commit)
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+	return commit
+}
+
+func packageBinaryName(version string) string {
+	name := fmt.Sprintf("devtool-%s-%s-%s", version, runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}

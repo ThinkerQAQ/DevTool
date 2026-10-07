@@ -29,6 +29,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	}
 
 	switch args[0] {
+	case "version":
+		return runVersion(args[1:], out)
 	case "init":
 		return runInit(ctx, args[1:], out)
 	case "project":
@@ -121,6 +123,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "DevTool")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Core Commands:")
+	fmt.Fprintln(out, "  devtool version [--json]")
 	fmt.Fprintln(out, "  devtool init [--json]")
 	fmt.Fprintln(out, "  devtool project inspect [--json]")
 	fmt.Fprintln(out, "  devtool config path")
