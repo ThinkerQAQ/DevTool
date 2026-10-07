@@ -69,9 +69,9 @@ document_context(path=document, review=true)
   -> next_cursor
 
 document_context(path=document, review=true, cursor=next_cursor)
-  -> exactly one top-level section body
-  -> covered sections
-  -> remaining sections
+  -> exactly one bounded review unit
+  -> covered units
+  -> remaining units
   -> next_cursor
 
 repeat until complete=true
@@ -84,7 +84,7 @@ document_context(path=document, section="...", include_content=true)
   -> one exact source section
 ```
 
-Review mode is stateless: the continuation cursor carries traversal position and is rejected if the document structure changes.
+Review mode is stateless: the continuation cursor carries traversal position and is rejected if the document structure or review plan changes. Large sections are recursively decomposed by heading boundaries according to the configured `review_max_lines` budget; structurally unsplittable oversized units are marked explicitly.
 
 When the review depends on series/project/note context, request deterministic relationships on the initial call:
 

@@ -43,6 +43,74 @@ func TestAgentSurfaceExposesOneIntentLevelDocumentCapability(t *testing.T) {
 	}
 }
 
+func TestDocumentCapabilityConfiguresReviewBudget(t *testing.T) {
+	e := New()
+	if e.defaultReviewMaxLines != defaultReviewMaxLines {
+		t.Fatalf("default review max lines = %d, want %d", e.defaultReviewMaxLines, defaultReviewMaxLines)
+	}
+	if err := e.Configure(map[string]any{"review_max_lines": int64(180)}); err != nil {
+		t.Fatal(err)
+	}
+	if e.defaultReviewMaxLines != 180 {
+		t.Fatalf("review max lines = %d, want 180", e.defaultReviewMaxLines)
+	}
+	if err := e.Configure(map[string]any{"review_max_lines": 0}); err == nil {
+		t.Fatal("expected zero review budget to fail")
+	}
+	if err := e.Configure(map[string]any{"review_max_lines": 1.5}); err == nil {
+		t.Fatal("expected fractional review budget to fail")
+	}
+}
+
+func TestPlanReviewSectionsRecursivelyBoundsStructuredContent(t *testing.T) {
+	outline := []documentcontract.Section{
+		{
+			Key: "1", Title: "1. Java", Level: 2, StartLine: 1, EndLine: 700,
+			Children: []documentcontract.Section{
+				{Key: "1.1", Title: "1.1 Model", Level: 3, StartLine: 21, EndLine: 180},
+				{
+					Key: "1.2", Title: "1.2 Lifecycle", Level: 3, StartLine: 181, EndLine: 620,
+					Children: []documentcontract.Section{
+						{Key: "1.2.1", Title: "1.2.1 Create", Level: 4, StartLine: 201, EndLine: 320},
+						{Key: "1.2.2", Title: "1.2.2 Wait", Level: 4, StartLine: 321, EndLine: 500},
+						{Key: "1.2.3", Title: "1.2.3 Finish", Level: 4, StartLine: 501, EndLine: 620},
+					},
+				},
+				{Key: "1.3", Title: "1.3 Huge Leaf", Level: 3, StartLine: 621, EndLine: 700},
+			},
+		},
+	}
+	units := planReviewSections(outline, 150)
+	want := []struct {
+		start, end int
+		kind       string
+		oversized  bool
+	}{
+		{1, 20, "preamble", false},
+		{21, 180, "section", true},
+		{181, 200, "preamble", false},
+		{201, 320, "section", false},
+		{321, 500, "section", true},
+		{501, 620, "section", false},
+		{621, 700, "section", false},
+	}
+	if len(units) != len(want) {
+		t.Fatalf("units = %d, want %d: %#v", len(units), len(want), units)
+	}
+	for i, expected := range want {
+		unit := units[i]
+		if unit.StartLine != expected.start || unit.EndLine != expected.end || unit.RangeKind != expected.kind || unit.Oversized != expected.oversized {
+			t.Fatalf("unit %d = %#v, want %d..%d %s oversized=%v", i, unit, expected.start, expected.end, expected.kind, expected.oversized)
+		}
+		if i > 0 && units[i-1].EndLine+1 != unit.StartLine {
+			t.Fatalf("gap/overlap between units %d and %d: %#v %#v", i-1, i, units[i-1], unit)
+		}
+	}
+	if units[0].StartLine != 1 || units[len(units)-1].EndLine != 700 {
+		t.Fatalf("planned coverage = %d..%d, want 1..700", units[0].StartLine, units[len(units)-1].EndLine)
+	}
+}
+
 func TestDocumentContextInvokesStableDocumentService(t *testing.T) {
 	var method string
 	var request documentcontract.InspectRequest
@@ -92,17 +160,15 @@ func TestDocumentReviewBuildsPlanAndTraversesSections(t *testing.T) {
 				return nil, err
 			}
 			requests = append(requests, request)
-			if request.SectionStartLine > 0 {
+			if request.RangeStartLine > 0 {
 				return json.Marshal(documentcontract.InspectResponse{
 					Path:      request.Path,
 					Format:    "markdown",
 					LineCount: 40,
-					SelectedSection: &documentcontract.SelectedSection{
-						Title:     "Repeated",
-						Level:     2,
-						StartLine: request.SectionStartLine,
-						EndLine:   request.SectionStartLine + 9,
-						Content:   fmt.Sprintf("section at %d", request.SectionStartLine),
+					SelectedRange: &documentcontract.SelectedRange{
+						StartLine: request.RangeStartLine,
+						EndLine:   request.RangeEndLine,
+						Content:   fmt.Sprintf("section at %d", request.RangeStartLine),
 					},
 				})
 			}
@@ -182,11 +248,14 @@ func TestDocumentReviewBuildsPlanAndTraversesSections(t *testing.T) {
 	if len(requests) != 3 {
 		t.Fatalf("requests = %d, want 3", len(requests))
 	}
-	if got := requests[2].SectionStartLine; got != 10 {
-		t.Fatalf("review selected start line = %d, want 10", got)
+	if got := requests[2].RangeStartLine; got != 10 {
+		t.Fatalf("review selected range start line = %d, want 10", got)
+	}
+	if got := requests[2].RangeEndLine; got != 19 {
+		t.Fatalf("review selected range end line = %d, want 19", got)
 	}
 	if !requests[2].IncludeContent {
-		t.Fatal("review section request must include content")
+		t.Fatal("review range request must include content")
 	}
 }
 

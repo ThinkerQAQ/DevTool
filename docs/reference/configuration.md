@@ -138,6 +138,9 @@ module = "github.com/thinkerqaq/devtool"
 version = "<pinned-commit>"
 package = "./extensions/capability/document/cmd/provider"
 
+[extension.document-capability.settings]
+review_max_lines = 300
+
 [extension.document-markdown]
 loader = "go-module"
 
@@ -170,7 +173,7 @@ provider = "document.markdown.goldmark"
 provider = "document.relations.content"
 ```
 
-The Agent surface remains `document_context`; parser-specific and content-relation behavior stay behind the selected providers. Repositories that do not need cross-document relations can omit `document-relations` entirely.
+The Agent surface remains `document_context`; parser-specific and content-relation behavior stay behind the selected providers. `review_max_lines` controls the default maximum size of structurally splittable review units and defaults to 300 when omitted. Repositories that do not need cross-document relations can omit `document-relations` entirely.
 
 A content-only repository can use the reusable `project.workspace` Project Extension instead of creating a fake project-local build/runtime implementation:
 

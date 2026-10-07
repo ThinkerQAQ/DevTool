@@ -13,6 +13,8 @@ type InspectRequest struct {
 	Path             string `json:"path"`
 	Section          string `json:"section,omitempty"`
 	SectionStartLine int    `json:"section_start_line,omitempty"`
+	RangeStartLine   int    `json:"range_start_line,omitempty"`
+	RangeEndLine     int    `json:"range_end_line,omitempty"`
 	IncludeContent   bool   `json:"include_content,omitempty"`
 }
 
@@ -34,6 +36,12 @@ type SelectedSection struct {
 	Content   string `json:"content,omitempty"`
 }
 
+type SelectedRange struct {
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	Content   string `json:"content,omitempty"`
+}
+
 type InspectResponse struct {
 	Path            string           `json:"path"`
 	Format          string           `json:"format"`
@@ -41,6 +49,7 @@ type InspectResponse struct {
 	Frontmatter     map[string]any   `json:"frontmatter,omitempty"`
 	Outline         []Section        `json:"outline,omitempty"`
 	SelectedSection *SelectedSection `json:"selected_section,omitempty"`
+	SelectedRange   *SelectedRange   `json:"selected_range,omitempty"`
 }
 
 type RelationsRequest struct {

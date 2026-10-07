@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 
@@ -17,11 +18,30 @@ import (
 
 const ExtensionID = "capability.document"
 
+const defaultReviewMaxLines = 300
+
 type Extension struct {
-	services extensioncontract.Registrar
+	services              extensioncontract.Registrar
+	defaultReviewMaxLines int
 }
 
-func New() *Extension { return &Extension{} }
+func New() *Extension {
+	return &Extension{defaultReviewMaxLines: defaultReviewMaxLines}
+}
+
+func (e *Extension) Configure(settings map[string]any) error {
+	raw, ok := settings["review_max_lines"]
+	if !ok {
+		e.defaultReviewMaxLines = defaultReviewMaxLines
+		return nil
+	}
+	value, err := positiveInt(raw)
+	if err != nil {
+		return fmt.Errorf("document capability review_max_lines: %w", err)
+	}
+	e.defaultReviewMaxLines = value
+	return nil
+}
 
 func (e *Extension) Descriptor() extensioncontract.Descriptor {
 	return extensioncontract.Descriptor{
@@ -67,6 +87,11 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 					"type":        "string",
 					"description": "Opaque continuation cursor returned by a previous review-mode call.",
 				},
+				"review_max_lines": map[string]any{
+					"type":        "integer",
+					"minimum":     1,
+					"description": "Optional maximum lines per structurally splittable review unit. Defaults to the configured document capability budget.",
+				},
 				"related": map[string]any{
 					"type":        "boolean",
 					"description": "Include deterministic cross-document relationship context from the configured relation provider.",
@@ -94,6 +119,7 @@ type documentContextInput struct {
 	IncludeContent bool   `json:"include_content,omitempty"`
 	Review         bool   `json:"review,omitempty"`
 	Cursor         string `json:"cursor,omitempty"`
+	ReviewMaxLines int    `json:"review_max_lines,omitempty"`
 	Related        bool   `json:"related,omitempty"`
 	RelationDepth  int    `json:"relation_depth,omitempty"`
 	RelationLimit  int    `json:"relation_limit,omitempty"`
@@ -103,6 +129,7 @@ type reviewCursor struct {
 	Path      string `json:"path"`
 	Next      int    `json:"next"`
 	Signature string `json:"signature"`
+	MaxLines  int    `json:"max_lines"`
 }
 
 type reviewSection struct {
@@ -111,10 +138,13 @@ type reviewSection struct {
 	Level     int    `json:"level"`
 	StartLine int    `json:"start_line"`
 	EndLine   int    `json:"end_line"`
+	RangeKind string `json:"range_kind,omitempty"`
+	Oversized bool   `json:"oversized,omitempty"`
 }
 
 type reviewState struct {
 	TotalSections     int             `json:"total_sections"`
+	MaxLines          int             `json:"max_lines"`
 	CurrentSection    *reviewSection  `json:"current_section,omitempty"`
 	CoveredSections   []reviewSection `json:"covered_sections"`
 	RemainingSections []reviewSection `json:"remaining_sections"`
@@ -154,6 +184,12 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 	}
 	if input.Review && input.IncludeContent {
 		return nil, fmt.Errorf("document_context review mode controls section content; omit include_content")
+	}
+	if input.ReviewMaxLines < 0 {
+		return nil, fmt.Errorf("document_context review_max_lines must be positive")
+	}
+	if !input.Review && input.ReviewMaxLines > 0 {
+		return nil, fmt.Errorf("document_context review_max_lines requires review=true")
 	}
 	if input.Cursor != "" && input.Related {
 		return nil, fmt.Errorf("document_context related context is only available on the initial review call")
@@ -210,6 +246,7 @@ func (e *Extension) callReview(
 	normalizedPath := normalizeDocumentPath(input.Path)
 
 	var continuation *reviewCursor
+	maxLines := input.ReviewMaxLines
 	if input.Cursor != "" {
 		decoded, err := decodeReviewCursor(input.Cursor)
 		if err != nil {
@@ -218,7 +255,21 @@ func (e *Extension) callReview(
 		if decoded.Path != normalizedPath {
 			return nil, fmt.Errorf("document_context review cursor belongs to %q, not %q", decoded.Path, normalizedPath)
 		}
+		if input.ReviewMaxLines > 0 && input.ReviewMaxLines != decoded.MaxLines {
+			return nil, fmt.Errorf(
+				"document_context review_max_lines %d does not match cursor budget %d",
+				input.ReviewMaxLines,
+				decoded.MaxLines,
+			)
+		}
+		maxLines = decoded.MaxLines
 		continuation = &decoded
+	}
+	if maxLines <= 0 {
+		maxLines = e.defaultReviewMaxLines
+	}
+	if maxLines <= 0 {
+		maxLines = defaultReviewMaxLines
 	}
 
 	document, err := inspectDocument(ctx, invoker, documentcontract.InspectRequest{
@@ -229,23 +280,14 @@ func (e *Extension) callReview(
 		return nil, fmt.Errorf("build document review plan: %w", err)
 	}
 
-	sections := make([]reviewSection, 0, len(document.Outline))
-	for _, section := range document.Outline {
-		sections = append(sections, reviewSection{
-			Key:       section.Key,
-			Title:     section.Title,
-			Level:     section.Level,
-			StartLine: section.StartLine,
-			EndLine:   section.EndLine,
-		})
-	}
-	signature, err := reviewSignature(normalizedPath, sections)
+	sections := planReviewSections(document.Outline, maxLines)
+	signature, err := reviewSignature(normalizedPath, maxLines, sections)
 	if err != nil {
 		return nil, err
 	}
 
 	if continuation == nil {
-		state, err := buildReviewState(normalizedPath, signature, sections, -1)
+		state, err := buildReviewState(normalizedPath, signature, maxLines, sections, -1)
 		if err != nil {
 			return nil, err
 		}
@@ -264,7 +306,7 @@ func (e *Extension) callReview(
 		return toolResult(result)
 	}
 	if continuation.Signature != signature {
-		return nil, fmt.Errorf("document_context review cursor is stale because the document structure changed")
+		return nil, fmt.Errorf("document_context review cursor is stale because the document structure or review plan changed")
 	}
 	if continuation.Next < 0 || continuation.Next >= len(sections) {
 		return nil, fmt.Errorf("document_context review cursor section index %d is out of range", continuation.Next)
@@ -272,26 +314,41 @@ func (e *Extension) callReview(
 
 	current := sections[continuation.Next]
 	selected, err := inspectDocument(ctx, invoker, documentcontract.InspectRequest{
-		Root:             session.ProjectRoot,
-		Path:             input.Path,
-		SectionStartLine: current.StartLine,
-		IncludeContent:   true,
+		Root:           session.ProjectRoot,
+		Path:           input.Path,
+		RangeStartLine: current.StartLine,
+		RangeEndLine:   current.EndLine,
+		IncludeContent: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read document review section: %w", err)
+		return nil, fmt.Errorf("read document review range: %w", err)
 	}
-	if selected.SelectedSection == nil {
-		return nil, fmt.Errorf("document review section at line %d was not returned by the provider", current.StartLine)
+	if selected.SelectedRange == nil {
+		return nil, fmt.Errorf(
+			"document review range %d..%d was not returned by the provider",
+			current.StartLine,
+			current.EndLine,
+		)
 	}
 
-	state, err := buildReviewState(normalizedPath, signature, sections, continuation.Next)
+	state, err := buildReviewState(normalizedPath, signature, maxLines, sections, continuation.Next)
 	if err != nil {
 		return nil, err
+	}
+	section := map[string]any{
+		"key":        current.Key,
+		"title":      current.Title,
+		"level":      current.Level,
+		"start_line": current.StartLine,
+		"end_line":   current.EndLine,
+		"range_kind": current.RangeKind,
+		"oversized":  current.Oversized,
+		"content":    selected.SelectedRange.Content,
 	}
 	return toolResult(map[string]any{
 		"objective": input.Objective,
 		"review":    state,
-		"section":   selected.SelectedSection,
+		"section":   section,
 	})
 }
 
@@ -347,14 +404,61 @@ func (e *Extension) resolveRelations(
 	return response, nil
 }
 
+func planReviewSections(outline []documentcontract.Section, maxLines int) []reviewSection {
+	if maxLines <= 0 {
+		maxLines = defaultReviewMaxLines
+	}
+	var result []reviewSection
+	for _, section := range outline {
+		result = append(result, planReviewSection(section, maxLines)...)
+	}
+	return result
+}
+
+func planReviewSection(section documentcontract.Section, maxLines int) []reviewSection {
+	lines := section.EndLine - section.StartLine + 1
+	if lines <= maxLines || len(section.Children) == 0 {
+		return []reviewSection{{
+			Key:       section.Key,
+			Title:     section.Title,
+			Level:     section.Level,
+			StartLine: section.StartLine,
+			EndLine:   section.EndLine,
+			RangeKind: "section",
+			Oversized: lines > maxLines,
+		}}
+	}
+
+	var result []reviewSection
+	preambleEnd := section.Children[0].StartLine - 1
+	if preambleEnd >= section.StartLine {
+		preambleLines := preambleEnd - section.StartLine + 1
+		result = append(result, reviewSection{
+			Key:       section.Key,
+			Title:     section.Title,
+			Level:     section.Level,
+			StartLine: section.StartLine,
+			EndLine:   preambleEnd,
+			RangeKind: "preamble",
+			Oversized: preambleLines > maxLines,
+		})
+	}
+	for _, child := range section.Children {
+		result = append(result, planReviewSection(child, maxLines)...)
+	}
+	return result
+}
+
 func buildReviewState(
 	path string,
 	signature string,
+	maxLines int,
 	sections []reviewSection,
 	currentIndex int,
 ) (reviewState, error) {
 	state := reviewState{
 		TotalSections: len(sections),
+		MaxLines:      maxLines,
 	}
 	if currentIndex >= 0 {
 		current := sections[currentIndex]
@@ -373,6 +477,7 @@ func buildReviewState(
 			Path:      path,
 			Next:      nextIndex,
 			Signature: signature,
+			MaxLines:  maxLines,
 		})
 		if err != nil {
 			return reviewState{}, err
@@ -386,13 +491,11 @@ func buildReviewState(
 	return state, nil
 }
 
-func reviewSignature(path string, sections []reviewSection) (string, error) {
-	raw, err := json.Marshal(struct {
-		Path     string          `json:"path"`
-		Sections []reviewSection `json:"sections"`
-	}{
-		Path:     path,
-		Sections: sections,
+func reviewSignature(path string, maxLines int, sections []reviewSection) (string, error) {
+	raw, err := json.Marshal(map[string]any{
+		"path":      path,
+		"max_lines": maxLines,
+		"sections":  sections,
 	})
 	if err != nil {
 		return "", err
@@ -419,10 +522,59 @@ func decodeReviewCursor(value string) (reviewCursor, error) {
 		return reviewCursor{}, fmt.Errorf("decode cursor payload: %w", err)
 	}
 	cursor.Path = normalizeDocumentPath(cursor.Path)
-	if cursor.Path == "." || cursor.Signature == "" || cursor.Next < 0 {
+	if cursor.Path == "." || cursor.Signature == "" || cursor.Next < 0 || cursor.MaxLines <= 0 {
 		return reviewCursor{}, fmt.Errorf("cursor payload is incomplete")
 	}
 	return cursor, nil
+}
+
+func positiveInt(value any) (int, error) {
+	var number int64
+	switch typed := value.(type) {
+	case int:
+		number = int64(typed)
+	case int8:
+		number = int64(typed)
+	case int16:
+		number = int64(typed)
+	case int32:
+		number = int64(typed)
+	case int64:
+		number = typed
+	case uint:
+		if uint64(typed) > math.MaxInt64 {
+			return 0, fmt.Errorf("value %v exceeds supported integer range", value)
+		}
+		number = int64(typed)
+	case uint8:
+		number = int64(typed)
+	case uint16:
+		number = int64(typed)
+	case uint32:
+		number = int64(typed)
+	case uint64:
+		if typed > math.MaxInt64 {
+			return 0, fmt.Errorf("value %v exceeds supported integer range", value)
+		}
+		number = int64(typed)
+	case float64:
+		if math.Trunc(typed) != typed {
+			return 0, fmt.Errorf("value %v must be an integer", value)
+		}
+		if typed > float64(math.MaxInt64) || typed < float64(math.MinInt64) {
+			return 0, fmt.Errorf("value %v exceeds supported integer range", value)
+		}
+		number = int64(typed)
+	default:
+		return 0, fmt.Errorf("value %v must be an integer", value)
+	}
+	if number <= 0 {
+		return 0, fmt.Errorf("value %d must be positive", number)
+	}
+	if number > int64(math.MaxInt) {
+		return 0, fmt.Errorf("value %d exceeds platform integer range", number)
+	}
+	return int(number), nil
 }
 
 func normalizeDocumentPath(path string) string {
