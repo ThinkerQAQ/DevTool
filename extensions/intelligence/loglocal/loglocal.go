@@ -26,12 +26,13 @@ const (
 )
 
 var (
-	levelPattern  = regexp.MustCompile(`(?i)\b(trace|debug|info|warn(?:ing)?|error|fatal|panic)\b`)
-	numberPattern = regexp.MustCompile(`\b\d+\b`)
-	hexPattern    = regexp.MustCompile(`(?i)\b(?:0x)?[0-9a-f]{8,}\b`)
-	uuidPattern   = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
-	secretPattern = regexp.MustCompile(`(?i)\b(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*([^\s,;]+)`)
-	bearerPattern = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`)
+	levelPattern     = regexp.MustCompile(`(?i)\b(trace|debug|info|warn(?:ing)?|error|fatal|panic)\b`)
+	timestampPattern = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b`)
+	numberPattern    = regexp.MustCompile(`\b\d+\b`)
+	hexPattern       = regexp.MustCompile(`(?i)\b(?:0x)?[0-9a-f]{8,}\b`)
+	uuidPattern      = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	secretPattern    = regexp.MustCompile(`(?i)\b(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*([^\s,;]+)`)
+	bearerPattern    = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`)
 )
 
 type Extension struct{}
@@ -289,6 +290,7 @@ func recordPattern(patterns map[string]*patternState, line string) {
 
 func normalizePattern(line string) string {
 	line = redact(strings.TrimSpace(line))
+	line = timestampPattern.ReplaceAllString(line, "<ts>")
 	line = uuidPattern.ReplaceAllString(line, "<uuid>")
 	line = hexPattern.ReplaceAllString(line, "<hex>")
 	line = numberPattern.ReplaceAllString(line, "<n>")
