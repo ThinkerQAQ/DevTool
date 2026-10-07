@@ -106,8 +106,6 @@ func TestInspectRejectsPathOutsideConfiguredRoots(t *testing.T) {
 	}
 }
 
-
-
 func TestInspectRejectsSymlinkEscape(t *testing.T) {
 	root := t.TempDir()
 	contentRoot := filepath.Join(root, "src", "content")
