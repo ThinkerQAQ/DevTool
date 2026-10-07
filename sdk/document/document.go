@@ -3,6 +3,9 @@ package document
 const (
 	ServiceName   = "document-structure"
 	MethodInspect = "inspect"
+
+	RelationsServiceName   = "document-relations"
+	MethodResolveRelations = "resolve"
 )
 
 type InspectRequest struct {
@@ -38,4 +41,37 @@ type InspectResponse struct {
 	Frontmatter     map[string]any   `json:"frontmatter,omitempty"`
 	Outline         []Section        `json:"outline,omitempty"`
 	SelectedSection *SelectedSection `json:"selected_section,omitempty"`
+}
+
+type RelationsRequest struct {
+	Root     string `json:"root"`
+	Path     string `json:"path"`
+	Depth    int    `json:"depth,omitempty"`
+	MaxNodes int    `json:"max_nodes,omitempty"`
+}
+
+type RelationNode struct {
+	Key      string `json:"key"`
+	Kind     string `json:"kind"`
+	ID       string `json:"id"`
+	Path     string `json:"path"`
+	Title    string `json:"title,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Language string `json:"language,omitempty"`
+}
+
+type RelationEdge struct {
+	Type   string `json:"type"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Order  *int   `json:"order,omitempty"`
+	Label  string `json:"label,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+type RelationsResponse struct {
+	RootNode RelationNode   `json:"root_node"`
+	Nodes    []RelationNode `json:"nodes,omitempty"`
+	Edges    []RelationEdge `json:"edges,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
 }
