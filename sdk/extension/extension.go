@@ -18,6 +18,7 @@ const (
 	KindInfrastructure       Kind = "infrastructure"
 	KindCodeIntelligence     Kind = "code-intelligence"
 	KindDocumentIntelligence Kind = "document-intelligence"
+	KindLogIntelligence      Kind = "log-intelligence"
 	KindCapability           Kind = "capability"
 	KindPolicy               Kind = "policy"
 	KindUI                   Kind = "ui"

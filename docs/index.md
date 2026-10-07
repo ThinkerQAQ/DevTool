@@ -16,6 +16,7 @@ If you are an agent entering the repository, start with [AGENTS.md](../AGENTS.md
 - [Implementation Design](implementation-design.md) — implementation-level design.
 - [Runtime Lifecycle](runtime-lifecycle.md) — process/container/MCP lifecycle ownership.
 - [Microkernel Audit](architecture/microkernel-audit-20261005.md) — architecture audit and closure criteria.
+- [Log Intelligence and Remote Transport](architecture/log-intelligence-and-remote-transport.md) — arbitrary-log context, local-first providers, and the boundary to a future self-hosted ChatGPT remote transport.
 
 ## How-to
 

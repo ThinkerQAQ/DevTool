@@ -41,6 +41,20 @@ loader = "go"
 module = "."
 package = "./extensions/capability/code/cmd/provider"
 
+[extension.log-capability]
+loader = "go"
+
+[extension.log-capability.loader_config]
+module = "."
+package = "./extensions/capability/log/cmd/provider"
+
+[extension.log-local]
+loader = "go"
+
+[extension.log-local.loader_config]
+module = "."
+package = "./extensions/intelligence/loglocal/cmd/provider"
+
 [extension.workspace-capability]
 loader = "go"
 
@@ -111,6 +125,9 @@ provider = "intelligence.codegraph"
 
 [service.code-realtime]
 provider = "intelligence.lsp.serena"
+
+[service.log-analysis]
+provider = "intelligence.log.local"
 
 [service.credential-store]
 provider = "credential.store.file"
