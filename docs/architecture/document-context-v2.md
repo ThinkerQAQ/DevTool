@@ -193,6 +193,42 @@ Acceptance requires:
 - Core diff remains zero;
 - existing code intelligence, SCM, self-hosting and document provider tests remain green.
 
+## Phase 1 acceptance result
+
+The first implementation was exercised against the real 2,271-line thread-scheduling article.
+
+The initial plan found all eight top-level review units:
+
+```text
+目录
+0. 这一篇继续回答什么？
+1. Java
+2. Go
+3. CPython
+4. 三种实现的共同套路
+5. 四种线程模型放在一起比较
+6. 下一篇：Language Memory Model
+```
+
+Repeated cursor calls covered all eight units in order and ended with:
+
+```text
+remaining_sections = 0
+complete = true
+```
+
+Each continuation returned only the current section body. Duplicate heading titles are safe because capability traversal uses the provider-neutral exact start-line anchor instead of title matching.
+
+The acceptance also exposed the next efficiency limit:
+
+```text
+Java section    ~15K characters
+Go section      ~13K characters
+CPython section ~10K characters
+```
+
+Coverage is deterministic, but some top-level units are still larger than the desired context budget.
+
 ## Next phases
 
 After review traversal is proven:

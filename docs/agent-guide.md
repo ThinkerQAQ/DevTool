@@ -60,17 +60,31 @@ Ask for the engineering context you need, not a provider method.
 
 Use `document_context`.
 
-The normal long-document workflow is outline-first:
+The normal long-document workflow uses deterministic review traversal:
 
 ```text
-document_context(path=document)
-  -> frontmatter + complete outline + exact section ranges
+document_context(path=document, review=true)
+  -> frontmatter + complete outline
+  -> explicit remaining coverage
+  -> next_cursor
 
-document_context(path=document, section="...", include_content=true)
-  -> one bounded source section
+document_context(path=document, review=true, cursor=next_cursor)
+  -> exactly one top-level section body
+  -> covered sections
+  -> remaining sections
+  -> next_cursor
+
+repeat until complete=true
 ```
 
-Review the relevant sections before making whole-document conclusions. The agent should not depend on Goldmark, Marksman, Serena, or another concrete document provider.
+For a focused lookup, keep using direct section selection:
+
+```text
+document_context(path=document, section="...", include_content=true)
+  -> one exact source section
+```
+
+Review mode is stateless: the continuation cursor carries traversal position and is rejected if the document structure changes. The agent should not depend on Goldmark, Marksman, Serena, or another concrete document provider.
 
 ### Execute project operations
 
