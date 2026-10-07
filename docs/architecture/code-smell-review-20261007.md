@@ -343,3 +343,69 @@ This review does **not** recommend:
 - preserving parallel legacy control paths.
 
 The intended result is a smaller and more orthogonal control plane, not another abstraction layer.
+
+## TODO — Installed DevTool binary activation/update lifecycle
+
+The local development workflow now installs the self-hosted DevTool binary at:
+
+```text
+~/.local/bin/devtool
+```
+
+with `~/.local/bin` on `PATH`.
+
+That creates a deliberate source/install split:
+
+```text
+~/code/DevTool
+    -> canonical source checkout
+
+~/.local/bin/devtool
+    -> currently activated local DevTool binary
+```
+
+The missing lifecycle is how an updated DevTool source revision becomes the newly activated binary without relying on ad-hoc manual copy commands.
+
+This should be designed before it becomes a second bootstrap/update path.
+
+### Required properties
+
+A future solution should preserve the existing self-hosting model:
+
+```text
+installed DevTool N
+    -> ordinary DevTool Project Extension
+    -> build DevTool N+1
+    -> verify N+1
+    -> atomically activate N+1
+    -> retain enough provenance/rollback information
+```
+
+Requirements:
+
+- no DevTool Core special case merely because the project is DevTool;
+- no `curl | sh` or separate installer path for normal source updates;
+- activation only after the newly built binary passes the required verification;
+- atomic replacement of the active binary so interruption cannot leave a partial executable;
+- record enough provenance to identify the source commit and binary digest;
+- keep a rollback path to the previously activated binary;
+- work from local/remote Agent workflows without depending on an interactive shell;
+- keep Stage 0 bootstrap separate: when no DevTool binary exists, `go run ./cmd/devtool` may still produce the first self-hosted binary.
+
+### Likely ownership
+
+Do **not** automatically add a permanent Core command such as `devtool self-update`.
+
+First evaluate whether activation belongs to the DevTool Project Extension as ordinary project semantics, for example:
+
+```text
+build
+verify
+install / activate
+```
+
+If multiple projects later need the same artifact-activation semantics, extract a generic contract/provider at that point.
+
+The design test is:
+
+> Can DevTool update and activate itself through the same ordinary extension/service path available to other projects, without creating a privileged second control plane?
