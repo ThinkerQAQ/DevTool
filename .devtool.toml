@@ -10,6 +10,13 @@ loader = "go"
 module = "./devcontrol"
 package = "./cmd/provider"
 
+[extension.workspace]
+loader = "go"
+
+[extension.workspace.loader_config]
+module = "."
+package = "./extensions/workspace/git/cmd/provider"
+
 [extension.environment]
 loader = "go"
 
@@ -82,6 +89,9 @@ loader = "go"
 [extension.scm.loader_config]
 module = "."
 package = "./extensions/scm/github/cmd/provider"
+
+[service.workspace]
+provider = "workspace.git"
 
 [service.environment]
 provider = "environment.docker"
