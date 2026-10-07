@@ -17,6 +17,7 @@ If you are an agent entering the repository, start with [AGENTS.md](../AGENTS.md
 - [Runtime Lifecycle](runtime-lifecycle.md) — process/container/MCP lifecycle ownership.
 - [Microkernel Audit](architecture/microkernel-audit-20261005.md) — architecture audit and closure criteria.
 - [Log Intelligence and Remote Transport](architecture/log-intelligence-and-remote-transport.md) — arbitrary-log context, local-first providers, and the boundary to a future self-hosted ChatGPT remote transport.
+- [Developer Control Plane Boundaries](architecture/developer-control-plane-boundaries-20261007.md) — final boundary decision for ChatGPT, Remote Gateway, DevTool, GoTiny, Capability cleanup, and remote/log optimization.
 
 ## How-to
 
