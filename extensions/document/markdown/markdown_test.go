@@ -128,6 +128,69 @@ func TestInspectSelectsSectionByExactStartLine(t *testing.T) {
 	}
 }
 
+func TestInspectSelectsExactLineRange(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "article.md")
+	source := "line1\nline2\nline3\nline4\nline5\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ext := New()
+	if err := ext.Configure(map[string]any{"roots": []any{"."}}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(documentcontract.InspectRequest{
+		Root: root, Path: "article.md", RangeStartLine: 2, RangeEndLine: 4, IncludeContent: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := ext.Invoke(t.Context(), documentcontract.MethodInspect, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response documentcontract.InspectResponse
+	if err := json.Unmarshal(result, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SelectedRange == nil {
+		t.Fatal("selected range is nil")
+	}
+	if response.SelectedRange.StartLine != 2 || response.SelectedRange.EndLine != 4 {
+		t.Fatalf("range = %d..%d, want 2..4", response.SelectedRange.StartLine, response.SelectedRange.EndLine)
+	}
+	if response.SelectedRange.Content != "line2\nline3\nline4\n" {
+		t.Fatalf("range content = %q", response.SelectedRange.Content)
+	}
+}
+
+func TestInspectRejectsInvalidLineRange(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "article.md")
+	if err := os.WriteFile(path, []byte("## 1. One\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ext := New()
+	if err := ext.Configure(map[string]any{"roots": []any{"."}}); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []documentcontract.InspectRequest{
+		{Root: root, Path: "article.md", RangeStartLine: 1},
+		{Root: root, Path: "article.md", RangeEndLine: 1},
+		{Root: root, Path: "article.md", RangeStartLine: 2, RangeEndLine: 1},
+		{Root: root, Path: "article.md", RangeStartLine: 1, RangeEndLine: 3},
+		{Root: root, Path: "article.md", Section: "1", RangeStartLine: 1, RangeEndLine: 1},
+	}
+	for _, request := range cases {
+		raw, _ := json.Marshal(request)
+		if _, err := ext.Invoke(t.Context(), documentcontract.MethodInspect, raw); err == nil {
+			t.Fatalf("expected invalid request to fail: %#v", request)
+		}
+	}
+}
+
 func TestInspectRejectsPathOutsideConfiguredRoots(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "src", "content"), 0o755); err != nil {

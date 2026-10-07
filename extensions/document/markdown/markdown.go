@@ -133,7 +133,13 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 	}
 
 	selector := strings.TrimSpace(request.Section)
-	if selector != "" || request.SectionStartLine > 0 {
+	hasSectionSelection := selector != "" || request.SectionStartLine > 0
+	hasRangeSelection := request.RangeStartLine > 0 || request.RangeEndLine > 0
+	if hasSectionSelection && hasRangeSelection {
+		return documentcontract.InspectResponse{}, fmt.Errorf("document section selection and range selection are mutually exclusive")
+	}
+
+	if hasSectionSelection {
 		var selected flatSection
 		if request.SectionStartLine > 0 {
 			selected, err = selectSectionByStartLine(flat, request.SectionStartLine)
@@ -154,6 +160,26 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 			result.Content = contentForLines(source, lineStarts, selected.StartLine, selected.EndLine)
 		}
 		response.SelectedSection = result
+	}
+
+	if hasRangeSelection {
+		if request.RangeStartLine <= 0 || request.RangeEndLine <= 0 {
+			return documentcontract.InspectResponse{}, fmt.Errorf("document range requires both start and end lines")
+		}
+		if request.RangeStartLine > request.RangeEndLine {
+			return documentcontract.InspectResponse{}, fmt.Errorf("document range start line %d exceeds end line %d", request.RangeStartLine, request.RangeEndLine)
+		}
+		if request.RangeEndLine > lineCount {
+			return documentcontract.InspectResponse{}, fmt.Errorf("document range end line %d exceeds document line count %d", request.RangeEndLine, lineCount)
+		}
+		result := &documentcontract.SelectedRange{
+			StartLine: request.RangeStartLine,
+			EndLine:   request.RangeEndLine,
+		}
+		if request.IncludeContent {
+			result.Content = contentForLines(source, lineStarts, request.RangeStartLine, request.RangeEndLine)
+		}
+		response.SelectedRange = result
 	}
 	return response, nil
 }
