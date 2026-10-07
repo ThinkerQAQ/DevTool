@@ -133,14 +133,29 @@ OpenTelemetry cannot reconstruct trace relationships that were never present in 
 
 The stable agent-facing intent is log_context.
 
-Initial input:
+Input:
 
 ~~~
 objective
-path
-query?       # optional literal/regex hint
-limit?       # bounded evidence count
+
+# legacy file shorthand
+path?
+
+# structured source
+source?:
+  kind = file | journald
+  path?        # file
+  unit?        # journald
+  scope?       # user | system
+  since?       # RFC3339
+  until?       # RFC3339
+  max_entries?
+
+query?         # optional literal hint
+limit?         # bounded evidence count
 ~~~
+
+Exactly one of `path` or `source` is supplied. The legacy `path` form remains equivalent to `source={kind:"file", path:"..."}`.
 
 Expected output shape:
 
@@ -178,6 +193,8 @@ The MVP may combine direct parsing with opportunistic lnav use inside a single l
 intelligence.log.local must:
 
 - work on an ordinary local file without Docker;
+- read local journald units without moving log analysis into Remote Gateway;
+- keep journald outer severity (`PRIORITY`) separate from severity detected inside `MESSAGE`;
 - constrain paths to the project/workspace boundary unless explicitly allowed by a future policy;
 - bound bytes/lines returned to the agent;
 - recognize common levels (trace, debug, info, warn, error, fatal, panic);
@@ -234,7 +251,19 @@ Implemented in the local provider:
 
 Remaining work is benchmark-driven: add deeper lnav query enrichment only when it materially improves arbitrary-log analysis.
 
-### Stage L2 — controlled-system observability
+### Stage L2 — journald source and envelope semantics
+
+Implemented in the local provider:
+
+- structured `source.kind=journald` with user/system scope and bounded entry count;
+- `PRIORITY` is normalized as the outer event severity;
+- severity words inside `MESSAGE` are reported separately as embedded severity;
+- evidence contains normalized event time/source/outer level/embedded level;
+- the existing file source remains backward compatible through `path`.
+
+A dedicated process/session source remains deferred until DevTool has a stable transport-neutral session identifier to consume. It should not depend on Remote Commander's private PID/session representation.
+
+### Stage L3 — controlled-system observability
 
 Only when there is a real multi-service need: structured DevTool logs, correlation/trace IDs, OpenTelemetry exporter/provider and a Loki/LogQL provider.
 

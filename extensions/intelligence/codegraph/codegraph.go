@@ -71,7 +71,7 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 		ID:        ExtensionID,
 		Kind:      extensioncontract.KindCodeIntelligence,
 		Provides:  []string{codeintelligence.IndexedServiceName},
-		Requires:  []string{environmentcontract.ServiceName},
+		Requires:  []string{environmentcontract.ToolingServiceName},
 		Readiness: true,
 	}
 }

@@ -27,6 +27,13 @@ package = "./extensions/environment/docker/cmd/provider"
 [extension.environment.settings]
 image = "ghcr.io/thinkerqaq/dev-base@sha256:f922f24b2dd917faa87bfc090dd90321aaf82651cc9a2de320a22519c3b77a8e"
 
+[extension.tooling-environment]
+loader = "go"
+
+[extension.tooling-environment.loader_config]
+module = "."
+package = "./extensions/environment/local/cmd/provider"
+
 [extension.runtime]
 loader = "go"
 
@@ -40,6 +47,40 @@ loader = "go"
 [extension.code-capability.loader_config]
 module = "."
 package = "./extensions/capability/code/cmd/provider"
+
+[extension.code-context]
+loader = "go"
+
+[extension.code-context.loader_config]
+module = "."
+package = "./extensions/context/code/cmd/provider"
+
+[extension.document-capability]
+loader = "go"
+
+[extension.document-capability.loader_config]
+module = "."
+package = "./extensions/capability/document/cmd/provider"
+
+[extension.document-context]
+loader = "go"
+
+[extension.document-context.loader_config]
+module = "."
+package = "./extensions/context/document/cmd/provider"
+
+[extension.document-context.settings]
+review_max_lines = 300
+
+[extension.document-markdown]
+loader = "go"
+
+[extension.document-markdown.loader_config]
+module = "."
+package = "./extensions/document/markdown/cmd/provider"
+
+[extension.document-markdown.settings]
+roots = ["docs"]
 
 [extension.log-capability]
 loader = "go"
@@ -117,6 +158,9 @@ provider = "workspace.git"
 [service.environment]
 provider = "environment.docker"
 
+[service.tooling-environment]
+provider = "environment.docker"
+
 [service.portable-runtime]
 provider = "runtime.dagger"
 
@@ -125,6 +169,15 @@ provider = "intelligence.codegraph"
 
 [service.code-realtime]
 provider = "intelligence.lsp.serena"
+
+[service.code-context]
+provider = "context.code.composite"
+
+[service.document-context]
+provider = "context.document.composite"
+
+[service.document-structure]
+provider = "document.markdown.goldmark"
 
 [service.log-analysis]
 provider = "intelligence.log.local"
@@ -141,14 +194,16 @@ provider = "scm.github"
 [code]
 workspaces = ["."]
 
-[profile.railway.extension.environment]
-loader = "go"
+[profile.local.service.environment]
+provider = "environment.local"
 
-[profile.railway.extension.environment.loader_config]
-module = "."
-package = "./extensions/environment/local/cmd/provider"
+[profile.local.service.tooling-environment]
+provider = "environment.local"
 
 [profile.railway.service.environment]
+provider = "environment.local"
+
+[profile.railway.service.tooling-environment]
 provider = "environment.local"
 
 [profile.sourcegraph.service.code-indexed]

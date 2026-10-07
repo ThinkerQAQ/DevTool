@@ -93,3 +93,59 @@ func TestLogContextRejectsMissingObjective(t *testing.T) {
 		t.Fatal("expected missing objective to fail")
 	}
 }
+
+func TestLogContextDelegatesJournaldSource(t *testing.T) {
+	var got logintelligence.AnalyzeRequest
+	reg := &fakeRegistrar{services: map[string]service.Invoker{
+		logintelligence.ServiceName: service.Func(func(_ context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
+			if method != logintelligence.MethodAnalyze {
+				t.Fatalf("method = %q", method)
+			}
+			if err := json.Unmarshal(payload, &got); err != nil {
+				return nil, err
+			}
+			return json.Marshal(logintelligence.AnalyzeResponse{
+				Provider:   "intelligence.log.fake",
+				Source:     "journald:user:desktop-commander.service",
+				SourceKind: logintelligence.SourceJournald,
+				Format:     "journald-json",
+			})
+		}),
+	}}
+	ext := New()
+	if err := ext.Register(reg); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ext.CallTool(
+		t.Context(),
+		agentsdk.Session{ProjectRoot: "/workspace"},
+		"log_context",
+		json.RawMessage(`{"objective":"inspect remote gateway","source":{"kind":"journald","unit":"desktop-commander.service","scope":"user","max_entries":50},"query":"ERROR","limit":7}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Source == nil {
+		t.Fatal("source was not delegated")
+	}
+	if got.Source.Kind != logintelligence.SourceJournald || got.Source.Unit != "desktop-commander.service" || got.Source.Scope != "user" || got.Source.MaxEntries != 50 {
+		t.Fatalf("source = %#v", got.Source)
+	}
+	if got.Query != "ERROR" || got.Limit != 7 {
+		t.Fatalf("request = %#v", got)
+	}
+}
+
+func TestLogContextRejectsAmbiguousSource(t *testing.T) {
+	ext := New()
+	ext.services = &fakeRegistrar{services: map[string]service.Invoker{}}
+	if _, err := ext.CallTool(
+		t.Context(),
+		agentsdk.Session{ProjectRoot: "/workspace"},
+		"log_context",
+		json.RawMessage(`{"objective":"inspect","path":"a.log","source":{"kind":"journald","unit":"x.service"}}`),
+	); err == nil {
+		t.Fatal("expected path+source to fail")
+	}
+}

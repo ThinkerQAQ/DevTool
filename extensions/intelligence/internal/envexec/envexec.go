@@ -7,18 +7,18 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 	environmentcontract "github.com/thinkerqaq/devtool/sdk/environment"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
-	"github.com/thinkerqaq/devtool/sdk/codeintelligence"
 )
 
 func Command(ctx context.Context, services extensioncontract.Registrar, workspace codeintelligence.Workspace, executable string, args ...string) (*exec.Cmd, error) {
 	if services == nil {
 		return nil, fmt.Errorf("environment service registry is unavailable")
 	}
-	invoker, ok := services.Service(environmentcontract.ServiceName)
+	invoker, ok := services.Service(environmentcontract.ToolingServiceName)
 	if !ok {
-		return nil, fmt.Errorf("service %q is not configured", environmentcontract.ServiceName)
+		return nil, fmt.Errorf("service %q is not configured", environmentcontract.ToolingServiceName)
 	}
 	payload, err := json.Marshal(environmentcontract.CommandRequest{
 		Root:       workspace.Root,

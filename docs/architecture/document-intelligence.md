@@ -173,9 +173,12 @@ include_content?
 
 Behavior:
 
-1. validate stable intent;
-2. invoke the selected `document-structure` service;
-3. return one compact document-context bundle.
+1. validate the stable Agent intent;
+2. invoke the selected `document-context` service;
+3. let that service compose structure/review/optional relation semantics;
+4. return one compact document-context bundle.
+
+The Capability does not implement review traversal or parser/provider orchestration.
 
 Expected usage for a long article:
 
@@ -270,6 +273,7 @@ The config should load DevTool extensions by pinned DevTool commit:
 ```text
 project.workspace
 capability.document
+context.document.composite
 document.markdown.goldmark
 capability.scm
 credential.store.file
@@ -280,6 +284,7 @@ scm.github
 Selected services:
 
 ```text
+document-context   -> context.document.composite
 document-structure -> document.markdown.goldmark
 credential-store   -> credential.store.file
 credential         -> credential.github
@@ -321,13 +326,15 @@ DevTool:
 - implement `document.markdown.goldmark`;
 - test nested headings, code fences, line ranges, frontmatter, section selection and root restrictions.
 
-### Phase 3 — Agent capability
+### Phase 3 — Document context service and Agent capability
 
 DevTool:
 
-- add `capability.document`;
+- add `context.document.composite` behind the stable `document-context` service;
+- keep bounded review/cursor/relation composition in that service provider;
+- add thin `capability.document`;
 - expose only `document_context`;
-- test capability/service composition with a fake provider.
+- test Capability delegation separately from document-context orchestration.
 
 ### Phase 4 — DevTool integration and self-host verification
 

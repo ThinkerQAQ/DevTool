@@ -3,9 +3,10 @@ package environment
 import "encoding/json"
 
 const (
-	ServiceName   = "environment"
-	MethodCommand = "command"
-	MethodRun     = "run"
+	ServiceName        = "environment"
+	ToolingServiceName = "tooling-environment"
+	MethodCommand      = "command"
+	MethodRun          = "run"
 	// WorkspaceRoot is the provider-neutral logical project root. Environment providers map it to their own execution root.
 	WorkspaceRoot = "."
 )

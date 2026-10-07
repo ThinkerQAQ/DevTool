@@ -113,6 +113,9 @@ provider = "intelligence.lsp.serena"
 [service.scm]
 provider = "scm.github"
 
+[service.document-context]
+provider = "context.document.composite"
+
 [service.document-structure]
 provider = "document.markdown.goldmark"
 ```
@@ -138,7 +141,15 @@ module = "github.com/thinkerqaq/devtool"
 version = "<pinned-commit>"
 package = "./extensions/capability/document/cmd/provider"
 
-[extension.document-capability.settings]
+[extension.document-context]
+loader = "go-module"
+
+[extension.document-context.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/context/document/cmd/provider"
+
+[extension.document-context.settings]
 review_max_lines = 300
 
 [extension.document-markdown]
@@ -166,6 +177,9 @@ series = "src/content/series"
 notes = "src/content/notes"
 projects = "src/content/projects"
 
+[service.document-context]
+provider = "context.document.composite"
+
 [service.document-structure]
 provider = "document.markdown.goldmark"
 
@@ -173,7 +187,7 @@ provider = "document.markdown.goldmark"
 provider = "document.relations.content"
 ```
 
-The Agent surface remains `document_context`; parser-specific and content-relation behavior stay behind the selected providers. `review_max_lines` controls the default maximum size of structurally splittable review units and defaults to 300 when omitted. Repositories that do not need cross-document relations can omit `document-relations` entirely.
+The Agent surface remains `document_context`. The thin Capability delegates to `document-context`; bounded review/cursor/relation composition lives in the selected document-context provider, while parser-specific structure and content-relation behavior remain behind their own services. `review_max_lines` configures the document-context provider and defaults to 300 when omitted. Repositories that do not need cross-document relations can omit `document-relations` entirely.
 
 A content-only repository can use the reusable `project.workspace` Project Extension instead of creating a fake project-local build/runtime implementation:
 
@@ -238,16 +252,20 @@ Profiles override extension and service wiring without mutating the base configu
 Example:
 
 ```toml
-[profile.railway.extension.environment]
-loader = "go"
+[profile.local.service.environment]
+provider = "environment.local"
 
-[profile.railway.extension.environment.loader_config]
-module = "."
-package = "./extensions/environment/local/cmd/provider"
+[profile.local.service.tooling-environment]
+provider = "environment.local"
 
 [profile.railway.service.environment]
 provider = "environment.local"
+
+[profile.railway.service.tooling-environment]
+provider = "environment.local"
 ```
+
+The base configuration keeps project execution and tooling as separate service contracts even when both select `environment.docker`. Profiles may switch either service independently without changing the intelligence providers.
 
 Activate:
 
@@ -284,6 +302,9 @@ The repository currently uses this service graph conceptually:
 environment
   -> environment.docker
 
+tooling-environment
+  -> environment.docker
+
 portable-runtime
   -> runtime.dagger
 
@@ -304,7 +325,9 @@ code-indexed
   -> intelligence.sourcegraph
 ```
 
-The `railway` profile replaces the environment extension/service with `environment.local` because the Railway deployment is already inside the remote runtime container.
+The default profile selects the shared DevEnvironment container for both project execution and developer tooling, while keeping `environment` and `tooling-environment` as independent services. This lets CI obtain CodeGraph/Serena from the configured DevEnvironment without coupling their contracts.
+
+The `local` and `railway` profiles select `environment.local` for both services. Use `local` when the required developer tools are installed on the host; use `railway` when the Railway runtime already provides them.
 
 These are provider choices, not Project Extension changes.
 
@@ -371,6 +394,9 @@ package = "./extensions/scm/github/cmd/provider"
 
 [service.environment]
 provider = "environment.docker"
+
+[service.tooling-environment]
+provider = "environment.local"
 
 [service.portable-runtime]
 provider = "runtime.dagger"

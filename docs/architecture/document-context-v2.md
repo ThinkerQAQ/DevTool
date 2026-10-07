@@ -26,7 +26,7 @@ The change must preserve:
 
 1. **Minimal Core** — no Core change.
 2. **One Agent intent** — keep `document_context`; do not add provider-native tools.
-3. **Capability owns orchestration** — review traversal belongs in `capability.document`, not in Goldmark.
+3. **Document-context service owns orchestration** — review traversal belongs behind the stable `document-context` service, not in the thin Agent Capability and not in Goldmark.
 4. **Provider remains structural** — the provider keeps exposing the stable `document-structure` contract.
 5. **Stateless continuation** — no hidden in-memory review session; continuation is represented by an opaque cursor.
 6. **Configuration-driven providers** — the selected document provider remains controlled by `.devtool.toml`.
@@ -90,7 +90,7 @@ Repeat until `complete=true`.
 
 ## Cursor model
 
-The cursor is capability-owned and opaque to the Agent.
+The cursor is document-context-service-owned and opaque to the Agent.
 
 It contains only:
 
@@ -111,16 +111,19 @@ This directly solves whole-article coverage and keeps the implementation small.
 
 A later phase can recursively split very large top-level sections by child headings and a context budget. That should not be mixed into the first coverage change.
 
-## Capability behavior
+## Service and Capability behavior
 
-`capability.document`:
+`capability.document` is a thin Agent adapter. It validates the stable public intent, maps the Agent session root into the request, invokes `document-context.build`, and wraps the stable response.
+
+The selected `document-context` provider:
 
 1. invokes `document-structure.inspect` without content;
 2. derives top-level review units from the provider-neutral outline;
 3. on initial review call, returns the plan and first cursor;
 4. on continuation, resolves exactly one review unit;
 5. invokes `document-structure.inspect` again for that section with content;
-6. returns explicit covered/remaining sections plus the next cursor.
+6. optionally composes `document-relations`;
+7. returns explicit covered/remaining sections plus the next cursor.
 
 Goldmark does not know about coverage or traversal.
 

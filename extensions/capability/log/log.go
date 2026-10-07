@@ -38,7 +38,7 @@ func (e *Extension) Register(reg extensioncontract.Registrar) error {
 func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Tool, error) {
 	definition, _ := json.Marshal(map[string]any{
 		"name":        "log_context",
-		"description": "Build bounded structured context from an arbitrary local log file for a debugging or investigation objective.",
+		"description": "Build bounded structured context from a local file or journald source for a debugging or investigation objective.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -48,7 +48,46 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 				},
 				"path": map[string]any{
 					"type":        "string",
-					"description": "Project-relative log file path.",
+					"description": "Legacy shorthand for a project-relative file source.",
+				},
+				"source": map[string]any{
+					"type":        "object",
+					"description": "Structured log source. Use file for project files or journald for local service logs.",
+					"properties": map[string]any{
+						"kind": map[string]any{
+							"type": "string",
+							"enum": []string{logintelligence.SourceFile, logintelligence.SourceJournald},
+						},
+						"path": map[string]any{
+							"type":        "string",
+							"description": "Project-relative path for kind=file.",
+						},
+						"unit": map[string]any{
+							"type":        "string",
+							"description": "systemd unit for kind=journald.",
+						},
+						"scope": map[string]any{
+							"type": "string",
+							"enum": []string{"user", "system"},
+						},
+						"since": map[string]any{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Optional RFC3339 start time.",
+						},
+						"until": map[string]any{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Optional RFC3339 end time.",
+						},
+						"max_entries": map[string]any{
+							"type":    "integer",
+							"minimum": 1,
+							"maximum": 100000,
+						},
+					},
+					"required":             []string{"kind"},
+					"additionalProperties": false,
 				},
 				"query": map[string]any{
 					"type":        "string",
@@ -60,7 +99,11 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 					"maximum": 100,
 				},
 			},
-			"required":             []string{"objective", "path"},
+			"required": []string{"objective"},
+			"oneOf": []map[string]any{
+				{"required": []string{"path"}},
+				{"required": []string{"source"}},
+			},
 			"additionalProperties": false,
 		},
 	})
@@ -76,10 +119,11 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 	}
 
 	var input struct {
-		Objective string `json:"objective"`
-		Path      string `json:"path"`
-		Query     string `json:"query,omitempty"`
-		Limit     int    `json:"limit,omitempty"`
+		Objective string                  `json:"objective"`
+		Path      string                  `json:"path,omitempty"`
+		Source    *logintelligence.Source `json:"source,omitempty"`
+		Query     string                  `json:"query,omitempty"`
+		Limit     int                     `json:"limit,omitempty"`
 	}
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
@@ -93,8 +137,11 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 	if input.Objective == "" {
 		return nil, fmt.Errorf("log_context objective is required")
 	}
-	if input.Path == "" {
-		return nil, fmt.Errorf("log_context path is required")
+	if input.Path == "" && input.Source == nil {
+		return nil, fmt.Errorf("log_context path or source is required")
+	}
+	if input.Path != "" && input.Source != nil {
+		return nil, fmt.Errorf("log_context path and source are mutually exclusive")
 	}
 	if input.Limit < 0 || input.Limit > 100 {
 		return nil, fmt.Errorf("log_context limit must be between 1 and 100")
@@ -105,10 +152,11 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 		return nil, fmt.Errorf("service %q is not configured", logintelligence.ServiceName)
 	}
 	payload, err := json.Marshal(logintelligence.AnalyzeRequest{
-		Root:  session.ProjectRoot,
-		Path:  input.Path,
-		Query: input.Query,
-		Limit: input.Limit,
+		Root:   session.ProjectRoot,
+		Path:   input.Path,
+		Source: input.Source,
+		Query:  input.Query,
+		Limit:  input.Limit,
 	})
 	if err != nil {
 		return nil, err

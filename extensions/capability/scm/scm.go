@@ -61,41 +61,24 @@ func (e *Extension) CallTool(ctx context.Context, session agentsdk.Session, name
 			return nil, fmt.Errorf("scm_checkpoint message is required")
 		}
 
-		statusRaw, err := e.invoke(ctx, scmcontract.MethodStatus, scmcontract.Request{Root: session.ProjectRoot})
+		raw, err := e.invoke(ctx, scmcontract.MethodCheckpoint, scmcontract.CheckpointRequest{
+			Root: session.ProjectRoot, Message: message,
+		})
 		if err != nil {
+			return nil, fmt.Errorf("create SCM checkpoint: %w", err)
+		}
+		var response scmcontract.CheckpointResponse
+		if err := json.Unmarshal(raw, &response); err != nil {
 			return nil, err
 		}
-		var status scmcontract.StatusResponse
-		if err := json.Unmarshal(statusRaw, &status); err != nil {
-			return nil, err
+		if response.Authorization != nil {
+			return toolResult(map[string]any{
+				"status":        "authorization_required",
+				"authorization": response.Authorization,
+				"result":        decodeResult(raw),
+			})
 		}
-
-		var commit any
-		if !status.Clean {
-			commitRaw, err := e.invoke(ctx, scmcontract.MethodCommit, scmcontract.CommitRequest{Root: session.ProjectRoot, Message: message})
-			if err != nil {
-				return nil, fmt.Errorf("create SCM checkpoint commit: %w", err)
-			}
-			commit = decodeResult(commitRaw)
-		}
-
-		pushRaw, err := e.invoke(ctx, scmcontract.MethodPush, scmcontract.PushRequest{Root: session.ProjectRoot})
-		if err != nil {
-			return nil, fmt.Errorf("push SCM checkpoint: %w", err)
-		}
-		var push scmcontract.PushResponse
-		if err := json.Unmarshal(pushRaw, &push); err != nil {
-			return nil, err
-		}
-		result := map[string]any{"status": "pushed", "push": decodeResult(pushRaw)}
-		if commit != nil {
-			result["commit"] = commit
-		}
-		if push.Authorization != nil {
-			result["status"] = "authorization_required"
-			result["authorization"] = push.Authorization
-		}
-		return toolResult(result)
+		return toolResult(map[string]any{"status": "pushed", "result": decodeResult(raw)})
 
 	case "scm_publish":
 		var input struct {

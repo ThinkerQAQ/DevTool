@@ -19,6 +19,8 @@ import (
 
 const protocolVersion = "2025-06-18"
 
+// Gateway exposes DevTool capabilities over MCP. It is an Agent-facing protocol adapter,
+// not an Agent runtime: it owns no planning, durable run state, retry policy, or workflow semantics.
 type Gateway struct {
 	registry *registry.Registry
 	session  agentsdk.Session
@@ -122,7 +124,7 @@ func (g *Gateway) handle(ctx context.Context, request rpcRequest) rpcResponse {
 				"tools": map[string]any{"listChanged": false},
 			},
 			"serverInfo": map[string]any{
-				"name":    "devtool-agent",
+				"name":    "devtool-mcp",
 				"version": "1",
 			},
 		})
