@@ -417,20 +417,27 @@ new workspace root
       +-- runtime state
 ```
 
-Removing a workspace must dispose workspace-scoped resources before or with provider removal.
+Workspace removal follows lifecycle ownership rather than acting as a global process supervisor.
+
+The Agent/Host that owns a workspace-scoped LSP, CodeGraph MCP process, or runtime process must close those resources when that owner/session ends. The workspace provider removes the clean filesystem worktree; it does not discover and terminate unrelated provider processes owned by another Agent/Host.
 
 ```text
-Workspace.Remove
+Agent / ProjectHost lifetime ends
       |
-      +-- close indexed session
-      +-- close realtime session
-      +-- release runtime/process state
+      +-- close realtime provider session
+      +-- close indexed provider session
+      +-- release owned runtime/process state
+      |
+      v
+Workspace.Remove
       |
       v
 workspace.git remove
 ```
 
-If DevTool lacks the minimum workspace-scoped lifecycle mechanism required for this, add only that stable mechanism. Do not introduce a generic event bus.
+Persistent CodeGraph storage is a rebuildable cache and may outlive the filesystem worktree. A later workspace with a distinct workspace identity must not reuse that cache incorrectly.
+
+Do not add a global workspace process registry or event bus merely to make `workspace_remove` terminate resources it does not own.
 
 ---
 
@@ -547,9 +554,10 @@ Acceptance conditions:
 - distinct workspace identities;
 - distinct CodeGraph project indexes;
 - isolated LSP sessions;
-- deleting a file in A cannot produce a stale file result after verify;
+- deleting a file in A cannot produce a stale file result after provider reconciliation;
 - B is unaffected;
-- removing A disposes A-scoped resources;
+- A/B provider sessions remain workspace-scoped and are closed by their owning Agent/Host lifecycle;
+- removing clean A removes only A's filesystem worktree and leaves B unaffected;
 - self-hosting build/verify still uses the normal DevTool path.
 
 ---
@@ -570,7 +578,7 @@ Use the normal small-step development cadence:
 
 07 refactor(codegraph): separate workspace identity from revision state
 08 refactor(codegraph): refresh on git tree transition
-09 refactor(codegraph): dispose workspace-scoped index state
+09 refactor(codegraph): keep provider sessions scoped to workspace identity
 
 10 feat(agent): expose workspace intent if justified
 11 test: verify parallel worktree isolation
