@@ -247,7 +247,10 @@ func (e *Extension) publish(ctx context.Context, request scm.PublishRequest) (sc
 	}
 	base := strings.TrimSpace(request.Base)
 	if base == "" {
-		base = "main"
+		base, err = e.defaultBranch(ctx, token, owner, repo)
+		if err != nil {
+			return scm.PublishResponse{}, err
+		}
 	}
 
 	status, err := e.status(ctx, root)
@@ -289,6 +292,20 @@ func (e *Extension) publish(ctx context.Context, request scm.PublishRequest) (sc
 		response.DurationM = time.Since(start).Milliseconds()
 	}
 	return response, nil
+}
+
+func (e *Extension) defaultBranch(ctx context.Context, token, owner, repo string) (string, error) {
+	var metadata struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := e.githubJSON(ctx, token, http.MethodGet, fmt.Sprintf("/repos/%s/%s", owner, repo), nil, &metadata); err != nil {
+		return "", fmt.Errorf("resolve GitHub default branch: %w", err)
+	}
+	branch := strings.TrimSpace(metadata.DefaultBranch)
+	if branch == "" {
+		return "", fmt.Errorf("GitHub repository %s/%s has no default branch", owner, repo)
+	}
+	return branch, nil
 }
 
 type pullRequest struct {
