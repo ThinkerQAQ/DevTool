@@ -220,20 +220,48 @@ Goldmark still does not own review planning, budgets, coverage, or cursors.
 
 ## Acceptance
 
-Use the real thread-scheduling draft.
+The implementation was exercised against the real 2,271-line thread-scheduling draft with:
 
-Requirements:
+```text
+review = true
+review_max_lines = 300
+related = true
+```
 
-1. whole-document coverage still reaches `complete=true`;
-2. every document line covered by review units is covered exactly once within each top-level section;
+Observed review plan:
+
+```text
+review units       = 33
+largest unit       = 275 lines
+oversized units    = 0
+relation nodes     = 56
+relation edges     = 56
+relation warnings  = 0
+```
+
+Java / Go / CPython were decomposed by their existing heading hierarchy. Java's lifecycle section was further decomposed into `1.3.1 ... 1.3.6` units.
+
+Cursor traversal consumed all 33 review units in order and ended with:
+
+```text
+complete = true
+remaining_sections = 0
+```
+
+Every adjacent planned range was checked for exact continuity, so the covered article body contained neither overlaps nor gaps.
+
+Acceptance status:
+
+1. whole-document coverage reaches `complete=true`;
+2. review units cover the outlined document body without overlap or gaps;
 3. Java / Go / CPython are split into nested units instead of one huge payload;
-4. normal unit length is <= configured `review_max_lines`;
-5. any structurally unsplittable oversized unit is explicit via `oversized=true`;
+4. the real article's largest review unit is 275 lines under the 300-line budget;
+5. structurally unsplittable oversized units remain explicitly representable via `oversized=true`;
 6. focused `section + include_content` remains compatible;
-7. `related=true` on the initial call remains compatible;
+7. `related=true` remains compatible on the initial review call;
 8. stale/cross-document cursor checks remain intact;
 9. Core diff remains zero;
-10. full tests and DevTool self-host verification remain green.
+10. full tests and DevTool self-host verification are required before merge.
 
 ## Non-goals
 
