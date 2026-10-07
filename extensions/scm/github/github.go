@@ -161,6 +161,16 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			return nil, err
 		}
 		return json.Marshal(response)
+	case scm.MethodCheckpoint:
+		var request scm.CheckpointRequest
+		if err := json.Unmarshal(payload, &request); err != nil {
+			return nil, fmt.Errorf("decode scm checkpoint request: %w", err)
+		}
+		response, err := e.checkpoint(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(response)
 	case scm.MethodPublish:
 		var request scm.PublishRequest
 		if err := json.Unmarshal(payload, &request); err != nil {

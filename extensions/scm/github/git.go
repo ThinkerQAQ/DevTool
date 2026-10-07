@@ -84,6 +84,42 @@ func (e *Extension) commit(ctx context.Context, request scm.CommitRequest) (scm.
 	return scm.CommitResponse{Provider: ExtensionID, Branch: status.Branch, Commit: commit}, nil
 }
 
+func (e *Extension) checkpoint(ctx context.Context, request scm.CheckpointRequest) (scm.CheckpointResponse, error) {
+	message := strings.TrimSpace(request.Message)
+	if message == "" {
+		return scm.CheckpointResponse{}, fmt.Errorf("checkpoint message is required")
+	}
+
+	status, err := e.status(ctx, request.Root)
+	if err != nil {
+		return scm.CheckpointResponse{}, err
+	}
+
+	response := scm.CheckpointResponse{
+		Provider: ExtensionID,
+		Branch:   status.Branch,
+		Commit:   status.Head,
+	}
+	if !status.Clean {
+		commit, err := e.commit(ctx, scm.CommitRequest{Root: request.Root, Message: message})
+		if err != nil {
+			return scm.CheckpointResponse{}, err
+		}
+		response.Commit = commit.Commit
+		response.Committed = true
+	}
+
+	push, err := e.push(ctx, scm.PushRequest{Root: request.Root})
+	if err != nil {
+		return scm.CheckpointResponse{}, err
+	}
+	response.Authorization = push.Authorization
+	if push.Commit != "" {
+		response.Commit = push.Commit
+	}
+	return response, nil
+}
+
 func (e *Extension) push(ctx context.Context, request scm.PushRequest) (scm.PushResponse, error) {
 	root := strings.TrimSpace(request.Root)
 	if root == "" {

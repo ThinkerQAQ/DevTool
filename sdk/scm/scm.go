@@ -9,11 +9,12 @@ import (
 const ServiceName = "scm"
 
 const (
-	MethodDoctor  = "doctor"
-	MethodStatus  = "status"
-	MethodCommit  = "commit"
-	MethodPush    = "push"
-	MethodPublish = "publish"
+	MethodDoctor     = "doctor"
+	MethodStatus     = "status"
+	MethodCommit     = "commit"
+	MethodPush       = "push"
+	MethodCheckpoint = "checkpoint"
+	MethodPublish    = "publish"
 )
 
 type Request struct {
@@ -27,6 +28,11 @@ type CommitRequest struct {
 
 type PushRequest struct {
 	Root string `json:"root"`
+}
+
+type CheckpointRequest struct {
+	Root    string `json:"root"`
+	Message string `json:"message"`
 }
 
 type PublishRequest struct {
@@ -65,6 +71,14 @@ type PushResponse struct {
 	Provider      string                            `json:"provider"`
 	Branch        string                            `json:"branch"`
 	Commit        string                            `json:"commit"`
+	Authorization *credentialcontract.Authorization `json:"authorization,omitempty"`
+}
+
+type CheckpointResponse struct {
+	Provider      string                            `json:"provider"`
+	Branch        string                            `json:"branch"`
+	Commit        string                            `json:"commit"`
+	Committed     bool                              `json:"committed"`
 	Authorization *credentialcontract.Authorization `json:"authorization,omitempty"`
 }
 
