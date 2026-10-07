@@ -2,15 +2,18 @@ package loglocal
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,21 +26,24 @@ import (
 const ExtensionID = "intelligence.log.local"
 
 const (
-	defaultLimit     = 20
-	maxLimit         = 100
-	maxLineBytes     = 4 * 1024 * 1024
-	maxEvidenceBytes = 2 * 1024
-	levelProbeBytes  = 160
+	defaultLimit          = 20
+	maxLimit              = 100
+	maxLineBytes          = 4 * 1024 * 1024
+	maxEvidenceBytes      = 2 * 1024
+	levelProbeBytes       = 160
+	defaultJournalEntries = 20000
+	maxJournalEntries     = 100000
 )
 
 var (
-	levelPattern     = regexp.MustCompile(`(?i)\b(trace|debug|info|warn(?:ing)?|error|fatal|panic)\b`)
-	timestampPattern = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b`)
-	numberPattern    = regexp.MustCompile(`\b\d+\b`)
-	hexPattern       = regexp.MustCompile(`(?i)\b(?:0x)?[0-9a-f]{8,}\b`)
-	uuidPattern      = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
-	secretPattern    = regexp.MustCompile(`(?i)\b(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*([^\s,;]+)`)
-	bearerPattern    = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`)
+	levelPattern       = regexp.MustCompile(`(?i)\b(trace|debug|info|warn(?:ing)?|error|fatal|panic)\b`)
+	timestampPattern   = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b`)
+	numberPattern      = regexp.MustCompile(`\b\d+\b`)
+	hexPattern         = regexp.MustCompile(`(?i)\b(?:0x)?[0-9a-f]{8,}\b`)
+	uuidPattern        = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	secretPattern      = regexp.MustCompile(`(?i)\b(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*([^\s,;]+)`)
+	bearerPattern      = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`)
+	journalUnitPattern = regexp.MustCompile(`^[A-Za-z0-9@_.:-]+$`)
 )
 
 type Extension struct{}
@@ -74,14 +80,18 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	if err := json.Unmarshal(payload, &request); err != nil {
 		return nil, fmt.Errorf("decode local log analysis request: %w", err)
 	}
-	response, err := analyze(request)
+	response, err := analyze(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	if format, ok := detectLnavFormat(ctx, request); ok {
-		response.LnavUsed = true
-		if format != "generic_log" || response.Format == "plain" {
-			response.Format = format
+	if response.SourceKind == logintelligence.SourceFile {
+		if path, err := sourceFilePath(request); err == nil {
+			if format, ok := detectLnavFormat(ctx, path); ok {
+				response.LnavUsed = true
+				if format != "generic_log" || response.Format == "plain" {
+					response.Format = format
+				}
+			}
 		}
 	}
 	return json.Marshal(response)
@@ -92,12 +102,351 @@ type patternState struct {
 	sample string
 }
 
-func detectLnavFormat(ctx context.Context, request logintelligence.AnalyzeRequest) (string, bool) {
-	executable, err := exec.LookPath("lnav")
+type sourceInput struct {
+	reader     io.ReadCloser
+	kind       string
+	label      string
+	format     string
+	bytes      int64
+	maxEntries int
+}
+
+type normalizedRecord struct {
+	Time          string
+	Source        string
+	Level         string
+	EmbeddedLevel string
+	Text          string
+}
+
+func analyze(ctx context.Context, request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeResponse, error) {
+	source, err := openSource(ctx, request)
 	if err != nil {
-		return "", false
+		return logintelligence.AnalyzeResponse{}, err
 	}
-	path, err := resolvePath(request.Root, request.Path)
+	defer source.reader.Close()
+
+	limit := request.Limit
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit > maxLimit {
+		return logintelligence.AnalyzeResponse{}, fmt.Errorf("log analysis limit must not exceed %d", maxLimit)
+	}
+	query := strings.ToLower(strings.TrimSpace(request.Query))
+
+	response := logintelligence.AnalyzeResponse{
+		Provider:       ExtensionID,
+		Source:         source.label,
+		SourceKind:     source.kind,
+		Format:         source.format,
+		Levels:         map[string]int{},
+		EmbeddedLevels: map[string]int{},
+		Summary: logintelligence.Summary{
+			Bytes: source.bytes,
+		},
+	}
+
+	scanner := bufio.NewScanner(source.reader)
+	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
+	patterns := map[string]*patternState{}
+	firstContentSeen := false
+	candidateEvidence := 0
+	continuationIndex := -1
+	continuationRemaining := 0
+
+	for scanner.Scan() {
+		response.Summary.Lines++
+		lineNo := int(response.Summary.Lines)
+		line := scanner.Text()
+		record := parseRecord(source.kind, line)
+		trimmed := strings.TrimSpace(record.Text)
+
+		if source.kind == logintelligence.SourceFile && !firstContentSeen && strings.TrimSpace(line) != "" {
+			firstContentSeen = true
+			if looksJSON(strings.TrimSpace(line)) {
+				response.Format = "json"
+			}
+		}
+
+		recordLevel(&response, record.Level, false)
+		recordLevel(&response, record.EmbeddedLevel, true)
+
+		if isErrorLevel(record.Level) || isErrorLevel(record.EmbeddedLevel) {
+			recordPattern(patterns, record.Text)
+		}
+
+		matchesQuery := query != "" && strings.Contains(strings.ToLower(record.Text), query)
+		evidence := logintelligence.Evidence{
+			Line:          lineNo,
+			Time:          record.Time,
+			Source:        record.Source,
+			Level:         record.Level,
+			EmbeddedLevel: record.EmbeddedLevel,
+			Text:          boundedRedact(record.Text),
+		}
+		if matchesQuery {
+			response.Summary.Matched++
+			if len(response.Matches) < limit {
+				response.Matches = append(response.Matches, evidence)
+			}
+		}
+
+		if shouldKeepEvidence(record.Level, record.EmbeddedLevel, matchesQuery) {
+			candidateEvidence++
+			if len(response.Evidence) < limit {
+				response.Evidence = append(response.Evidence, evidence)
+				continuationIndex = len(response.Evidence) - 1
+				continuationRemaining = 4
+			} else {
+				continuationIndex = -1
+				continuationRemaining = 0
+			}
+		} else if source.kind == logintelligence.SourceFile && continuationIndex >= 0 && continuationRemaining > 0 && isContinuation(line) {
+			response.Evidence[continuationIndex].Text = appendBounded(
+				response.Evidence[continuationIndex].Text,
+				boundedRedact(line),
+			)
+			continuationRemaining--
+		} else if trimmed != "" {
+			continuationIndex = -1
+			continuationRemaining = 0
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return logintelligence.AnalyzeResponse{}, fmt.Errorf("scan log source: %w", err)
+	}
+
+	response.Patterns = topPatterns(patterns, 10)
+	response.Summary.Truncated = candidateEvidence > len(response.Evidence)
+	if source.kind == logintelligence.SourceJournald && source.maxEntries > 0 && response.Summary.Lines >= int64(source.maxEntries) {
+		response.Summary.Truncated = true
+	}
+	if len(response.Levels) == 0 {
+		response.Levels = nil
+	}
+	if len(response.EmbeddedLevels) == 0 {
+		response.EmbeddedLevels = nil
+	}
+	return response, nil
+}
+
+func openSource(ctx context.Context, request logintelligence.AnalyzeRequest) (sourceInput, error) {
+	source := request.Source
+	if source == nil {
+		source = &logintelligence.Source{Kind: logintelligence.SourceFile, Path: request.Path}
+	} else if strings.TrimSpace(request.Path) != "" {
+		return sourceInput{}, fmt.Errorf("log analysis path and source are mutually exclusive")
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(source.Kind))
+	switch kind {
+	case "", logintelligence.SourceFile:
+		path := strings.TrimSpace(source.Path)
+		if path == "" {
+			path = strings.TrimSpace(request.Path)
+		}
+		resolved, err := resolvePath(request.Root, path)
+		if err != nil {
+			return sourceInput{}, err
+		}
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return sourceInput{}, fmt.Errorf("stat log file: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			return sourceInput{}, fmt.Errorf("log path %q is not a regular file", path)
+		}
+		file, err := os.Open(resolved)
+		if err != nil {
+			return sourceInput{}, fmt.Errorf("open log file: %w", err)
+		}
+		return sourceInput{
+			reader: file,
+			kind:   logintelligence.SourceFile,
+			label:  path,
+			format: "plain",
+			bytes:  info.Size(),
+		}, nil
+	case logintelligence.SourceJournald:
+		return openJournalSource(ctx, *source)
+	default:
+		return sourceInput{}, fmt.Errorf("unsupported log source kind %q", source.Kind)
+	}
+}
+
+func openJournalSource(ctx context.Context, source logintelligence.Source) (sourceInput, error) {
+	unit := strings.TrimSpace(source.Unit)
+	if unit == "" {
+		return sourceInput{}, fmt.Errorf("journald source unit is required")
+	}
+	if !journalUnitPattern.MatchString(unit) {
+		return sourceInput{}, fmt.Errorf("journald source unit %q contains unsupported characters", unit)
+	}
+	scope := strings.ToLower(strings.TrimSpace(source.Scope))
+	if scope == "" {
+		scope = "user"
+	}
+	if scope != "user" && scope != "system" {
+		return sourceInput{}, fmt.Errorf("journald source scope must be user or system")
+	}
+	maxEntries := source.MaxEntries
+	if maxEntries <= 0 {
+		maxEntries = defaultJournalEntries
+	}
+	if maxEntries > maxJournalEntries {
+		return sourceInput{}, fmt.Errorf("journald max_entries must not exceed %d", maxJournalEntries)
+	}
+
+	args := []string{"--no-pager", "--output=json", "--lines", strconv.Itoa(maxEntries), "--unit", unit}
+	if scope == "user" {
+		args = append([]string{"--user"}, args...)
+	}
+	if since := strings.TrimSpace(source.Since); since != "" {
+		args = append(args, "--since", since)
+	}
+	if until := strings.TrimSpace(source.Until); until != "" {
+		args = append(args, "--until", until)
+	}
+	output, err := exec.CommandContext(ctx, "journalctl", args...).CombinedOutput()
+	if err != nil {
+		return sourceInput{}, fmt.Errorf("read journald unit %s: %w: %s", unit, err, strings.TrimSpace(string(output)))
+	}
+	return sourceInput{
+		reader:     io.NopCloser(bytes.NewReader(output)),
+		kind:       logintelligence.SourceJournald,
+		label:      fmt.Sprintf("journald:%s:%s", scope, unit),
+		format:     "journald-json",
+		bytes:      int64(len(output)),
+		maxEntries: maxEntries,
+	}, nil
+}
+
+func parseRecord(kind, line string) normalizedRecord {
+	if kind != logintelligence.SourceJournald {
+		return normalizedRecord{
+			Level: detectLevel(line),
+			Text:  line,
+		}
+	}
+
+	var event map[string]any
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return normalizedRecord{Text: line}
+	}
+	message := journalString(event["MESSAGE"])
+	source := firstNonEmpty(
+		journalString(event["SYSLOG_IDENTIFIER"]),
+		journalString(event["_SYSTEMD_UNIT"]),
+		journalString(event["_COMM"]),
+	)
+	level := journalPriorityLevel(journalString(event["PRIORITY"]))
+	embedded := detectLevel(message)
+	return normalizedRecord{
+		Time:          journalTimestamp(journalString(event["__REALTIME_TIMESTAMP"])),
+		Source:        source,
+		Level:         level,
+		EmbeddedLevel: embedded,
+		Text:          message,
+	}
+}
+
+func journalString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case []any:
+		var b strings.Builder
+		for _, item := range typed {
+			number, ok := item.(float64)
+			if !ok || number < 0 || number > 255 {
+				return ""
+			}
+			b.WriteByte(byte(number))
+		}
+		return strings.TrimSpace(b.String())
+	default:
+		return ""
+	}
+}
+
+func journalTimestamp(value string) string {
+	if value == "" {
+		return ""
+	}
+	micros, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return ""
+	}
+	return time.UnixMicro(micros).UTC().Format(time.RFC3339Nano)
+}
+
+func journalPriorityLevel(value string) string {
+	priority, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return ""
+	}
+	switch priority {
+	case 0, 1, 2:
+		return "fatal"
+	case 3:
+		return "error"
+	case 4:
+		return "warn"
+	case 5, 6:
+		return "info"
+	case 7:
+		return "debug"
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func recordLevel(response *logintelligence.AnalyzeResponse, level string, embedded bool) {
+	if level == "" {
+		return
+	}
+	if embedded {
+		response.EmbeddedLevels[level]++
+		switch level {
+		case "error", "fatal", "panic":
+			response.Summary.EmbeddedErrors++
+		case "warn":
+			response.Summary.EmbeddedWarnings++
+		}
+		return
+	}
+	response.Levels[level]++
+	switch level {
+	case "error", "fatal", "panic":
+		response.Summary.Errors++
+	case "warn":
+		response.Summary.Warnings++
+	}
+}
+
+func sourceFilePath(request logintelligence.AnalyzeRequest) (string, error) {
+	path := strings.TrimSpace(request.Path)
+	if request.Source != nil {
+		if strings.TrimSpace(request.Source.Kind) != "" && strings.TrimSpace(request.Source.Kind) != logintelligence.SourceFile {
+			return "", fmt.Errorf("not a file source")
+		}
+		path = strings.TrimSpace(request.Source.Path)
+	}
+	return resolvePath(request.Root, path)
+}
+
+func detectLnavFormat(ctx context.Context, path string) (string, bool) {
+	executable, err := exec.LookPath("lnav")
 	if err != nil {
 		return "", false
 	}
@@ -154,122 +503,6 @@ func parseLnavFormat(raw []byte) (string, error) {
 		}
 	}
 	return "", nil
-}
-
-func analyze(request logintelligence.AnalyzeRequest) (logintelligence.AnalyzeResponse, error) {
-	path, err := resolvePath(request.Root, request.Path)
-	if err != nil {
-		return logintelligence.AnalyzeResponse{}, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return logintelligence.AnalyzeResponse{}, fmt.Errorf("stat log file: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return logintelligence.AnalyzeResponse{}, fmt.Errorf("log path %q is not a regular file", request.Path)
-	}
-
-	limit := request.Limit
-	if limit <= 0 {
-		limit = defaultLimit
-	}
-	if limit > maxLimit {
-		return logintelligence.AnalyzeResponse{}, fmt.Errorf("log analysis limit must not exceed %d", maxLimit)
-	}
-	query := strings.ToLower(strings.TrimSpace(request.Query))
-
-	file, err := os.Open(path)
-	if err != nil {
-		return logintelligence.AnalyzeResponse{}, fmt.Errorf("open log file: %w", err)
-	}
-	defer file.Close()
-
-	response := logintelligence.AnalyzeResponse{
-		Provider: ExtensionID,
-		Source:   request.Path,
-		Format:   "plain",
-		Levels:   map[string]int{},
-		Summary: logintelligence.Summary{
-			Bytes: info.Size(),
-		},
-	}
-
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
-	patterns := map[string]*patternState{}
-	firstContentSeen := false
-	candidateEvidence := 0
-	continuationIndex := -1
-	continuationRemaining := 0
-
-	for scanner.Scan() {
-		response.Summary.Lines++
-		lineNo := int(response.Summary.Lines)
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-		if !firstContentSeen && trimmed != "" {
-			firstContentSeen = true
-			if looksJSON(trimmed) {
-				response.Format = "json"
-			}
-		}
-
-		level := detectLevel(line)
-		if level != "" {
-			response.Levels[level]++
-			switch level {
-			case "error", "fatal", "panic":
-				response.Summary.Errors++
-				recordPattern(patterns, line)
-			case "warn":
-				response.Summary.Warnings++
-			}
-		}
-
-		matchesQuery := query != "" && strings.Contains(strings.ToLower(line), query)
-		if matchesQuery {
-			response.Summary.Matched++
-			if len(response.Matches) < limit {
-				response.Matches = append(response.Matches, logintelligence.Evidence{
-					Line:  lineNo,
-					Level: level,
-					Text:  boundedRedact(line),
-				})
-			}
-		}
-
-		if shouldKeepEvidence(level, matchesQuery) {
-			candidateEvidence++
-			if len(response.Evidence) < limit {
-				response.Evidence = append(response.Evidence, logintelligence.Evidence{
-					Line:  lineNo,
-					Level: level,
-					Text:  boundedRedact(line),
-				})
-				continuationIndex = len(response.Evidence) - 1
-				continuationRemaining = 4
-			} else {
-				continuationIndex = -1
-				continuationRemaining = 0
-			}
-		} else if continuationIndex >= 0 && continuationRemaining > 0 && isContinuation(line) {
-			response.Evidence[continuationIndex].Text = appendBounded(
-				response.Evidence[continuationIndex].Text,
-				boundedRedact(line),
-			)
-			continuationRemaining--
-		} else if trimmed != "" {
-			continuationIndex = -1
-			continuationRemaining = 0
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return logintelligence.AnalyzeResponse{}, fmt.Errorf("scan log file: %w", err)
-	}
-
-	response.Patterns = topPatterns(patterns, 10)
-	response.Summary.Truncated = candidateEvidence > len(response.Evidence)
-	return response, nil
 }
 
 func resolvePath(root, name string) (string, error) {
@@ -348,12 +581,25 @@ func isContinuation(line string) bool {
 	return false
 }
 
-func shouldKeepEvidence(level string, query bool) bool {
+func shouldKeepEvidence(level, embeddedLevel string, query bool) bool {
 	if query {
 		return true
 	}
+	return isInterestingLevel(level) || isInterestingLevel(embeddedLevel)
+}
+
+func isInterestingLevel(level string) bool {
 	switch level {
 	case "warn", "error", "fatal", "panic":
+		return true
+	default:
+		return false
+	}
+}
+
+func isErrorLevel(level string) bool {
+	switch level {
+	case "error", "fatal", "panic":
 		return true
 	default:
 		return false

@@ -12,7 +12,8 @@ Implementation status: Phase 1 is implemented on `refactor/capability-boundaries
 - `document_context` delegates to `service.document-context` / `context.document.composite`;
 - Phase 2 environment decoupling is implemented with separate `environment` and `tooling-environment` service selections;
 - provider processes are already reused inside one DevTool host lifecycle, so no second provider-cache layer is being added;
-- repeated cold starts across Remote calls remain a later persistent-DevTool-endpoint problem.
+- repeated cold starts across Remote calls remain a later persistent-DevTool-endpoint problem;
+- Phase 3 file+journald log sources and envelope severity normalization are implemented; a dedicated process/session source is deferred until a transport-neutral session identifier exists.
 
 ## 1. One-sentence decision
 
@@ -697,11 +698,11 @@ This separates "understand the code" from "build in an isolated reproducible env
 
 `log_context` is now a real DevTool capability and should remain in DevTool.
 
-The next important semantic improvement is nested/envelope logs.
+Nested/envelope logs are now normalized in the local journald source.
 
 A Remote Commander journal event may contain another tool's output, which may itself contain an error log.
 
-Target normalized model:
+Implemented normalized model:
 
 ```text
 NormalizedEvent
@@ -890,10 +891,10 @@ The important consequence is:
 
 ### Phase 3 — broaden log sources
 
-- add journald source;
-- add process/session source;
+- add file + journald source adapters;
 - add envelope/nested event normalization;
-- preserve bounded/redacted evidence.
+- preserve bounded/redacted evidence;
+- defer a dedicated process/session source until DevTool has a stable transport-neutral session identifier rather than depending on Remote Commander's private PID/session model.
 
 ### Phase 4 — optimize remote path only after measurement
 

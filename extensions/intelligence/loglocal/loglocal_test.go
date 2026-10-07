@@ -25,7 +25,7 @@ func TestAnalyzeArbitraryLogBuildsBoundedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	response, err := analyze(logintelligence.AnalyzeRequest{
+	response, err := analyze(t.Context(), logintelligence.AnalyzeRequest{
 		Root:  root,
 		Path:  "service.log",
 		Query: "request",
@@ -70,7 +70,7 @@ func TestAnalyzeDetectsJSONLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	response, err := analyze(logintelligence.AnalyzeRequest{Root: root, Path: "events.jsonl"})
+	response, err := analyze(t.Context(), logintelligence.AnalyzeRequest{Root: root, Path: "events.jsonl"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestAnalyzeRejectsPathOutsideRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := analyze(logintelligence.AnalyzeRequest{Root: root, Path: path}); err == nil {
+	if _, err := analyze(t.Context(), logintelligence.AnalyzeRequest{Root: root, Path: path}); err == nil {
 		t.Fatal("expected path outside root to fail")
 	}
 }
@@ -107,8 +107,42 @@ func TestAnalyzeRejectsSymlinkEscape(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 
-	if _, err := analyze(logintelligence.AnalyzeRequest{Root: root, Path: "escape.log"}); err == nil {
+	if _, err := analyze(t.Context(), logintelligence.AnalyzeRequest{Root: root, Path: "escape.log"}); err == nil {
 		t.Fatal("expected symlink escape to fail")
+	}
+}
+
+func TestParseJournaldEnvelopeSeparatesOuterAndEmbeddedLevels(t *testing.T) {
+	record := parseRecord(logintelligence.SourceJournald, `{"MESSAGE":"ERROR nested request failed token=secret","PRIORITY":"6","SYSLOG_IDENTIFIER":"desktop-commander","__REALTIME_TIMESTAMP":"1791352800000000"}`)
+	if record.Level != "info" {
+		t.Fatalf("outer level = %q, want info", record.Level)
+	}
+	if record.EmbeddedLevel != "error" {
+		t.Fatalf("embedded level = %q, want error", record.EmbeddedLevel)
+	}
+	if record.Source != "desktop-commander" {
+		t.Fatalf("source = %q", record.Source)
+	}
+	if record.Time == "" {
+		t.Fatal("expected normalized journal timestamp")
+	}
+	if record.Text != "ERROR nested request failed token=secret" {
+		t.Fatalf("text = %q", record.Text)
+	}
+}
+
+func TestJournalPriorityLevel(t *testing.T) {
+	tests := map[string]string{
+		"2": "fatal",
+		"3": "error",
+		"4": "warn",
+		"6": "info",
+		"7": "debug",
+	}
+	for priority, want := range tests {
+		if got := journalPriorityLevel(priority); got != want {
+			t.Fatalf("priority %s = %q, want %q", priority, got, want)
+		}
 	}
 }
 
@@ -151,5 +185,49 @@ func TestInvokeRejectsUnknownMethod(t *testing.T) {
 	payload, _ := json.Marshal(logintelligence.AnalyzeRequest{Root: t.TempDir(), Path: "missing.log"})
 	if _, err := ext.Invoke(t.Context(), "unknown", payload); err == nil {
 		t.Fatal("expected unknown method to fail")
+	}
+}
+
+func TestParseJournalRecordSeparatesOuterAndEmbeddedSeverity(t *testing.T) {
+	line := `{"PRIORITY":"6","MESSAGE":"tool failed: ERROR downstream timeout","SYSLOG_IDENTIFIER":"desktop-commander-remote","__REALTIME_TIMESTAMP":"1791359299419603"}`
+	record := parseRecord(logintelligence.SourceJournald, line)
+	if record.Level != "info" {
+		t.Fatalf("outer level = %q, want info", record.Level)
+	}
+	if record.EmbeddedLevel != "error" {
+		t.Fatalf("embedded level = %q, want error", record.EmbeddedLevel)
+	}
+	if record.Source != "desktop-commander-remote" {
+		t.Fatalf("source = %q", record.Source)
+	}
+	if record.Time == "" {
+		t.Fatal("expected journal timestamp")
+	}
+
+	response := logintelligence.AnalyzeResponse{
+		Levels:         map[string]int{},
+		EmbeddedLevels: map[string]int{},
+	}
+	recordLevel(&response, record.Level, false)
+	recordLevel(&response, record.EmbeddedLevel, true)
+	if response.Summary.Errors != 0 || response.Summary.EmbeddedErrors != 1 {
+		t.Fatalf("summary = %#v", response.Summary)
+	}
+	if response.Levels["info"] != 1 || response.EmbeddedLevels["error"] != 1 {
+		t.Fatalf("levels = %#v embedded = %#v", response.Levels, response.EmbeddedLevels)
+	}
+}
+
+func TestJournalPriorityMapping(t *testing.T) {
+	tests := map[string]string{
+		"3": "error",
+		"4": "warn",
+		"6": "info",
+		"7": "debug",
+	}
+	for priority, want := range tests {
+		if got := journalPriorityLevel(priority); got != want {
+			t.Fatalf("priority %s = %q, want %q", priority, got, want)
+		}
 	}
 }
