@@ -149,11 +149,28 @@ package = "./extensions/document/markdown/cmd/provider"
 [extension.document-markdown.settings]
 roots = ["src/content"]
 
+[extension.document-relations]
+loader = "go-module"
+
+[extension.document-relations.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/document/relations/content/cmd/provider"
+
+[extension.document-relations.settings]
+articles = "src/content/articles"
+series = "src/content/series"
+notes = "src/content/notes"
+projects = "src/content/projects"
+
 [service.document-structure]
 provider = "document.markdown.goldmark"
+
+[service.document-relations]
+provider = "document.relations.content"
 ```
 
-The Agent surface remains `document_context`; parser-specific behavior stays inside the selected provider.
+The Agent surface remains `document_context`; parser-specific and content-relation behavior stay behind the selected providers. Repositories that do not need cross-document relations can omit `document-relations` entirely.
 
 A content-only repository can use the reusable `project.workspace` Project Extension instead of creating a fake project-local build/runtime implementation:
 

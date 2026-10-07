@@ -84,7 +84,21 @@ document_context(path=document, section="...", include_content=true)
   -> one exact source section
 ```
 
-Review mode is stateless: the continuation cursor carries traversal position and is rejected if the document structure changes. The agent should not depend on Goldmark, Marksman, Serena, or another concrete document provider.
+Review mode is stateless: the continuation cursor carries traversal position and is rejected if the document structure changes.
+
+When the review depends on series/project/note context, request deterministic relationships on the initial call:
+
+```text
+document_context(path=document, review=true, related=true)
+  -> document outline + review coverage
+  -> parent series/project
+  -> ordered sibling documents
+  -> explicit related notes / configured note scopes
+```
+
+The relationship graph discovers source-of-truth links; it does not automatically ingest every related body. Read only the related documents needed for the objective.
+
+The agent should not depend on Goldmark, the configured relation provider, Marksman, Serena, or another concrete provider.
 
 ### Execute project operations
 
