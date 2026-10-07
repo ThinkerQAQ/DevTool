@@ -62,10 +62,10 @@ Rules:
 
 ## Configuration
 
-`capability.document` gains a configurable default:
+The selected `document-context` provider owns the configurable review default:
 
 ```toml
-[extension.document-capability.settings]
+[extension.document-context.settings]
 review_max_lines = 300
 ```
 

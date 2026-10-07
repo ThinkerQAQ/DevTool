@@ -113,6 +113,9 @@ provider = "intelligence.lsp.serena"
 [service.scm]
 provider = "scm.github"
 
+[service.document-context]
+provider = "context.document.composite"
+
 [service.document-structure]
 provider = "document.markdown.goldmark"
 ```
@@ -138,7 +141,15 @@ module = "github.com/thinkerqaq/devtool"
 version = "<pinned-commit>"
 package = "./extensions/capability/document/cmd/provider"
 
-[extension.document-capability.settings]
+[extension.document-context]
+loader = "go-module"
+
+[extension.document-context.loader_config]
+module = "github.com/thinkerqaq/devtool"
+version = "<pinned-commit>"
+package = "./extensions/context/document/cmd/provider"
+
+[extension.document-context.settings]
 review_max_lines = 300
 
 [extension.document-markdown]
@@ -166,6 +177,9 @@ series = "src/content/series"
 notes = "src/content/notes"
 projects = "src/content/projects"
 
+[service.document-context]
+provider = "context.document.composite"
+
 [service.document-structure]
 provider = "document.markdown.goldmark"
 
@@ -173,7 +187,7 @@ provider = "document.markdown.goldmark"
 provider = "document.relations.content"
 ```
 
-The Agent surface remains `document_context`; parser-specific and content-relation behavior stay behind the selected providers. `review_max_lines` controls the default maximum size of structurally splittable review units and defaults to 300 when omitted. Repositories that do not need cross-document relations can omit `document-relations` entirely.
+The Agent surface remains `document_context`. The thin Capability delegates to `document-context`; bounded review/cursor/relation composition lives in the selected document-context provider, while parser-specific structure and content-relation behavior remain behind their own services. `review_max_lines` configures the document-context provider and defaults to 300 when omitted. Repositories that do not need cross-document relations can omit `document-relations` entirely.
 
 A content-only repository can use the reusable `project.workspace` Project Extension instead of creating a fake project-local build/runtime implementation:
 
