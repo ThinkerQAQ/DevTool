@@ -4,7 +4,7 @@ import "testing"
 
 func TestProviderDescribeConfiguredWorkspace(t *testing.T) {
 	provider := &Provider{}
-	if err := provider.Configure(map[string]any{"name": "BlogContent"}); err != nil {
+	if err := provider.Configure(map[string]any{"name": "Docs"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -12,8 +12,8 @@ func TestProviderDescribeConfiguredWorkspace(t *testing.T) {
 		t.Fatalf("extension id = %q, want %q", got, ExtensionID)
 	}
 	project := provider.ProjectDescriptor()
-	if got := project.Identity.Name; got != "BlogContent" {
-		t.Fatalf("project name = %q, want BlogContent", got)
+	if got := project.Identity.Name; got != "Docs" {
+		t.Fatalf("project name = %q, want Docs", got)
 	}
 	if len(project.Commands) != 0 {
 		t.Fatalf("workspace project should expose no commands, got %d", len(project.Commands))
