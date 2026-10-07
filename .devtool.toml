@@ -41,6 +41,13 @@ loader = "go"
 module = "."
 package = "./extensions/capability/code/cmd/provider"
 
+[extension.code-context]
+loader = "go"
+
+[extension.code-context.loader_config]
+module = "."
+package = "./extensions/context/code/cmd/provider"
+
 [extension.log-capability]
 loader = "go"
 
@@ -125,6 +132,9 @@ provider = "intelligence.codegraph"
 
 [service.code-realtime]
 provider = "intelligence.lsp.serena"
+
+[service.code-context]
+provider = "context.code.composite"
 
 [service.log-analysis]
 provider = "intelligence.log.local"
