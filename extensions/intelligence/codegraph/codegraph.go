@@ -167,7 +167,9 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			limit = 20
 		}
 		if request.Discovery {
-			return e.discover(ctx, request.Workspace, query, limit)
+			return e.guardSearchResult(ctx, request.Workspace, func() (json.RawMessage, error) {
+				return e.discover(ctx, request.Workspace, query, limit)
+			})
 		}
 		args, err := json.Marshal(map[string]any{
 			"query":   query,
@@ -177,10 +179,171 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err != nil {
 			return nil, err
 		}
-		return e.runTool(ctx, request.Workspace, "codegraph_symbol_search", args)
+		return e.searchSymbols(ctx, request.Workspace, args)
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
+}
+
+func (e *Extension) searchSymbols(ctx context.Context, workspace codeintelligence.Workspace, args json.RawMessage) (json.RawMessage, error) {
+	return e.guardSearchResult(ctx, workspace, func() (json.RawMessage, error) {
+		return e.runTool(ctx, workspace, "codegraph_symbol_search", args)
+	})
+}
+
+func (e *Extension) guardSearchResult(
+	ctx context.Context,
+	workspace codeintelligence.Workspace,
+	query func() (json.RawMessage, error),
+) (json.RawMessage, error) {
+	raw, err := query()
+	if err != nil {
+		return nil, err
+	}
+	filtered, stale, err := filterSearchResultPaths(workspace, raw)
+	if err != nil {
+		return nil, err
+	}
+	if !stale {
+		return filtered, nil
+	}
+	if err := e.forceReindex(ctx, workspace); err != nil {
+		return nil, err
+	}
+	raw, err = query()
+	if err != nil {
+		return nil, err
+	}
+	filtered, _, err = filterSearchResultPaths(workspace, raw)
+	return filtered, err
+}
+
+func (e *Extension) forceReindex(ctx context.Context, workspace codeintelligence.Workspace) error {
+	_, err := e.runTool(
+		ctx,
+		workspace,
+		"codegraph_reindex_workspace",
+		json.RawMessage(`{"force":true}`),
+	)
+	if err != nil {
+		return fmt.Errorf("force CodeGraph reindex after stale result: %w", err)
+	}
+	return nil
+}
+
+func filterSearchResultPaths(
+	workspace codeintelligence.Workspace,
+	raw json.RawMessage,
+) (json.RawMessage, bool, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, false, fmt.Errorf("decode CodeGraph search result: %w", err)
+	}
+
+	resultsRaw, ok := envelope["results"]
+	if !ok {
+		return append(json.RawMessage(nil), raw...), false, nil
+	}
+
+	var results []json.RawMessage
+	if err := json.Unmarshal(resultsRaw, &results); err != nil {
+		return nil, false, fmt.Errorf("decode CodeGraph search results: %w", err)
+	}
+
+	filtered := make([]json.RawMessage, 0, len(results))
+	stale := false
+	for _, result := range results {
+		path, ok, err := codeGraphResultPath(result)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok && !workspaceFileExists(workspace, path) {
+			stale = true
+			continue
+		}
+		filtered = append(filtered, result)
+	}
+
+	encoded, err := json.Marshal(filtered)
+	if err != nil {
+		return nil, false, err
+	}
+	envelope["results"] = encoded
+	out, err := json.Marshal(envelope)
+	return out, stale, err
+}
+
+func codeGraphResultPath(raw json.RawMessage) (string, bool, error) {
+	var result struct {
+		Path   string `json:"path"`
+		Symbol struct {
+			Location struct {
+				File string `json:"file"`
+			} `json:"location"`
+		} `json:"symbol"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", false, fmt.Errorf("decode CodeGraph result path: %w", err)
+	}
+	if path := strings.TrimSpace(result.Path); path != "" {
+		return path, true, nil
+	}
+	if path := strings.TrimSpace(result.Symbol.Location.File); path != "" {
+		return path, true, nil
+	}
+	return "", false, nil
+}
+
+func workspaceFileExists(workspace codeintelligence.Workspace, candidate string) bool {
+	path, ok := resolveWorkspacePath(workspace, candidate)
+	if !ok {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func resolveWorkspacePath(
+	workspace codeintelligence.Workspace,
+	candidate string,
+) (string, bool) {
+	root := strings.TrimSpace(workspace.Root)
+	if root == "" {
+		return "", false
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	root = filepath.Clean(root)
+
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return "", false
+	}
+	path := filepath.Clean(filepath.FromSlash(candidate))
+	if !filepath.IsAbs(path) {
+		return pathWithinRoot(root, filepath.Join(root, path))
+	}
+	if resolved, ok := pathWithinRoot(root, path); ok {
+		return resolved, true
+	}
+
+	environmentRoot := filepath.Clean(filepath.FromSlash(environmentcontract.WorkspaceRoot))
+	rel, err := filepath.Rel(environmentRoot, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return pathWithinRoot(root, filepath.Join(root, rel))
+}
+
+func pathWithinRoot(root, candidate string) (string, bool) {
+	candidate = filepath.Clean(candidate)
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return candidate, true
 }
 
 type discoveryCandidate struct {
