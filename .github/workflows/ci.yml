@@ -57,6 +57,8 @@ jobs:
           assert "code_context" in names, names
           assert "project_build" in names, names
           assert "project_verify" in names, names
+          assert "project_activate" in names, names
+          assert "project_rollback" in names, names
           assert not any(name in {"code_search", "code_symbols", "code_references", "code_diagnostics"} for name in names), names
           assert not any(name.startswith("codegraph_") for name in names), names
           assert not any(name.startswith("sourcegraph_") for name in names), names
@@ -77,9 +79,11 @@ jobs:
         run: |
           cp .devtool/out/devtool-next /tmp/devtool-n1
           /tmp/devtool-n1 project inspect --json
+          /tmp/devtool-n1 version --json
           /tmp/devtool-n1 build
           cp .devtool/out/devtool-next /tmp/devtool-n2
           /tmp/devtool-n2 project inspect --json
+          /tmp/devtool-n2 version --json
           cmp /tmp/devtool-n1 /tmp/devtool-n2
       - name: Self-host through local environment provider
         run: |

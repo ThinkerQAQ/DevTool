@@ -1,8 +1,13 @@
 package devcontrol
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -27,8 +32,10 @@ func (Provider) ProjectDescriptor() contract.ProjectDescriptor {
 	return contract.ProjectDescriptor{
 		Identity: contract.ProjectIdentity{Name: "DevTool"},
 		Commands: []contract.CommandDescriptor{
+			{ID: "activate", Title: "Activate", Description: "Atomically activate the verified DevTool candidate in the user PATH installation.", SideEffect: contract.SideEffectWrite},
 			{ID: "build", Title: "Build", Description: "Build the next DevTool binary in the configured development environment.", SideEffect: contract.SideEffectWrite},
 			{ID: "package", Title: "Package", Description: "Package a verified DevTool binary in the configured development environment.", SideEffect: contract.SideEffectWrite},
+			{ID: "rollback", Title: "Rollback", Description: "Atomically restore the previously activated DevTool version.", SideEffect: contract.SideEffectWrite},
 			{ID: "verify", Title: "Verify", Description: "Run DevTool self-host verification in the configured development environment.", SideEffect: contract.SideEffectWrite},
 		},
 		Resources: []contract.ResourceDescriptor{
@@ -42,6 +49,8 @@ func (Provider) ProjectDescriptor() contract.ProjectDescriptor {
 				Actions: []contract.ActionDescriptor{
 					{CommandID: "build", Label: "Build"},
 					{CommandID: "verify", Label: "Verify"},
+					{CommandID: "activate", Label: "Activate"},
+					{CommandID: "rollback", Label: "Rollback"},
 					{CommandID: "package", Label: "Package"},
 				},
 			},
@@ -59,10 +68,14 @@ func (Provider) Execute(ctx project.Context, command string, _ map[string]any) e
 	}
 
 	switch command {
+	case "activate":
+		return activate(ctx, workspace)
 	case "build":
 		return build(ctx, workspace)
 	case "verify":
 		return verify(ctx, workspace)
+	case "rollback":
+		return rollback(ctx)
 	case "package":
 		return packageArtifact(ctx, workspace)
 	default:
@@ -71,21 +84,23 @@ func (Provider) Execute(ctx project.Context, command string, _ map[string]any) e
 }
 
 func build(ctx project.Context, workspace string) error {
+	metadata, err := loadBuildMetadata(workspace)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "out"), 0o755); err != nil {
 		return fmt.Errorf("create DevTool output directory: %w", err)
 	}
-	if err := ctx.Emit("progress", "Building DevTool N+1 in configured environment"); err != nil {
+	if err := removeVerificationManifest(workspace); err != nil {
+		return err
+	}
+	if err := ctx.Emit("progress", fmt.Sprintf("Building DevTool %s (%s) N+1 in configured environment", metadata.Version, shortCommit(metadata.Commit))); err != nil {
 		return err
 	}
 	if err := runEnvironment(ctx, workspace, environmentcontract.CommandRequest{
 		Executable: "go",
-		Args: []string{
-			"build",
-			"-trimpath",
-			"-o", ".devtool/out/" + nextBinaryName(),
-			"./cmd/devtool",
-		},
-		Env: targetEnv(),
+		Args:       devtoolBuildArgs(".devtool/out/"+nextBinaryName(), metadata, false),
+		Env:        targetEnv(),
 	}); err != nil {
 		return err
 	}
@@ -93,8 +108,15 @@ func build(ctx project.Context, workspace string) error {
 }
 
 func verify(ctx project.Context, workspace string) error {
+	metadata, err := loadBuildMetadata(workspace)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Join(workspace, ".devtool", "out"), 0o755); err != nil {
 		return fmt.Errorf("create DevTool output directory: %w", err)
+	}
+	if err := removeVerificationManifest(workspace); err != nil {
+		return err
 	}
 	if err := ctx.Emit("progress", "Verifying DevTool self-hosting in configured environment"); err != nil {
 		return err
@@ -105,12 +127,7 @@ func verify(ctx project.Context, workspace string) error {
 		{Executable: "go", Args: []string{"-C", "devcontrol", "test", "./..."}, Env: selfHostTestEnv()},
 		{
 			Executable: "go",
-			Args: []string{
-				"build",
-				"-trimpath",
-				"-o", ".devtool/out/" + nextBinaryName(),
-				"./cmd/devtool",
-			},
+			Args:       devtoolBuildArgs(".devtool/out/"+nextBinaryName(), metadata, false),
 		},
 		{
 			Executable: ".devtool/out/" + nextBinaryName(),
@@ -122,10 +139,20 @@ func verify(ctx project.Context, workspace string) error {
 			return err
 		}
 	}
+	if err := verifyCandidateMetadata(ctx, workspace, metadata); err != nil {
+		return err
+	}
+	if err := writeVerificationManifest(workspace, metadata); err != nil {
+		return err
+	}
 	return ctx.Emit("result", "DevTool self-host verification passed in configured environment")
 }
 
 func packageArtifact(ctx project.Context, workspace string) error {
+	metadata, err := loadBuildMetadata(workspace)
+	if err != nil {
+		return err
+	}
 	if err := verify(ctx, workspace); err != nil {
 		return err
 	}
@@ -137,14 +164,8 @@ func packageArtifact(ctx project.Context, workspace string) error {
 	}
 	if err := runEnvironment(ctx, workspace, environmentcontract.CommandRequest{
 		Executable: "go",
-		Args: []string{
-			"build",
-			"-trimpath",
-			"-ldflags=-s -w",
-			"-o", ".devtool/artifacts/" + packageBinaryName(),
-			"./cmd/devtool",
-		},
-		Env: targetEnv(),
+		Args:       devtoolBuildArgs(".devtool/artifacts/"+packageBinaryName(metadata.Version), metadata, true),
+		Env:        targetEnv(),
 	}); err != nil {
 		return err
 	}
@@ -152,6 +173,11 @@ func packageArtifact(ctx project.Context, workspace string) error {
 }
 
 func runEnvironment(ctx project.Context, workspace string, request environmentcontract.CommandRequest) error {
+	_, err := runEnvironmentResult(ctx, workspace, request)
+	return err
+}
+
+func runEnvironmentResult(ctx project.Context, workspace string, request environmentcontract.CommandRequest) (environmentcontract.RunResult, error) {
 	request.Root = workspace
 
 	var result environmentcontract.RunResult
@@ -161,7 +187,7 @@ func runEnvironment(ctx project.Context, workspace string, request environmentco
 		request,
 		&result,
 	); err != nil {
-		return err
+		return environmentcontract.RunResult{}, err
 	}
 	if result.ExitCode != 0 {
 		message := strings.TrimSpace(result.Stderr)
@@ -171,9 +197,90 @@ func runEnvironment(ctx project.Context, workspace string, request environmentco
 		if message == "" {
 			message = fmt.Sprintf("exit code %d", result.ExitCode)
 		}
-		return fmt.Errorf("%s failed: %s", request.Executable, message)
+		return result, fmt.Errorf("%s failed: %s", request.Executable, message)
+	}
+	return result, nil
+}
+
+func verifyCandidateMetadata(ctx project.Context, workspace string, metadata buildMetadata) error {
+	result, err := runEnvironmentResult(ctx, workspace, environmentcontract.CommandRequest{
+		Executable: ".devtool/out/" + nextBinaryName(),
+		Args:       []string{"version", "--json"},
+	})
+	if err != nil {
+		return err
+	}
+	var got struct {
+		Version string `json:"version"`
+		Commit  string `json:"commit"`
+		Dirty   bool   `json:"dirty"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &got); err != nil {
+		return fmt.Errorf("decode DevTool candidate version: %w", err)
+	}
+	if got.Version != metadata.Version || got.Commit != metadata.Commit || got.Dirty != metadata.Dirty {
+		return fmt.Errorf(
+			"DevTool candidate metadata mismatch: got version=%s commit=%s dirty=%t, want version=%s commit=%s dirty=%t",
+			got.Version, got.Commit, got.Dirty, metadata.Version, metadata.Commit, metadata.Dirty,
+		)
 	}
 	return nil
+}
+
+func verificationManifestPath(workspace string) string {
+	return filepath.Join(workspace, ".devtool", "out", nextBinaryName()+".verified.json")
+}
+
+func removeVerificationManifest(workspace string) error {
+	path := verificationManifestPath(workspace)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale DevTool verification manifest: %w", err)
+	}
+	return nil
+}
+
+func writeVerificationManifest(workspace string, metadata buildMetadata) error {
+	binaryPath := filepath.Join(workspace, ".devtool", "out", nextBinaryName())
+	digest, err := sha256File(binaryPath)
+	if err != nil {
+		return err
+	}
+	manifest := verificationManifest{
+		SchemaVersion: 1,
+		Version:       metadata.Version,
+		Commit:        metadata.Commit,
+		Dirty:         metadata.Dirty,
+		SHA256:        digest,
+		Binary:        nextBinaryName(),
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	path := verificationManifestPath(workspace)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return fmt.Errorf("write DevTool verification manifest: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("activate DevTool verification manifest: %w", err)
+	}
+	return nil
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash %s: %w", path, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func selfHostTestEnv() []string {
@@ -195,8 +302,95 @@ func nextBinaryName() string {
 	return "devtool-next"
 }
 
-func packageBinaryName() string {
-	name := fmt.Sprintf("devtool-%s-%s", runtime.GOOS, runtime.GOARCH)
+type buildMetadata struct {
+	Version string
+	Commit  string
+	Dirty   bool
+}
+
+type verificationManifest struct {
+	SchemaVersion int    `json:"schema_version"`
+	Version       string `json:"version"`
+	Commit        string `json:"commit"`
+	Dirty         bool   `json:"dirty"`
+	SHA256        string `json:"sha256"`
+	Binary        string `json:"binary"`
+}
+
+func loadBuildMetadata(workspace string) (buildMetadata, error) {
+	rawVersion, err := os.ReadFile(filepath.Join(workspace, "VERSION"))
+	if err != nil {
+		return buildMetadata{}, fmt.Errorf("read DevTool VERSION: %w", err)
+	}
+	version := strings.TrimSpace(string(rawVersion))
+	if !validVersion(version) {
+		return buildMetadata{}, fmt.Errorf("DevTool VERSION %q is invalid; use letters, numbers, dot, plus and hyphen", version)
+	}
+
+	cmd := exec.Command("git", "-C", workspace, "rev-parse", "HEAD")
+	rawCommit, err := cmd.CombinedOutput()
+	if err != nil {
+		return buildMetadata{}, fmt.Errorf("resolve DevTool source commit: %w: %s", err, strings.TrimSpace(string(rawCommit)))
+	}
+	commit := strings.TrimSpace(string(rawCommit))
+	if commit == "" {
+		return buildMetadata{}, fmt.Errorf("resolve DevTool source commit: empty commit")
+	}
+	dirtyCmd := exec.Command("git", "-C", workspace, "status", "--porcelain")
+	rawDirty, err := dirtyCmd.CombinedOutput()
+	if err != nil {
+		return buildMetadata{}, fmt.Errorf("inspect DevTool source status: %w: %s", err, strings.TrimSpace(string(rawDirty)))
+	}
+	return buildMetadata{Version: version, Commit: commit, Dirty: len(strings.TrimSpace(string(rawDirty))) != 0}, nil
+}
+
+func validVersion(version string) bool {
+	version = strings.TrimSpace(version)
+	if version == "" || len(version) > 64 {
+		return false
+	}
+	for _, r := range version {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		switch r {
+		case '.', '+', '-':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func devtoolBuildArgs(output string, metadata buildMetadata, strip bool) []string {
+	ldflags := []string{
+		"-X", "github.com/thinkerqaq/devtool/internal/buildinfo.Version=" + metadata.Version,
+		"-X", "github.com/thinkerqaq/devtool/internal/buildinfo.Commit=" + metadata.Commit,
+		"-X", fmt.Sprintf("github.com/thinkerqaq/devtool/internal/buildinfo.Dirty=%t", metadata.Dirty),
+	}
+	if strip {
+		ldflags = append([]string{"-s", "-w"}, ldflags...)
+	}
+	return []string{
+		"build",
+		"-trimpath",
+		"-ldflags=" + strings.Join(ldflags, " "),
+		"-o", output,
+		"./cmd/devtool",
+	}
+}
+
+func shortCommit(commit string) string {
+	commit = strings.TrimSpace(commit)
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+	return commit
+}
+
+func packageBinaryName(version string) string {
+	name := fmt.Sprintf("devtool-%s-%s-%s", version, runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
