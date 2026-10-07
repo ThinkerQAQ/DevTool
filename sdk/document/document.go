@@ -6,10 +6,11 @@ const (
 )
 
 type InspectRequest struct {
-	Root           string `json:"root"`
-	Path           string `json:"path"`
-	Section        string `json:"section,omitempty"`
-	IncludeContent bool   `json:"include_content,omitempty"`
+	Root             string `json:"root"`
+	Path             string `json:"path"`
+	Section          string `json:"section,omitempty"`
+	SectionStartLine int    `json:"section_start_line,omitempty"`
+	IncludeContent   bool   `json:"include_content,omitempty"`
 }
 
 type Section struct {
