@@ -54,6 +54,9 @@ func TestInspectBuildsOutlineAndExactSection(t *testing.T) {
 	if response.Format != "markdown" {
 		t.Fatalf("format = %q", response.Format)
 	}
+	if response.LineCount != strings.Count(source, "\n") {
+		t.Fatalf("line count = %d, want %d", response.LineCount, strings.Count(source, "\n"))
+	}
 	if got := response.Frontmatter["title"]; got != "Example" {
 		t.Fatalf("frontmatter title = %#v", got)
 	}

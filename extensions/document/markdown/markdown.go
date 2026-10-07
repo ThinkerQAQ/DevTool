@@ -298,7 +298,7 @@ func selectSection(sections []flatSection, selector string) (flatSection, error)
 func sourceLineStarts(source []byte) []int {
 	starts := []int{0}
 	for index, value := range source {
-		if value == '\n' {
+		if value == '\n' && index+1 < len(source) {
 			starts = append(starts, index+1)
 		}
 	}
