@@ -408,3 +408,67 @@ func TestSearchRepairsDeletedFileStaleIndex(t *testing.T) {
 		t.Fatalf("deleted symbol leaked through CodeGraph provider: %s", after)
 	}
 }
+
+func TestRevisionRefreshPolicy(t *testing.T) {
+	current := revisionState{Head: "head-a", Tree: "tree-a"}
+	if revisionRefreshRequired(revisionState{}, false, current, false) {
+		t.Fatal("non-git workspace should stay incremental")
+	}
+	if !revisionRefreshRequired(revisionState{}, false, current, true) {
+		t.Fatal("first git revision should force refresh")
+	}
+	if revisionRefreshRequired(current, true, current, true) {
+		t.Fatal("unchanged git revision should stay incremental")
+	}
+	if !revisionRefreshRequired(current, true, revisionState{Head: "head-b", Tree: "tree-a"}, true) {
+		t.Fatal("HEAD transition should force refresh")
+	}
+	if !revisionRefreshRequired(current, true, revisionState{Head: "head-a", Tree: "tree-b"}, true) {
+		t.Fatal("tree transition should force refresh")
+	}
+}
+
+func TestGitRevisionStateChangesAfterCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+	runGit(t, root, "config", "user.name", "DevTool Test")
+	runGit(t, root, "config", "user.email", "devtool@example.test")
+
+	path := filepath.Join(root, "probe.go")
+	if err := os.WriteFile(path, []byte("package probe\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "probe.go")
+	runGit(t, root, "commit", "-q", "-m", "initial")
+
+	first, ok := gitRevisionState(context.Background(), root)
+	if !ok {
+		t.Fatal("expected git revision state")
+	}
+
+	if err := os.WriteFile(path, []byte("package probe\nfunc Changed() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "probe.go")
+	runGit(t, root, "commit", "-q", "-m", "change")
+
+	second, ok := gitRevisionState(context.Background(), root)
+	if !ok {
+		t.Fatal("expected changed git revision state")
+	}
+	if first == second {
+		t.Fatal("git revision state did not change after commit")
+	}
+}
+
+func runGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	command := append([]string{"-C", root}, args...)
+	out, err := exec.Command("git", command...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, strings.TrimSpace(string(out)))
+	}
+}

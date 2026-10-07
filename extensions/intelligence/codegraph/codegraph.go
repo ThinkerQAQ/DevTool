@@ -28,6 +28,11 @@ import (
 
 const ExtensionID = "intelligence.codegraph"
 
+type revisionState struct {
+	Head string
+	Tree string
+}
+
 type Extension struct {
 	// executable exists only for isolated adapter tests. Production execution
 	// is resolved through the configured Environment service.
@@ -38,19 +43,26 @@ type Extension struct {
 	bridge            *mcpbridge.Provider
 	workspaceIdentity uint64
 	persistent        bool
+
+	revisionMu sync.Mutex
+	revisions  map[uint64]revisionState
 }
 
 func New() *Extension { return &Extension{persistent: true} }
 
 func (e *Extension) Close() error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.bridge == nil {
-		return nil
+	var err error
+	if e.bridge != nil {
+		err = e.bridge.Close()
 	}
-	err := e.bridge.Close()
 	e.bridge = nil
 	e.workspaceIdentity = 0
+	e.mu.Unlock()
+
+	e.revisionMu.Lock()
+	e.revisions = nil
+	e.revisionMu.Unlock()
 	return err
 }
 
@@ -98,7 +110,7 @@ func (e *Extension) CheckReadiness(ctx context.Context, request readiness.Reques
 		}
 	}
 
-	if _, err := e.runTool(ctx, workspace, "codegraph_reindex_workspace", json.RawMessage(`{"force":false}`)); err != nil {
+	if _, err := e.refreshIndex(ctx, workspace, false); err != nil {
 		report.Issues = append(report.Issues, readiness.Issue{
 			Kind:        readiness.KindVerificationFailed,
 			Resource:    "codegraph-index",
@@ -107,6 +119,7 @@ func (e *Extension) CheckReadiness(ctx context.Context, request readiness.Reques
 		})
 		return report, nil
 	}
+	e.rememberRevision(ctx, workspace)
 	report.Ready = true
 	return report, nil
 }
@@ -147,10 +160,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if err := json.Unmarshal(payload, &request); err != nil {
 			return nil, fmt.Errorf("decode CodeGraph verify request: %w", err)
 		}
-		raw, err := e.runTool(ctx, request, "codegraph_reindex_workspace", json.RawMessage(`{"force":true}`))
+		raw, err := e.refreshIndex(ctx, request, true)
 		if err != nil {
 			return nil, err
 		}
+		e.rememberRevision(ctx, request)
 		return json.Marshal(codeintelligence.VerifyResponse{Provider: ExtensionID, Output: strings.TrimSpace(string(raw))})
 	case codeintelligence.MethodSearch:
 		var request codeintelligence.SearchRequest
@@ -195,7 +209,7 @@ func (e *Extension) guardSearchResult(
 	workspace codeintelligence.Workspace,
 	query func() (json.RawMessage, error),
 ) (json.RawMessage, error) {
-	if _, err := e.refreshIndex(ctx, workspace, false); err != nil {
+	if err := e.ensureFresh(ctx, workspace); err != nil {
 		return nil, err
 	}
 	raw, err := query()
@@ -224,6 +238,7 @@ func (e *Extension) forceReindex(ctx context.Context, workspace codeintelligence
 	if _, err := e.refreshIndex(ctx, workspace, true); err != nil {
 		return fmt.Errorf("force CodeGraph reindex after stale result: %w", err)
 	}
+	e.rememberRevision(ctx, workspace)
 	return nil
 }
 
@@ -237,6 +252,83 @@ func (e *Extension) refreshIndex(
 		return nil, err
 	}
 	return e.runTool(ctx, workspace, "codegraph_reindex_workspace", args)
+}
+
+func (e *Extension) ensureFresh(
+	ctx context.Context,
+	workspace codeintelligence.Workspace,
+) error {
+	identity, err := codeGraphWorkspaceIdentity(workspace)
+	if err != nil {
+		return err
+	}
+	current, available := gitRevisionState(ctx, workspace.Root)
+
+	e.revisionMu.Lock()
+	previous, seen := e.revisions[identity]
+	e.revisionMu.Unlock()
+
+	force := revisionRefreshRequired(previous, seen, current, available)
+	if _, err := e.refreshIndex(ctx, workspace, force); err != nil {
+		return err
+	}
+	if available {
+		e.recordRevision(identity, current)
+	}
+	return nil
+}
+
+func (e *Extension) rememberRevision(
+	ctx context.Context,
+	workspace codeintelligence.Workspace,
+) {
+	identity, err := codeGraphWorkspaceIdentity(workspace)
+	if err != nil {
+		return
+	}
+	current, available := gitRevisionState(ctx, workspace.Root)
+	if !available {
+		return
+	}
+	e.recordRevision(identity, current)
+}
+
+func (e *Extension) recordRevision(identity uint64, revision revisionState) {
+	e.revisionMu.Lock()
+	defer e.revisionMu.Unlock()
+	if e.revisions == nil {
+		e.revisions = map[uint64]revisionState{}
+	}
+	e.revisions[identity] = revision
+}
+
+func revisionRefreshRequired(
+	previous revisionState,
+	seen bool,
+	current revisionState,
+	available bool,
+) bool {
+	if !available {
+		return false
+	}
+	return !seen || previous != current
+}
+
+func gitRevisionState(ctx context.Context, root string) (revisionState, bool) {
+	root, err := canonicalWorkspaceRoot(root)
+	if err != nil {
+		return revisionState{}, false
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "HEAD", "HEAD^{tree}")
+	out, err := cmd.Output()
+	if err != nil {
+		return revisionState{}, false
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return revisionState{}, false
+	}
+	return revisionState{Head: fields[0], Tree: fields[1]}, true
 }
 
 func filterSearchResultPaths(
