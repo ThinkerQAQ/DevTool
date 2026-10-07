@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -243,10 +244,8 @@ func validateFieldOption(field contract.FieldDescriptor, value string) error {
 	if len(field.Options) == 0 {
 		return nil
 	}
-	for _, option := range field.Options {
-		if value == option {
-			return nil
-		}
+	if slices.Contains(field.Options, value) {
+		return nil
 	}
 	return fmt.Errorf("must be one of %s", strings.Join(field.Options, ", "))
 }

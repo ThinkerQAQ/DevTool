@@ -4,6 +4,14 @@ Status: accepted direction for the next DevTool refactor.
 
 Date: 2026-10-07
 
+Implementation status: Phase 1 is implemented on `refactor/capability-boundaries-20261007`.
+
+- parameterized Project Commands are projected to typed Agent tools;
+- `scm_checkpoint` is one stable SCM service operation;
+- `code_context` delegates to `service.code-context` / `context.code.composite`;
+- `document_context` delegates to `service.document-context` / `context.document.composite`;
+- Phase 2 provider lifecycle/environment work remains separate and is not claimed complete here.
+
 ## 1. One-sentence decision
 
 > ChatGPT owns reasoning and planning, Remote Gateway owns remote transport, DevTool owns developer capabilities, and GoTiny is an optional durable execution runtime that is inserted only when work must outlive a single request or conversation.
