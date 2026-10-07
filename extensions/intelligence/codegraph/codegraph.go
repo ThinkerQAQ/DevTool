@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -35,10 +34,10 @@ type Extension struct {
 	executable string
 	services   extensioncontract.Registrar
 
-	mu               sync.Mutex
-	bridge           *mcpbridge.Provider
-	workspaceVersion uint64
-	persistent       bool
+	mu                sync.Mutex
+	bridge            *mcpbridge.Provider
+	workspaceIdentity uint64
+	persistent        bool
 }
 
 func New() *Extension { return &Extension{persistent: true} }
@@ -51,7 +50,7 @@ func (e *Extension) Close() error {
 	}
 	err := e.bridge.Close()
 	e.bridge = nil
-	e.workspaceVersion = 0
+	e.workspaceIdentity = 0
 	return err
 }
 
@@ -196,6 +195,9 @@ func (e *Extension) guardSearchResult(
 	workspace codeintelligence.Workspace,
 	query func() (json.RawMessage, error),
 ) (json.RawMessage, error) {
+	if _, err := e.refreshIndex(ctx, workspace, false); err != nil {
+		return nil, err
+	}
 	raw, err := query()
 	if err != nil {
 		return nil, err
@@ -219,16 +221,22 @@ func (e *Extension) guardSearchResult(
 }
 
 func (e *Extension) forceReindex(ctx context.Context, workspace codeintelligence.Workspace) error {
-	_, err := e.runTool(
-		ctx,
-		workspace,
-		"codegraph_reindex_workspace",
-		json.RawMessage(`{"force":true}`),
-	)
-	if err != nil {
+	if _, err := e.refreshIndex(ctx, workspace, true); err != nil {
 		return fmt.Errorf("force CodeGraph reindex after stale result: %w", err)
 	}
 	return nil
+}
+
+func (e *Extension) refreshIndex(
+	ctx context.Context,
+	workspace codeintelligence.Workspace,
+	force bool,
+) (json.RawMessage, error) {
+	args, err := json.Marshal(map[string]bool{"force": force})
+	if err != nil {
+		return nil, err
+	}
+	return e.runTool(ctx, workspace, "codegraph_reindex_workspace", args)
 }
 
 func filterSearchResultPaths(
@@ -662,19 +670,19 @@ func (e *Extension) runTool(ctx context.Context, workspace codeintelligence.Work
 }
 
 func (e *Extension) runPersistentTool(ctx context.Context, workspace codeintelligence.Workspace, tool string, toolArgs json.RawMessage) (json.RawMessage, error) {
-	version, err := workspaceFingerprint(workspace)
+	identity, err := codeGraphWorkspaceIdentity(workspace)
 	if err != nil {
 		return nil, err
 	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.bridge == nil || e.workspaceVersion != version {
+	if e.bridge == nil || e.workspaceIdentity != identity {
 		if e.bridge != nil {
 			_ = e.bridge.Close()
 		}
 		e.bridge = mcpbridge.New(e.mcpCommand)
-		e.workspaceVersion = version
+		e.workspaceIdentity = identity
 	}
 
 	session := agentsdk.Session{
@@ -689,65 +697,97 @@ func (e *Extension) runPersistentTool(ctx context.Context, workspace codeintelli
 	return unwrapMCPToolResult(raw)
 }
 
-func workspaceFingerprint(workspace codeintelligence.Workspace) (uint64, error) {
-	root := strings.TrimSpace(workspace.Root)
-	if root == "" {
-		return 0, fmt.Errorf("CodeGraph workspace root is required")
-	}
-	root, err := filepath.Abs(root)
+func codeGraphWorkspaceIdentity(workspace codeintelligence.Workspace) (uint64, error) {
+	root, err := canonicalWorkspaceRoot(workspace.Root)
 	if err != nil {
-		return 0, fmt.Errorf("resolve CodeGraph root: %w", err)
+		return 0, err
 	}
+
 	workspaces := workspace.Workspaces
 	if len(workspaces) == 0 {
 		workspaces = []string{root}
 	}
-
-	h := fnv.New64a()
+	normalized := make([]string, 0, len(workspaces))
 	for _, item := range workspaces {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return 0, fmt.Errorf("CodeGraph workspace cannot be empty")
+		}
 		if !filepath.IsAbs(item) {
 			item = filepath.Join(root, item)
 		}
-		item = filepath.Clean(item)
+		item, err = canonicalWorkspaceRoot(item)
+		if err != nil {
+			return 0, err
+		}
 		if _, err := os.Stat(item); err != nil {
 			return 0, fmt.Errorf("stat CodeGraph workspace %s: %w", item, err)
 		}
-		if err := filepath.WalkDir(item, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() && path != item && ignoredFingerprintDir(entry.Name()) {
-				return filepath.SkipDir
-			}
-			info, err := entry.Info()
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			_, _ = h.Write([]byte(filepath.ToSlash(rel)))
-			_, _ = h.Write([]byte{0})
-			_, _ = h.Write([]byte(strconv.FormatInt(info.Size(), 10)))
-			_, _ = h.Write([]byte{0})
-			_, _ = h.Write([]byte(strconv.FormatInt(info.ModTime().UnixNano(), 10)))
-			_, _ = h.Write([]byte{0})
-			return nil
-		}); err != nil {
-			return 0, fmt.Errorf("fingerprint CodeGraph workspace %s: %w", item, err)
-		}
+		normalized = append(normalized, item)
+	}
+	sort.Strings(normalized)
+
+	h := fnv.New64a()
+	writeIdentityPart(h, root)
+	writeIdentityPart(h, gitWorktreeIdentity(root))
+	for _, item := range normalized {
+		writeIdentityPart(h, item)
 	}
 	return h.Sum64(), nil
 }
 
-func ignoredFingerprintDir(name string) bool {
-	switch name {
-	case ".git", ".devtool", ".cache", "node_modules", "dist", "coverage":
-		return true
-	default:
-		return false
+func canonicalWorkspaceRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("CodeGraph workspace root is required")
 	}
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve CodeGraph root: %w", err)
+	}
+	absolute = filepath.Clean(absolute)
+	if resolved, err := filepath.EvalSymlinks(absolute); err == nil {
+		absolute = filepath.Clean(resolved)
+	}
+	return absolute, nil
+}
+
+func gitWorktreeIdentity(root string) string {
+	path := filepath.Join(root, ".git")
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	if info.IsDir() {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return filepath.Clean(resolved)
+		}
+		return filepath.Clean(path)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	value := strings.TrimSpace(string(raw))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(strings.ToLower(value), prefix) {
+		return ""
+	}
+	gitDir := strings.TrimSpace(value[len(prefix):])
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(root, gitDir)
+	}
+	gitDir = filepath.Clean(gitDir)
+	if resolved, err := filepath.EvalSymlinks(gitDir); err == nil {
+		gitDir = filepath.Clean(resolved)
+	}
+	return gitDir
+}
+
+func writeIdentityPart(h interface{ Write([]byte) (int, error) }, value string) {
+	_, _ = h.Write([]byte(filepath.ToSlash(value)))
+	_, _ = h.Write([]byte{0})
 }
 
 func (e *Extension) runOneShotTool(ctx context.Context, workspace codeintelligence.Workspace, tool string, toolArgs json.RawMessage) (json.RawMessage, error) {

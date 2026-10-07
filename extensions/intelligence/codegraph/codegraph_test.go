@@ -127,36 +127,59 @@ func TestMCPCommandUsesPersistentGraphMode(t *testing.T) {
 	}
 }
 
-func TestWorkspaceFingerprintChangesWithSourceState(t *testing.T) {
+func TestWorkspaceIdentityStableAcrossSourceState(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "probe.go")
 	if err := os.WriteFile(path, []byte("package probe\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	workspace := codeintelligence.Workspace{Root: root}
-	first, err := workspaceFingerprint(workspace)
+	first, err := codeGraphWorkspaceIdentity(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("package probe\nfunc Changed() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second, err := workspaceFingerprint(workspace)
+	second, err := codeGraphWorkspaceIdentity(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first == second {
-		t.Fatal("fingerprint did not change after source edit")
+	if first != second {
+		t.Fatal("workspace identity changed after source edit")
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	third, err := workspaceFingerprint(workspace)
+	third, err := codeGraphWorkspaceIdentity(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second == third {
-		t.Fatal("fingerprint did not change after source deletion")
+	if second != third {
+		t.Fatal("workspace identity changed after source deletion")
+	}
+}
+
+func TestWorkspaceIdentityIncludesGitWorktreeIdentity(t *testing.T) {
+	root := t.TempDir()
+	gitFile := filepath.Join(root, ".git")
+	if err := os.WriteFile(gitFile, []byte("gitdir: ../repo/.git/worktrees/one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := codeintelligence.Workspace{Root: root}
+	first, err := codeGraphWorkspaceIdentity(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gitFile, []byte("gitdir: ../repo/.git/worktrees/two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := codeGraphWorkspaceIdentity(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("workspace identity did not change with git worktree identity")
 	}
 }
 
@@ -176,24 +199,34 @@ func TestSearchMapsToSymbolSearch(t *testing.T) {
 		t.Skip("shell fixture is unix-only")
 	}
 	path := writeFixture(t, `#!/bin/sh
-found_tool=0
-found_args=0
+tool=""
+tool_args=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --run-tool)
       shift
-      [ "$1" = "codegraph_symbol_search" ] && found_tool=1
+      tool="$1"
       ;;
     --tool-args)
       shift
-      [ "$1" = '{"compact":true,"limit":7,"query":"Registry"}' ] && found_args=1
+      tool_args="$1"
       ;;
   esac
   shift
 done
-[ "$found_tool" -eq 1 ] || exit 6
-[ "$found_args" -eq 1 ] || exit 7
-printf '{"results":[]}'
+case "$tool" in
+  codegraph_reindex_workspace)
+    [ "$tool_args" = '{"force":false}' ] || exit 6
+    printf '{"status":"success"}'
+    ;;
+  codegraph_symbol_search)
+    [ "$tool_args" = '{"compact":true,"limit":7,"query":"Registry"}' ] || exit 7
+    printf '{"results":[]}'
+    ;;
+  *)
+    exit 8
+    ;;
+esac
 `)
 	e := &Extension{executable: path}
 	payload, err := json.Marshal(codeintelligence.SearchRequest{
