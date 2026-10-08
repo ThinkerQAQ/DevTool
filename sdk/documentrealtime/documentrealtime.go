@@ -40,6 +40,7 @@ type Diagnostic struct {
 type AnalyzeResponse struct {
 	Status            string       `json:"status"`
 	Provider          string       `json:"provider"`
+	WorkspaceScope    string       `json:"workspace_scope,omitempty"`
 	Symbols           []Symbol     `json:"symbols"`
 	Diagnostics       []Diagnostic `json:"diagnostics"`
 	DiagnosticsStatus string       `json:"diagnostics_status"`
