@@ -17,6 +17,7 @@ import (
 )
 
 type evidence struct {
+	Truncated   bool
 	Symbols     []diagram.DiagramSymbol
 	Diagnostics []diagram.DiagramDiagnostic
 }
@@ -128,9 +129,10 @@ type lspSymbol struct {
 	Children []lspSymbol `json:"children"`
 }
 
-func flatten(items []lspSymbol, depth int, out *[]diagram.DiagramSymbol) {
+func flatten(items []lspSymbol, depth int, out *[]diagram.DiagramSymbol, truncated *bool) {
 	for _, s := range items {
 		if len(*out) >= 1000 {
+			*truncated = true
 			return
 		}
 		// The level-0 symbol describes a whole diagram, while child symbols
@@ -138,7 +140,7 @@ func flatten(items []lspSymbol, depth int, out *[]diagram.DiagramSymbol) {
 		if depth > 0 {
 			*out = append(*out, diagram.DiagramSymbol{Name: s.Name, Kind: symbolKind(s.Kind), Line: s.Range.Start.Line + 1})
 		}
-		flatten(s.Children, depth+1, out)
+		flatten(s.Children, depth+1, out, truncated)
 	}
 }
 func symbolKind(kind int) string {
@@ -206,7 +208,7 @@ func (e *Extension) language(ctx context.Context, root, path string, source []by
 		return nil, fmt.Errorf("Merman symbols shape: %w", err)
 	}
 	ev := &evidence{Symbols: []diagram.DiagramSymbol{}, Diagnostics: []diagram.DiagramDiagnostic{}}
-	flatten(symbols, 0, &ev.Symbols)
+	flatten(symbols, 0, &ev.Symbols, &ev.Truncated)
 	diagRaw, err := c.call(3, "textDocument/diagnostic", map[string]any{"textDocument": map[string]string{"uri": uri}})
 	if err != nil {
 		return nil, fmt.Errorf("Merman diagnostics: %w", err)

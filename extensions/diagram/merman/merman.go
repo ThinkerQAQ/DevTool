@@ -143,6 +143,9 @@ func (e *Extension) analyze(ctx context.Context, req diagram.IntelligenceRequest
 		}
 		r.Graph = graph
 		if lsp != nil {
+			if lsp.Truncated {
+				r.Graph.Truncated = true
+			}
 			for _, sym := range lsp.Symbols {
 				if sym.Line >= it.StartLine && sym.Line <= it.EndLine {
 					if len(r.Symbols) >= 160 {

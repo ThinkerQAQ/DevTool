@@ -57,6 +57,13 @@ func (e *Extension) semantic(ctx context.Context, bin, source string) (diagram.G
 		if run.Err() != nil {
 			return g, fmt.Errorf("Merman parse interrupted: %w", run.Err())
 		}
+		if exit, ok := err.(*exec.ExitError); ok && len(exit.Stderr) > 0 {
+			message := strings.TrimSpace(string(exit.Stderr))
+			if len(message) > 1200 {
+				message = message[:1200]
+			}
+			return g, fmt.Errorf("Merman semantic parse: %s", message)
+		}
 		return g, fmt.Errorf("Merman semantic parse: %w", err)
 	}
 	if len(raw) > 6<<20 {
