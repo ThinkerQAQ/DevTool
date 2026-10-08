@@ -1,16 +1,15 @@
 package marksman
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	doc "github.com/thinkerqaq/devtool/sdk/documentrealtime"
@@ -25,6 +24,8 @@ type Extension struct {
 	binary         string
 	timeout        time.Duration
 	workspaceRoots []string
+	mu             sync.Mutex
+	sessions       map[string]*lspSession
 }
 
 func New() *Extension { return &Extension{binary: "marksman", timeout: 30 * time.Second} }
@@ -163,51 +164,56 @@ func (e *Extension) analyze(ctx context.Context, in doc.AnalyzeRequest) (doc.Ana
 	if err != nil {
 		return unavailable("Marksman executable unavailable; configure document-realtime binary; no automatic installation"), nil
 	}
+	session, ephemeral := e.getSession(workspaceRoot)
+	session.mu.Lock()
+	defer session.mu.Unlock()
 	run, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
-	cmd := exec.CommandContext(run, bin, "server")
-	cmd.Dir = workspaceRoot
-	cmd.Stderr = io.Discard
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return doc.AnalyzeResponse{}, err
+	stopDeadline := context.AfterFunc(run, session.stop)
+	defer stopDeadline()
+	if ephemeral {
+		defer session.stop()
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return doc.AnalyzeResponse{}, err
+	failed := func(detail string) (doc.AnalyzeResponse, error) {
+		if !ephemeral {
+			e.dropSession(workspaceRoot, session)
+		} else {
+			session.stop()
+		}
+		if run.Err() != nil {
+			detail = "Marksman request timed out or canceled: " + run.Err().Error()
+		}
+		return unavailable(detail), nil
 	}
-	if err := cmd.Start(); err != nil {
-		return unavailable("Marksman could not start: " + err.Error()), nil
-	}
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
-	client := &stdioClient{stdin: stdin, out: bufio.NewReader(stdout)}
 	rootURI := (&url.URL{Scheme: "file", Path: filepath.ToSlash(workspaceRoot)}).String()
 	uri := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
-	init := map[string]any{"processId": nil, "rootUri": rootURI,
-		"capabilities": map[string]any{"textDocument": map[string]any{
-			"documentSymbol": map[string]any{"hierarchicalDocumentSymbolSupport": true},
-			"definition":     map[string]any{}, "references": map[string]any{},
-			"publishDiagnostics": map[string]any{}},
-			"workspace": map[string]any{"workspaceFolders": true}},
-		"workspaceFolders": []map[string]any{{"uri": rootURI, "name": filepath.Base(workspaceRoot)}}}
-	if _, err := client.request(1, "initialize", init); err != nil {
-		return unavailable("Marksman initialize failed: " + err.Error()), nil
+	if session.client == nil {
+		if err := session.start(bin, workspaceRoot); err != nil {
+			return failed("Marksman start failed: " + err.Error())
+		}
+		init := map[string]any{"processId": nil, "rootUri": rootURI,
+			"capabilities": map[string]any{"textDocument": map[string]any{
+				"references": map[string]any{}},
+				"workspace": map[string]any{"workspaceFolders": true}},
+			"workspaceFolders": []map[string]any{{"uri": rootURI, "name": filepath.Base(workspaceRoot)}}}
+		if _, err := session.client.request(1, "initialize", init); err != nil {
+			return failed("Marksman initialize failed: " + err.Error())
+		}
+		if err := session.client.notify("initialized", map[string]any{}); err != nil {
+			return failed(err.Error())
+		}
 	}
-	if err := client.notify("initialized", map[string]any{}); err != nil {
-		return unavailable(err.Error()), nil
-	}
-	if err := client.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{
-		"uri": uri, "languageId": "markdown", "version": 1, "text": string(source)}}); err != nil {
-		return unavailable(err.Error()), nil
+	if err := session.syncDocument(uri, source); err != nil {
+		return failed("Marksman sync failed: " + err.Error())
 	}
 	params := map[string]any{
 		"textDocument": map[string]string{"uri": uri},
 		"position":     map[string]int{"line": in.HeadingLine - 1, "character": pos},
 		"context":      map[string]bool{"includeDeclaration": true},
 	}
-	refs, err := client.request(2, "textDocument/references", params)
+	refs, err := session.client.request(session.requestID(), "textDocument/references", params)
 	if err != nil {
-		return unavailable("Marksman references failed: " + err.Error()), nil
+		return failed("Marksman references failed: " + err.Error())
 	}
 	locations, truncated := parseLocations(refs, root)
 	result := doc.AnalyzeResponse{Status: "ok", Provider: ExtensionID, WorkspaceScope: filepath.ToSlash(scope),
