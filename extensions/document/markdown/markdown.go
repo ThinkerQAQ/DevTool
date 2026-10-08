@@ -206,8 +206,11 @@ func collectDiagrams(root ast.Node, source []byte, starts []int) []documentcontr
 		for i := 0; i < fence.Lines().Len(); i++ {
 			segment := fence.Lines().At(i)
 			content.Write(segment.Value(source))
-			content.WriteByte('\n')
-			endLine = lineForOffset(starts, segment.Stop)
+			lastByte := segment.Stop - 1
+			if lastByte < segment.Start {
+				lastByte = segment.Start
+			}
+			endLine = lineForOffset(starts, lastByte)
 		}
 		language := info[0]
 		if language == "puml" {

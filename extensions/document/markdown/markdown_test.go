@@ -264,7 +264,7 @@ func TestInspectDiagramsUseGoldmarkFences(t *testing.T) {
 	if len(r.Diagrams) != 2 {
 		t.Fatalf("diagrams=%+v", r.Diagrams)
 	}
-	if r.Diagrams[0].Language != "mermaid" || !strings.Contains(r.Diagrams[0].Source, "A --> B") || r.Diagrams[0].StartLine != 3 {
+	if r.Diagrams[0].Language != "mermaid" || r.Diagrams[0].Source != "flowchart TD\n A --> B\n" || r.Diagrams[0].StartLine != 3 {
 		t.Fatalf("first=%+v", r.Diagrams[0])
 	}
 	if r.Diagrams[1].Language != "plantuml" || !strings.Contains(r.Diagrams[1].Source, "@startuml") {
