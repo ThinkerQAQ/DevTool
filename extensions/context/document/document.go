@@ -127,6 +127,9 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	if !input.Review && input.ReviewMaxLines > 0 {
 		return nil, fmt.Errorf("document_context review_max_lines requires review=true")
 	}
+	if input.Cursor != "" && input.IncludeTables {
+		return nil, fmt.Errorf("document_context include_tables is available on the initial review call only")
+	}
 	if input.Cursor != "" && input.Related {
 		return nil, fmt.Errorf("document_context related context is only available on the initial review call")
 	}

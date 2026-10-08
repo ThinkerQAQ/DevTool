@@ -13,7 +13,7 @@ import (
 func TestNormalizeSymbolsAndReferences(t *testing.T) {
 	raw := json.RawMessage(`[{"name":"章节","range":{"start":{"line":2,"character":0},"end":{"line":3,"character":4}},"children":[{"name":"子节","range":{"start":{"line":4,"character":2},"end":{"line":5,"character":3}}}]}]`)
 	symbols := parseSymbols(raw)
-	if len(symbols) != 2 || symbols[0].Name != "章节" || symbols[0].Range.Start.Line != 3 || symbols[1].Level != 2 {
+	if len(symbols) != 2 || symbols[0].Name != "章节" || symbols[0].Range.Start.Line != 3 || symbols[1].Depth != 2 {
 		t.Fatalf("symbols=%+v", symbols)
 	}
 	root := t.TempDir()

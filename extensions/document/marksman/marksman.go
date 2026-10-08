@@ -262,7 +262,7 @@ func parseSymbols(raw json.RawMessage) []doc.Symbol {
 			if item.Location != nil {
 				r = item.Location.Range
 			}
-			out = append(out, doc.Symbol{Name: item.Name, Level: level, Range: normalizedRange(r)})
+			out = append(out, doc.Symbol{Name: item.Name, Depth: level, Range: normalizedRange(r)})
 			visit(item.Children, level+1)
 		}
 	}

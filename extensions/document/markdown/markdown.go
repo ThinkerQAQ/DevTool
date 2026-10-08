@@ -189,6 +189,22 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 		}
 		response.SelectedRange = result
 	}
+	if request.IncludeTables && (response.SelectedSection != nil || response.SelectedRange != nil) {
+		start, end := 1, lineCount
+		if response.SelectedSection != nil {
+			start, end = response.SelectedSection.StartLine, response.SelectedSection.EndLine
+		}
+		if response.SelectedRange != nil {
+			start, end = response.SelectedRange.StartLine, response.SelectedRange.EndLine
+		}
+		selected := make([]documentcontract.Table, 0)
+		for _, item := range response.Tables {
+			if item.StartLine >= start && item.EndLine <= end {
+				selected = append(selected, item)
+			}
+		}
+		response.Tables = selected
+	}
 	return response, nil
 }
 
