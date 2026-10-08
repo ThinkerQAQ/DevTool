@@ -30,3 +30,9 @@ Agent: diagram_context(path, render=true)
 ## Future asset/image context
 
 An independent `asset_context` may add deterministic image metadata (dimensions, MIME, hash, EXIF presence, references, missing alt text, size, duplicates). Visual meaning belongs to multimodal model perception, not to metadata inference. Opt-in OCR and image recognition should be replaceable providers, not Core or default work.
+
+## Usage
+
+`diagram_context(objective="verify layer diagrams", path="docs/example.md", render=true)` returns diagram indices, fenced source ranges, content hashes, status and SVG artifact paths.
+
+Configure `service.diagram-context` with `context.diagram.composite` and `service.diagram-render` with `diagram.render.cli`; install `mmdc` or `plantuml` only when rendering is needed. Missing executables produce `unavailable`; no source code is changed.
