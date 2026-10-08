@@ -108,6 +108,18 @@ loader = "go"
 module = "."
 package = "./extensions/context/diagram/cmd/provider"
 
+[extension.diagram-intelligence]
+loader = "go"
+
+[extension.diagram-intelligence.loader_config]
+module = "."
+package = "./extensions/diagram/merman/cmd/provider"
+
+[extension.diagram-intelligence.settings]
+cli_bin = "merman-cli"
+lsp_bin = "merman-lsp"
+timeout_seconds = 40
+
 [extension.diagram-render]
 loader = "go"
 
@@ -216,6 +228,9 @@ provider = "context.document.composite"
 
 [service.diagram-context]
 provider = "context.diagram.composite"
+
+[service.diagram-intelligence]
+provider = "diagram.intelligence.merman"
 
 [service.diagram-render]
 provider = "diagram.render.cli"
