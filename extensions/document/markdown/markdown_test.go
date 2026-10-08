@@ -244,3 +244,30 @@ func TestSelectSectionRejectsAmbiguousPrefix(t *testing.T) {
 		t.Fatal("expected ambiguous prefix to fail")
 	}
 }
+
+func TestInspectDiagramsUseGoldmarkFences(t *testing.T) {
+	root := t.TempDir()
+	src := "# Test\n\n```mermaid\nflowchart TD\n A --> B\n```\n\n```go\nprintln(1)\n```\n\n~~~plantuml\n@startuml\nAlice -> Bob: hi\n@enduml\n~~~\n"
+	if err := os.WriteFile(filepath.Join(root, "article.md"), []byte(src), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ext := New()
+	raw, _ := json.Marshal(documentcontract.InspectRequest{Root: root, Path: "article.md", IncludeDiagrams: true})
+	b, err := ext.Invoke(t.Context(), documentcontract.MethodInspect, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r documentcontract.InspectResponse
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Diagrams) != 2 {
+		t.Fatalf("diagrams=%+v", r.Diagrams)
+	}
+	if r.Diagrams[0].Language != "mermaid" || !strings.Contains(r.Diagrams[0].Source, "A --> B") || r.Diagrams[0].StartLine != 3 {
+		t.Fatalf("first=%+v", r.Diagrams[0])
+	}
+	if r.Diagrams[1].Language != "plantuml" || !strings.Contains(r.Diagrams[1].Source, "@startuml") {
+		t.Fatalf("second=%+v", r.Diagrams[1])
+	}
+}

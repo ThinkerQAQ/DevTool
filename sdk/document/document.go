@@ -16,6 +16,7 @@ type InspectRequest struct {
 	RangeStartLine   int    `json:"range_start_line,omitempty"`
 	RangeEndLine     int    `json:"range_end_line,omitempty"`
 	IncludeContent   bool   `json:"include_content,omitempty"`
+	IncludeDiagrams  bool   `json:"include_diagrams,omitempty"`
 }
 
 type Section struct {
@@ -42,12 +43,21 @@ type SelectedRange struct {
 	Content   string `json:"content,omitempty"`
 }
 
+type Diagram struct {
+	Index     int    `json:"index"`
+	Language  string `json:"language"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	Source    string `json:"source"`
+}
+
 type InspectResponse struct {
 	Path            string           `json:"path"`
 	Format          string           `json:"format"`
 	LineCount       int              `json:"line_count"`
 	Frontmatter     map[string]any   `json:"frontmatter,omitempty"`
 	Outline         []Section        `json:"outline,omitempty"`
+	Diagrams        []Diagram        `json:"diagrams,omitempty"`
 	SelectedSection *SelectedSection `json:"selected_section,omitempty"`
 	SelectedRange   *SelectedRange   `json:"selected_range,omitempty"`
 }

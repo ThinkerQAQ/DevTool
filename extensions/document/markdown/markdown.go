@@ -131,6 +131,9 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 		Frontmatter: frontmatter,
 		Outline:     outline,
 	}
+	if request.IncludeDiagrams {
+		response.Diagrams = collectDiagrams(doc, source, lineStarts)
+	}
 
 	selector := strings.TrimSpace(request.Section)
 	hasSectionSelection := selector != "" || request.SectionStartLine > 0
@@ -182,6 +185,42 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 		response.SelectedRange = result
 	}
 	return response, nil
+}
+
+func collectDiagrams(root ast.Node, source []byte, starts []int) []documentcontract.Diagram {
+	result := make([]documentcontract.Diagram, 0)
+	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		fence, ok := node.(*ast.FencedCodeBlock)
+		if !ok || fence.Info == nil {
+			return ast.WalkContinue, nil
+		}
+		info := strings.Fields(strings.ToLower(strings.TrimSpace(string(fence.Info.Text(source)))))
+		if len(info) == 0 || (info[0] != "mermaid" && info[0] != "plantuml" && info[0] != "puml") {
+			return ast.WalkContinue, nil
+		}
+		var content strings.Builder
+		endLine := lineForOffset(starts, fence.Info.Segment.Start)
+		for i := 0; i < fence.Lines().Len(); i++ {
+			segment := fence.Lines().At(i)
+			content.Write(segment.Value(source))
+			content.WriteByte('\n')
+			endLine = lineForOffset(starts, segment.Stop)
+		}
+		language := info[0]
+		if language == "puml" {
+			language = "plantuml"
+		}
+		result = append(result, documentcontract.Diagram{
+			Index: len(result) + 1, Language: language,
+			StartLine: lineForOffset(starts, fence.Info.Segment.Start),
+			EndLine:   endLine + 1, Source: content.String(),
+		})
+		return ast.WalkContinue, nil
+	})
+	return result
 }
 
 func (e *Extension) resolvePath(root, path string) (string, string, error) {
