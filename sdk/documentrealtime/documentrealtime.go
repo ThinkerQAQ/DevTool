@@ -29,7 +29,7 @@ type Location struct {
 }
 type Symbol struct {
 	Name  string `json:"name"`
-	Level int    `json:"level,omitempty"`
+	Depth int    `json:"depth,omitempty"`
 	Range Range  `json:"range"`
 }
 type Diagnostic struct {
