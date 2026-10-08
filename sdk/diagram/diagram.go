@@ -47,6 +47,7 @@ type DiagramSource struct {
 type GraphNode struct {
 	ID    string `json:"id"`
 	Label string `json:"label,omitempty"`
+	Line  int    `json:"line,omitempty"`
 }
 type GraphEdge struct {
 	From  string `json:"from"`
@@ -69,13 +70,15 @@ type DiagramDiagnostic struct {
 	Line     int    `json:"line"`
 }
 type Graph struct {
-	Kind      string       `json:"kind,omitempty"`
-	Nodes     []GraphNode  `json:"nodes"`
-	Edges     []GraphEdge  `json:"edges"`
-	Groups    []GraphGroup `json:"groups"`
-	NodeCount int          `json:"node_count"`
-	EdgeCount int          `json:"edge_count"`
-	Truncated bool         `json:"truncated,omitempty"`
+	Kind                     string       `json:"kind,omitempty"`
+	Nodes                    []GraphNode  `json:"nodes"`
+	Edges                    []GraphEdge  `json:"edges"`
+	Groups                   []GraphGroup `json:"groups"`
+	NodeCount                int          `json:"node_count"`
+	EdgeCount                int          `json:"edge_count"`
+	CrossLayerEdges          int          `json:"cross_layer_edges,omitempty"`
+	UnlabeledCrossLayerEdges int          `json:"unlabeled_cross_layer_edges,omitempty"`
+	Truncated                bool         `json:"truncated,omitempty"`
 }
 type IntelligenceResult struct {
 	Index       int                 `json:"index"`
