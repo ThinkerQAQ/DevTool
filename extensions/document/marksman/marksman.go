@@ -238,58 +238,35 @@ func normalizedRange(in lspRange) doc.Range {
 	return doc.Range{Start: doc.Position{Line: in.Start.Line + 1, Column: in.Start.Character + 1},
 		End: doc.Position{Line: in.End.Line + 1, Column: in.End.Character + 1}}
 }
+
+type lspSymbol struct {
+	Name     string   `json:"name"`
+	Range    lspRange `json:"range"`
+	Location *struct {
+		Range lspRange `json:"range"`
+	} `json:"location"`
+	Children []lspSymbol `json:"children"`
+}
+
 func parseSymbols(raw json.RawMessage) []doc.Symbol {
-	var items []struct {
-		Name     string   `json:"name"`
-		Range    lspRange `json:"range"`
-		Location *struct {
-			Range lspRange `json:"range"`
-		} `json:"location"`
-		Children json.RawMessage `json:"children"`
-	}
-	_ = json.Unmarshal(raw, &items)
-	out := make([]doc.Symbol, 0, len(items))
-	var walk func([]struct {
-		Name     string   `json:"name"`
-		Range    lspRange `json:"range"`
-		Location *struct {
-			Range lspRange `json:"range"`
-		} `json:"location"`
-		Children json.RawMessage `json:"children"`
-	}, int)
-	walk = func(values []struct {
-		Name     string   `json:"name"`
-		Range    lspRange `json:"range"`
-		Location *struct {
-			Range lspRange `json:"range"`
-		} `json:"location"`
-		Children json.RawMessage `json:"children"`
-	}, level int) {
-		for _, v := range values {
+	var values []lspSymbol
+	_ = json.Unmarshal(raw, &values)
+	out := make([]doc.Symbol, 0, len(values))
+	var visit func([]lspSymbol, int)
+	visit = func(items []lspSymbol, level int) {
+		for _, item := range items {
 			if len(out) >= 500 {
 				return
 			}
-			r := v.Range
-			if v.Location != nil {
-				r = v.Location.Range
+			r := item.Range
+			if item.Location != nil {
+				r = item.Location.Range
 			}
-			out = append(out, doc.Symbol{Name: v.Name, Level: level, Range: normalizedRange(r)})
-			if len(v.Children) > 0 {
-				var children []struct {
-					Name     string   `json:"name"`
-					Range    lspRange `json:"range"`
-					Location *struct {
-						Range lspRange `json:"range"`
-					} `json:"location"`
-					Children json.RawMessage `json:"children"`
-				}
-				if json.Unmarshal(v.Children, &children) == nil {
-					walk(children, level+1)
-				}
-			}
+			out = append(out, doc.Symbol{Name: item.Name, Level: level, Range: normalizedRange(r)})
+			visit(item.Children, level+1)
 		}
 	}
-	walk(items, 1)
+	visit(values, 1)
 	return out
 }
 func parseLocations(raw json.RawMessage, root string) []doc.Location {
