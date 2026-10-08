@@ -72,6 +72,18 @@ package = "./extensions/context/document/cmd/provider"
 [extension.document-context.settings]
 review_max_lines = 300
 
+[extension.document-realtime]
+loader = "go"
+
+[extension.document-realtime.loader_config]
+module = "."
+package = "./extensions/document/marksman/cmd/provider"
+
+[extension.document-realtime.settings]
+binary = "marksman"
+timeout_seconds = 30
+workspace_roots = ["docs"]
+
 [extension.document-markdown]
 loader = "go"
 
@@ -207,6 +219,9 @@ provider = "context.diagram.composite"
 
 [service.diagram-render]
 provider = "diagram.render.cli"
+
+[service.document-realtime]
+provider = "document.realtime.marksman"
 
 [service.document-structure]
 provider = "document.markdown.goldmark"

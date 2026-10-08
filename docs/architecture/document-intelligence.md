@@ -385,3 +385,30 @@ The first implementation does not add:
 - [ ] Blog Content has no repository-local parser or fake devcontrol implementation.
 - [ ] Long Markdown review works outline-first and section-by-section.
 - [ ] Existing code intelligence, SCM and self-hosting remain green.
+
+## V3: GFM tables and optional Markdown realtime LSP
+
+`document_context(include_tables=true)` includes deterministic GFM tables
+with headers, row matrices, alignments and exact line spans, parsed by Goldmark.
+The parser, not the Agent, owns Markdown syntax.
+
+`document_context(realtime=true)` optionally enriches a focused inspection
+with a normalized `document-realtime` service. For link navigation, supply a
+1-based `line` and 1-based UTF-16 `column`; `include_references=true`
+requests the target definition and workspace-scoped reference locations.
+
+The first interchangeable realtime provider uses Marksman over LSP stdio.
+No Marksman protocol is exposed as an Agent tool and Core remains unchanged.
+A missing binary returns `status=unavailable`; the absence of a diagnostics
+notification returns `diagnostics_status=not_reported` (not 'clean').
+
+Marksman may scan many Markdown files on cold initialization. Provider
+`workspace_roots` selects the narrowest configured directory containing the
+target document, while response `workspace_scope` makes the resulting
+cross-file reference horizon explicit. The domain-level document-relations
+provider remains responsible for series/notes/project relationships outside
+that scope.
+
+No automatic executable installs, no provider-specific workflow in a
+content repository, and no modification of Markdown from an LSP response.
+LSP rename edits require a separate reviewed, hash-checked write contract.
