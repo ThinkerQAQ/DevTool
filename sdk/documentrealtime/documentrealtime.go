@@ -5,14 +5,11 @@ const (
 	MethodAnalyze = "analyze"
 )
 
-// AnalyzeRequest asks a realtime provider to inspect a workspace document.
-// Line and Column are 1-based; Column is an LSP UTF-16 code-unit offset.
+// Provider input is structural; AI clients never calculate UTF-16 LSP positions.
 type AnalyzeRequest struct {
-	Root              string `json:"root"`
-	Path              string `json:"path"`
-	Line              int    `json:"line,omitempty"`
-	Column            int    `json:"column,omitempty"`
-	IncludeReferences bool   `json:"include_references,omitempty"`
+	Root        string `json:"root"`
+	Path        string `json:"path"`
+	HeadingLine int    `json:"heading_line"`
 }
 
 type Position struct {
@@ -27,24 +24,11 @@ type Location struct {
 	Path  string `json:"path"`
 	Range Range  `json:"range"`
 }
-type Symbol struct {
-	Name  string `json:"name"`
-	Depth int    `json:"depth,omitempty"`
-	Range Range  `json:"range"`
-}
-type Diagnostic struct {
-	Message  string `json:"message"`
-	Severity int    `json:"severity,omitempty"`
-	Range    Range  `json:"range"`
-}
 type AnalyzeResponse struct {
-	Status            string       `json:"status"`
-	Provider          string       `json:"provider"`
-	WorkspaceScope    string       `json:"workspace_scope,omitempty"`
-	Symbols           []Symbol     `json:"symbols"`
-	Diagnostics       []Diagnostic `json:"diagnostics"`
-	DiagnosticsStatus string       `json:"diagnostics_status"`
-	Definitions       []Location   `json:"definitions"`
-	References        []Location   `json:"references"`
-	Detail            string       `json:"detail,omitempty"`
+	Status         string     `json:"status"`
+	Provider       string     `json:"provider"`
+	WorkspaceScope string     `json:"workspace_scope,omitempty"`
+	References     []Location `json:"references"`
+	Truncated      bool       `json:"truncated,omitempty"`
+	Detail         string     `json:"detail,omitempty"`
 }

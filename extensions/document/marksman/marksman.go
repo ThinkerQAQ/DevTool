@@ -92,19 +92,14 @@ func (e *Extension) Invoke(ctx context.Context, method string, raw json.RawMessa
 	return json.Marshal(result)
 }
 func unavailable(detail string) doc.AnalyzeResponse {
-	return doc.AnalyzeResponse{Provider: ExtensionID, Status: "unavailable", Detail: detail,
-		Symbols: []doc.Symbol{}, Diagnostics: []doc.Diagnostic{}, DiagnosticsStatus: "not_reported",
-		Definitions: []doc.Location{}, References: []doc.Location{}}
+	return doc.AnalyzeResponse{Provider: ExtensionID, Status: "unavailable", Detail: detail, References: []doc.Location{}}
 }
 func (e *Extension) analyze(ctx context.Context, in doc.AnalyzeRequest) (doc.AnalyzeResponse, error) {
 	if in.Root == "" || in.Path == "" {
 		return doc.AnalyzeResponse{}, fmt.Errorf("document realtime requires root and path")
 	}
-	if in.Line < 0 || in.Column < 0 || (in.Line > 0) != (in.Column > 0) {
-		return doc.AnalyzeResponse{}, fmt.Errorf("line and column must be positive together")
-	}
-	if in.IncludeReferences && in.Line == 0 {
-		return doc.AnalyzeResponse{}, fmt.Errorf("references require line and column")
+	if in.HeadingLine <= 0 {
+		return doc.AnalyzeResponse{}, fmt.Errorf("heading line must be positive")
 	}
 	root, err := filepath.EvalSymlinks(in.Root)
 	if err != nil {
@@ -147,6 +142,23 @@ func (e *Extension) analyze(ctx context.Context, in doc.AnalyzeRequest) (doc.Ana
 	if err != nil {
 		return doc.AnalyzeResponse{}, err
 	}
+	lines := strings.Split(string(source), "\n")
+	if in.HeadingLine > len(lines) {
+		return doc.AnalyzeResponse{}, fmt.Errorf("heading line out of range")
+	}
+	heading := lines[in.HeadingLine-1]
+	trimmed := strings.TrimLeft(heading, " \t")
+	hashes := 0
+	for hashes < len(trimmed) && trimmed[hashes] == '#' {
+		hashes++
+	}
+	if hashes < 1 || hashes > 6 || hashes >= len(trimmed) || (trimmed[hashes] != ' ' && trimmed[hashes] != '\t') {
+		return doc.AnalyzeResponse{}, fmt.Errorf("line %d is not a Markdown heading", in.HeadingLine)
+	}
+	pos := len(heading) - len(trimmed) + hashes + 1
+	for pos < len(heading) && (heading[pos] == ' ' || heading[pos] == '\t') {
+		pos++
+	}
 	bin, err := exec.LookPath(e.binary)
 	if err != nil {
 		return unavailable("Marksman executable unavailable; configure document-realtime binary; no automatic installation"), nil
@@ -188,34 +200,18 @@ func (e *Extension) analyze(ctx context.Context, in doc.AnalyzeRequest) (doc.Ana
 		"uri": uri, "languageId": "markdown", "version": 1, "text": string(source)}}); err != nil {
 		return unavailable(err.Error()), nil
 	}
-	rawSymbols, err := client.request(2, "textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}})
+	params := map[string]any{
+		"textDocument": map[string]string{"uri": uri},
+		"position":     map[string]int{"line": in.HeadingLine - 1, "character": pos},
+		"context":      map[string]bool{"includeDeclaration": true},
+	}
+	refs, err := client.request(2, "textDocument/references", params)
 	if err != nil {
-		return unavailable("Marksman documentSymbol failed: " + err.Error()), nil
+		return unavailable("Marksman references failed: " + err.Error()), nil
 	}
+	locations, truncated := parseLocations(refs, root)
 	result := doc.AnalyzeResponse{Status: "ok", Provider: ExtensionID, WorkspaceScope: filepath.ToSlash(scope),
-		Symbols: parseSymbols(rawSymbols), Diagnostics: []doc.Diagnostic{}, DiagnosticsStatus: "not_reported",
-		Definitions: []doc.Location{}, References: []doc.Location{}}
-	if in.Line > 0 {
-		params := map[string]any{"textDocument": map[string]string{"uri": uri},
-			"position": map[string]int{"line": in.Line - 1, "character": in.Column - 1}}
-		def, err := client.request(3, "textDocument/definition", params)
-		if err != nil {
-			return unavailable("Marksman definition failed: " + err.Error()), nil
-		}
-		result.Definitions = parseLocations(def, root)
-		if in.IncludeReferences {
-			params["context"] = map[string]bool{"includeDeclaration": true}
-			refs, err := client.request(4, "textDocument/references", params)
-			if err != nil {
-				return unavailable("Marksman references failed: " + err.Error()), nil
-			}
-			result.References = parseLocations(refs, root)
-		}
-	}
-	if client.diagnosticsReported {
-		result.DiagnosticsStatus = "reported"
-		result.Diagnostics = parseDiagnostics(client.diagnostics)
-	}
+		References: locations, Truncated: truncated}
 	return result, nil
 }
 func within(root, path string) bool {
@@ -239,43 +235,13 @@ func normalizedRange(in lspRange) doc.Range {
 		End: doc.Position{Line: in.End.Line + 1, Column: in.End.Character + 1}}
 }
 
-type lspSymbol struct {
-	Name     string   `json:"name"`
-	Range    lspRange `json:"range"`
-	Location *struct {
-		Range lspRange `json:"range"`
-	} `json:"location"`
-	Children []lspSymbol `json:"children"`
-}
-
-func parseSymbols(raw json.RawMessage) []doc.Symbol {
-	var values []lspSymbol
-	_ = json.Unmarshal(raw, &values)
-	out := make([]doc.Symbol, 0, len(values))
-	var visit func([]lspSymbol, int)
-	visit = func(items []lspSymbol, level int) {
-		for _, item := range items {
-			if len(out) >= 500 {
-				return
-			}
-			r := item.Range
-			if item.Location != nil {
-				r = item.Location.Range
-			}
-			out = append(out, doc.Symbol{Name: item.Name, Depth: level, Range: normalizedRange(r)})
-			visit(item.Children, level+1)
-		}
-	}
-	visit(values, 1)
-	return out
-}
-func parseLocations(raw json.RawMessage, root string) []doc.Location {
+func parseLocations(raw json.RawMessage, root string) ([]doc.Location, bool) {
 	var items []struct {
 		URI   string   `json:"uri"`
 		Range lspRange `json:"range"`
 	}
 	if len(raw) == 0 || string(raw) == "null" {
-		return []doc.Location{}
+		return []doc.Location{}, false
 	}
 	if raw[0] == '[' {
 		_ = json.Unmarshal(raw, &items)
@@ -307,21 +273,5 @@ func parseLocations(raw json.RawMessage, root string) []doc.Location {
 		}
 		out = append(out, doc.Location{Path: filepath.ToSlash(rel), Range: normalizedRange(item.Range)})
 	}
-	return out
-}
-func parseDiagnostics(raw json.RawMessage) []doc.Diagnostic {
-	var values []struct {
-		Message  string   `json:"message"`
-		Severity int      `json:"severity"`
-		Range    lspRange `json:"range"`
-	}
-	_ = json.Unmarshal(raw, &values)
-	out := make([]doc.Diagnostic, 0, len(values))
-	for _, v := range values {
-		if len(out) >= 200 {
-			break
-		}
-		out = append(out, doc.Diagnostic{Message: v.Message, Severity: v.Severity, Range: normalizedRange(v.Range)})
-	}
-	return out
+	return out, len(items) > 300
 }

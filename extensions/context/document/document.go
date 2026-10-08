@@ -140,17 +140,8 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		return nil, fmt.Errorf("document_context relation depth/limit must be positive")
 	}
 
-	if input.Realtime && input.Review {
-		return nil, fmt.Errorf("document_context realtime enrichment requires a focused, non-review call")
-	}
-	if input.Line < 0 || input.Column < 0 || (input.Line > 0) != (input.Column > 0) {
-		return nil, fmt.Errorf("realtime line and column must both be positive")
-	}
-	if input.Line > 0 && !input.Realtime {
-		return nil, fmt.Errorf("realtime position requires realtime=true")
-	}
-	if input.IncludeReferences && (!input.Realtime || input.Line == 0) {
-		return nil, fmt.Errorf("include_references requires realtime and a position")
+	if input.References && (input.Review || input.Section == "") {
+		return nil, fmt.Errorf("document_context references requires a selected section and review=false")
 	}
 
 	invoker, ok := e.services.Service(documentcontract.ServiceName)
@@ -182,26 +173,52 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		}
 		result["relations"] = relations
 	}
-	if input.Realtime {
-		data := documentrealtime.AnalyzeRequest{Root: input.Root, Path: input.Path, Line: input.Line, Column: input.Column, IncludeReferences: input.IncludeReferences}
+	if input.References {
+		if document.SelectedSection == nil {
+			return nil, fmt.Errorf("document provider did not return the selected section")
+		}
+		item := document.SelectedSection
+		field := map[string]any{
+			"target":        map[string]any{"path": document.Path, "key": item.Key, "title": item.Title, "start_line": item.StartLine},
+			"status":        "unconfigured",
+			"complete":      false,
+			"referenced_by": []documentrealtime.Location{},
+		}
 		realtimeService, found := e.services.Service(documentrealtime.ServiceName)
-		if !found {
-			result["realtime"] = map[string]string{"status": "unconfigured", "detail": "document-realtime service is not configured"}
-		} else {
-			raw, err := json.Marshal(data)
+		if found {
+			request, err := json.Marshal(documentrealtime.AnalyzeRequest{Root: input.Root, Path: input.Path, HeadingLine: item.StartLine})
 			if err != nil {
 				return nil, err
 			}
-			response, err := realtimeService.Invoke(ctx, documentrealtime.MethodAnalyze, raw)
+			raw, err := realtimeService.Invoke(ctx, documentrealtime.MethodAnalyze, request)
 			if err != nil {
-				return nil, fmt.Errorf("build realtime document context: %w", err)
+				return nil, fmt.Errorf("resolve section references: %w", err)
 			}
-			var normalized documentrealtime.AnalyzeResponse
-			if err := json.Unmarshal(response, &normalized); err != nil {
-				return nil, fmt.Errorf("decode realtime document context: %w", err)
+			var refs documentrealtime.AnalyzeResponse
+			if err := json.Unmarshal(raw, &refs); err != nil {
+				return nil, fmt.Errorf("decode section references: %w", err)
 			}
-			result["realtime"] = normalized
+			inbound := make([]documentrealtime.Location, 0, len(refs.References))
+			for _, ref := range refs.References {
+				// LSP includes the heading declaration. Consumers need inbound links only.
+				if ref.Path == document.Path && ref.Range.Start.Line == item.StartLine {
+					continue
+				}
+				inbound = append(inbound, ref)
+			}
+			complete := refs.Status == "ok" && !refs.Truncated
+			status := refs.Status
+			if refs.Truncated && status == "ok" {
+				status = "partial"
+			}
+			field = map[string]any{
+				"target": field["target"], "status": status,
+				"complete": complete, "scope": refs.WorkspaceScope,
+				"referenced_by": inbound, "truncated": refs.Truncated,
+				"detail": refs.Detail,
+			}
 		}
+		result["references"] = field
 	}
 	return json.Marshal(result)
 }
