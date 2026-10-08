@@ -82,6 +82,32 @@ package = "./extensions/document/markdown/cmd/provider"
 [extension.document-markdown.settings]
 roots = ["docs"]
 
+[extension.diagram-capability]
+loader = "go"
+
+[extension.diagram-capability.loader_config]
+module = "."
+package = "./extensions/capability/diagram/cmd/provider"
+
+[extension.diagram-context]
+loader = "go"
+
+[extension.diagram-context.loader_config]
+module = "."
+package = "./extensions/context/diagram/cmd/provider"
+
+[extension.diagram-render]
+loader = "go"
+
+[extension.diagram-render.loader_config]
+module = "."
+package = "./extensions/diagram/cli/cmd/provider"
+
+[extension.diagram-render.settings]
+mermaid_bin = "mmdc"
+plantuml_bin = "plantuml"
+timeout_seconds = 30
+
 [extension.log-capability]
 loader = "go"
 
@@ -175,6 +201,12 @@ provider = "context.code.composite"
 
 [service.document-context]
 provider = "context.document.composite"
+
+[service.diagram-context]
+provider = "context.diagram.composite"
+
+[service.diagram-render]
+provider = "diagram.render.cli"
 
 [service.document-structure]
 provider = "document.markdown.goldmark"

@@ -32,6 +32,8 @@ Agents consume stable engineering intent, not provider-native APIs.
 Current stable agent capabilities include:
 
 - `code_context`: gather code context by composing configured indexed and realtime intelligence.
+- `document_context`: inspect documents with bounded coverage.
+- `diagram_context`: find Mermaid / PlantUML fences and optionally validate by rendering through configured tools.
 - `scm_publish`: publish source-control changes through the configured SCM provider.
 - `project_<command>`: invoke commands declared by the Project Extension, such as `project_build` and `project_verify`.
 
