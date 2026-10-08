@@ -52,6 +52,13 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 					"type":        "string",
 					"description": "Optional exact section title or numbered section key such as 1.3.",
 				},
+				"realtime": map[string]any{
+					"type":        "boolean",
+					"description": "Enrich with configured Markdown LSP symbols, diagnostics, and optional position references (focused call only).",
+				},
+				"line":               map[string]any{"type": "integer", "minimum": 1, "description": "Optional 1-based line for LSP definition/references."},
+				"column":             map[string]any{"type": "integer", "minimum": 1, "description": "1-based UTF-16 column for LSP lookup (required when line is set)."},
+				"include_references": map[string]any{"type": "boolean", "description": "Find references and definition at the specified position."},
 				"include_tables": map[string]any{
 					"type":        "boolean",
 					"description": "Include GFM tables as header/cell matrices with source lines (initial review call or focused inspection).",

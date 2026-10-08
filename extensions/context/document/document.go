@@ -12,6 +12,7 @@ import (
 
 	documentcontract "github.com/thinkerqaq/devtool/sdk/document"
 	documentcontext "github.com/thinkerqaq/devtool/sdk/documentcontext"
+	documentrealtime "github.com/thinkerqaq/devtool/sdk/documentrealtime"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	service "github.com/thinkerqaq/devtool/sdk/service"
 )
@@ -136,6 +137,19 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		return nil, fmt.Errorf("document_context relation depth/limit must be positive")
 	}
 
+	if input.Realtime && input.Review {
+		return nil, fmt.Errorf("document_context realtime enrichment requires a focused, non-review call")
+	}
+	if input.Line < 0 || input.Column < 0 || (input.Line > 0) != (input.Column > 0) {
+		return nil, fmt.Errorf("realtime line and column must both be positive")
+	}
+	if input.Line > 0 && !input.Realtime {
+		return nil, fmt.Errorf("realtime position requires realtime=true")
+	}
+	if input.IncludeReferences && (!input.Realtime || input.Line == 0) {
+		return nil, fmt.Errorf("include_references requires realtime and a position")
+	}
+
 	invoker, ok := e.services.Service(documentcontract.ServiceName)
 	if !ok {
 		return nil, fmt.Errorf("service %q is not configured", documentcontract.ServiceName)
@@ -164,6 +178,27 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			return nil, err
 		}
 		result["relations"] = relations
+	}
+	if input.Realtime {
+		data := documentrealtime.AnalyzeRequest{Root: input.Root, Path: input.Path, Line: input.Line, Column: input.Column, IncludeReferences: input.IncludeReferences}
+		realtimeService, found := e.services.Service(documentrealtime.ServiceName)
+		if !found {
+			result["realtime"] = map[string]string{"status": "unconfigured", "detail": "document-realtime service is not configured"}
+		} else {
+			raw, err := json.Marshal(data)
+			if err != nil {
+				return nil, err
+			}
+			response, err := realtimeService.Invoke(ctx, documentrealtime.MethodAnalyze, raw)
+			if err != nil {
+				return nil, fmt.Errorf("build realtime document context: %w", err)
+			}
+			var normalized documentrealtime.AnalyzeResponse
+			if err := json.Unmarshal(response, &normalized); err != nil {
+				return nil, fmt.Errorf("decode realtime document context: %w", err)
+			}
+			result["realtime"] = normalized
+		}
 	}
 	return json.Marshal(result)
 }
