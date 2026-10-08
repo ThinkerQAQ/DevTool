@@ -52,6 +52,10 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 					"type":        "string",
 					"description": "Optional exact section title or numbered section key such as 1.3.",
 				},
+				"include_tables": map[string]any{
+					"type":        "boolean",
+					"description": "Include GFM tables as header/cell matrices with source lines (initial review call or focused inspection).",
+				},
 				"include_content": map[string]any{
 					"type":        "boolean",
 					"description": "Include the exact selected section source in the response.",

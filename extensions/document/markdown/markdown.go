@@ -12,6 +12,8 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	extast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"gopkg.in/yaml.v3"
@@ -120,7 +122,7 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 	}
 
 	parseSource := maskFrontmatter(source)
-	doc := goldmark.New(goldmark.WithParserOptions(parser.WithAutoHeadingID())).Parser().Parse(text.NewReader(parseSource))
+	doc := goldmark.New(goldmark.WithExtensions(extension.GFM), goldmark.WithParserOptions(parser.WithAutoHeadingID())).Parser().Parse(text.NewReader(parseSource))
 	flat := collectSections(doc, source, lineStarts, lineCount)
 	outline := nestSections(flat)
 
@@ -133,6 +135,9 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 	}
 	if request.IncludeDiagrams {
 		response.Diagrams = collectDiagrams(doc, source, lineStarts)
+	}
+	if request.IncludeTables {
+		response.Tables = collectTables(doc, source, lineStarts)
 	}
 
 	selector := strings.TrimSpace(request.Section)
@@ -185,6 +190,72 @@ func (e *Extension) inspect(request documentcontract.InspectRequest) (documentco
 		response.SelectedRange = result
 	}
 	return response, nil
+}
+
+func collectTables(root ast.Node, source []byte, starts []int) []documentcontract.Table {
+	var result []documentcontract.Table
+	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		table, ok := node.(*extast.Table)
+		if !ok {
+			return ast.WalkContinue, nil
+		}
+		item := documentcontract.Table{Index: len(result) + 1, Columns: len(table.Alignments),
+			Headers: []string{}, Rows: [][]string{}, Alignments: []string{}}
+		for _, align := range table.Alignments {
+			item.Alignments = append(item.Alignments, align.String())
+		}
+		first, last := -1, -1
+		_ = ast.Walk(table, func(child ast.Node, on bool) (ast.WalkStatus, error) {
+			if !on {
+				return ast.WalkContinue, nil
+			}
+			txt, yes := child.(*ast.Text)
+			if yes {
+				if first < 0 || txt.Segment.Start < first {
+					first = txt.Segment.Start
+				}
+				if txt.Segment.Stop > last {
+					last = txt.Segment.Stop
+				}
+			}
+			return ast.WalkContinue, nil
+		})
+		if first >= 0 {
+			item.StartLine = lineForOffset(starts, first)
+			item.EndLine = lineForOffset(starts, last-1)
+		}
+		for row := table.FirstChild(); row != nil; row = row.NextSibling() {
+			values := []string{}
+			for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
+				var text strings.Builder
+				_ = ast.Walk(cell, func(child ast.Node, on bool) (ast.WalkStatus, error) {
+					if !on {
+						return ast.WalkContinue, nil
+					}
+					switch part := child.(type) {
+					case *ast.Text:
+						text.Write(part.Text(source))
+					case *ast.String:
+						text.Write(part.Value)
+					}
+					return ast.WalkContinue, nil
+				})
+				values = append(values, strings.TrimSpace(text.String()))
+			}
+			switch row.(type) {
+			case *extast.TableHeader:
+				item.Headers = values
+			case *extast.TableRow:
+				item.Rows = append(item.Rows, values)
+			}
+		}
+		result = append(result, item)
+		return ast.WalkSkipChildren, nil
+	})
+	return result
 }
 
 func collectDiagrams(root ast.Node, source []byte, starts []int) []documentcontract.Diagram {

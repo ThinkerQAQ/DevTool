@@ -11,6 +11,7 @@ type BuildRequest struct {
 	Path           string `json:"path"`
 	Section        string `json:"section,omitempty"`
 	IncludeContent bool   `json:"include_content,omitempty"`
+	IncludeTables  bool   `json:"include_tables,omitempty"`
 	Review         bool   `json:"review,omitempty"`
 	Cursor         string `json:"cursor,omitempty"`
 	ReviewMaxLines int    `json:"review_max_lines,omitempty"`

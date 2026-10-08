@@ -149,6 +149,7 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		Path:           input.Path,
 		Section:        input.Section,
 		IncludeContent: input.IncludeContent,
+		IncludeTables:  input.IncludeTables,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build document context: %w", err)
@@ -202,8 +203,9 @@ func (e *Extension) callReview(
 	}
 
 	document, err := inspectDocument(ctx, invoker, documentcontract.InspectRequest{
-		Root: input.Root,
-		Path: input.Path,
+		Root:          input.Root,
+		Path:          input.Path,
+		IncludeTables: input.IncludeTables && continuation == nil,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build document review plan: %w", err)
