@@ -61,3 +61,21 @@ func TestRejectBadRendererOutput(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", r)
 	}
 }
+
+func TestPlantUMLUsesPipeRenderer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix fixture executable")
+	}
+	path := filepath.Join(t.TempDir(), "plantuml")
+	script := "#!/bin/sh\ncat >/dev/null\nprintf '<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>'\n"
+	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	e := New()
+	e.plantuml = path
+	r := e.render(t.Context(), diagram.RenderRequest{Language: "plantuml", Source: "@startuml\nAlice -> Bob\n@enduml\n"})
+	if r.Status != "rendered" || r.ArtifactPath == "" {
+		t.Fatalf("unexpected result: %+v", r)
+	}
+	t.Cleanup(func() { os.Remove(r.ArtifactPath) })
+}
