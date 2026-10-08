@@ -32,6 +32,7 @@ func (e *Extension) ListTools(context.Context, agent.Session) ([]agent.Tool, err
 			"properties": map[string]any{
 				"objective":      map[string]any{"type": "string"},
 				"path":           map[string]any{"type": "string", "description": "Project-relative Markdown file."},
+				"analyze":        map[string]any{"type": "boolean", "description": "Enrich each diagram with structural graph, Mermaid language symbols, scoped diagnostics and containing Markdown section; provider controlled."},
 				"render":         map[string]any{"type": "boolean", "description": "Validate by renderer and generate SVG artifacts."},
 				"include_source": map[string]any{"type": "boolean", "description": "Return exact diagram sources."},
 				"index":          map[string]any{"type": "integer", "minimum": 1, "description": "Optional 1-based diagram index."},

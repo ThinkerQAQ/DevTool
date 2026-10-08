@@ -17,6 +17,7 @@ type InspectRequest struct {
 	RangeEndLine     int    `json:"range_end_line,omitempty"`
 	IncludeContent   bool   `json:"include_content,omitempty"`
 	IncludeDiagrams  bool   `json:"include_diagrams,omitempty"`
+	IncludeTables    bool   `json:"include_tables,omitempty"`
 }
 
 type Section struct {
@@ -51,6 +52,17 @@ type Diagram struct {
 	Source    string `json:"source"`
 }
 
+// Table represents a GFM table with bounded, source-anchored structured cells.
+type Table struct {
+	Index      int        `json:"index"`
+	StartLine  int        `json:"start_line"`
+	EndLine    int        `json:"end_line"`
+	Columns    int        `json:"columns"`
+	Headers    []string   `json:"headers"`
+	Rows       [][]string `json:"rows"`
+	Alignments []string   `json:"alignments,omitempty"`
+}
+
 type InspectResponse struct {
 	Path            string           `json:"path"`
 	Format          string           `json:"format"`
@@ -58,6 +70,7 @@ type InspectResponse struct {
 	Frontmatter     map[string]any   `json:"frontmatter,omitempty"`
 	Outline         []Section        `json:"outline,omitempty"`
 	Diagrams        []Diagram        `json:"diagrams,omitempty"`
+	Tables          []Table          `json:"tables,omitempty"`
 	SelectedSection *SelectedSection `json:"selected_section,omitempty"`
 	SelectedRange   *SelectedRange   `json:"selected_range,omitempty"`
 }

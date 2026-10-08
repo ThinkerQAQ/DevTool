@@ -12,6 +12,7 @@ import (
 
 	documentcontract "github.com/thinkerqaq/devtool/sdk/document"
 	documentcontext "github.com/thinkerqaq/devtool/sdk/documentcontext"
+	documentrealtime "github.com/thinkerqaq/devtool/sdk/documentrealtime"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	service "github.com/thinkerqaq/devtool/sdk/service"
 )
@@ -126,6 +127,9 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	if !input.Review && input.ReviewMaxLines > 0 {
 		return nil, fmt.Errorf("document_context review_max_lines requires review=true")
 	}
+	if input.Cursor != "" && input.IncludeTables {
+		return nil, fmt.Errorf("document_context include_tables is available on the initial review call only")
+	}
 	if input.Cursor != "" && input.Related {
 		return nil, fmt.Errorf("document_context related context is only available on the initial review call")
 	}
@@ -134,6 +138,10 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	}
 	if input.RelationDepth < 0 || input.RelationLimit < 0 {
 		return nil, fmt.Errorf("document_context relation depth/limit must be positive")
+	}
+
+	if input.References && (input.Review || input.Section == "") {
+		return nil, fmt.Errorf("document_context references requires a selected section and review=false")
 	}
 
 	invoker, ok := e.services.Service(documentcontract.ServiceName)
@@ -149,6 +157,7 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		Path:           input.Path,
 		Section:        input.Section,
 		IncludeContent: input.IncludeContent,
+		IncludeTables:  input.IncludeTables,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build document context: %w", err)
@@ -163,6 +172,53 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 			return nil, err
 		}
 		result["relations"] = relations
+	}
+	if input.References {
+		if document.SelectedSection == nil {
+			return nil, fmt.Errorf("document provider did not return the selected section")
+		}
+		item := document.SelectedSection
+		field := map[string]any{
+			"target":        map[string]any{"path": document.Path, "key": item.Key, "title": item.Title, "start_line": item.StartLine},
+			"status":        "unconfigured",
+			"complete":      false,
+			"referenced_by": []documentrealtime.Location{},
+		}
+		realtimeService, found := e.services.Service(documentrealtime.ServiceName)
+		if found {
+			request, err := json.Marshal(documentrealtime.AnalyzeRequest{Root: input.Root, Path: input.Path, HeadingLine: item.StartLine})
+			if err != nil {
+				return nil, err
+			}
+			raw, err := realtimeService.Invoke(ctx, documentrealtime.MethodAnalyze, request)
+			if err != nil {
+				return nil, fmt.Errorf("resolve section references: %w", err)
+			}
+			var refs documentrealtime.AnalyzeResponse
+			if err := json.Unmarshal(raw, &refs); err != nil {
+				return nil, fmt.Errorf("decode section references: %w", err)
+			}
+			inbound := make([]documentrealtime.Location, 0, len(refs.References))
+			for _, ref := range refs.References {
+				// LSP includes the heading declaration. Consumers need inbound links only.
+				if ref.Path == document.Path && ref.Range.Start.Line == item.StartLine {
+					continue
+				}
+				inbound = append(inbound, ref)
+			}
+			complete := refs.Status == "ok" && !refs.Truncated
+			status := refs.Status
+			if refs.Truncated && status == "ok" {
+				status = "partial"
+			}
+			field = map[string]any{
+				"target": field["target"], "status": status,
+				"complete": complete, "scope": refs.WorkspaceScope,
+				"referenced_by": inbound, "truncated": refs.Truncated,
+				"detail": refs.Detail,
+			}
+		}
+		result["references"] = field
 	}
 	return json.Marshal(result)
 }
@@ -202,8 +258,9 @@ func (e *Extension) callReview(
 	}
 
 	document, err := inspectDocument(ctx, invoker, documentcontract.InspectRequest{
-		Root: input.Root,
-		Path: input.Path,
+		Root:          input.Root,
+		Path:          input.Path,
+		IncludeTables: input.IncludeTables && continuation == nil,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build document review plan: %w", err)

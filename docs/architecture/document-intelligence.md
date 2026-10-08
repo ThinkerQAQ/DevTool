@@ -385,3 +385,50 @@ The first implementation does not add:
 - [ ] Blog Content has no repository-local parser or fake devcontrol implementation.
 - [ ] Long Markdown review works outline-first and section-by-section.
 - [ ] Existing code intelligence, SCM and self-hosting remain green.
+
+## V3: GFM tables and section reference intelligence
+
+The Goldmark/GFM provider owns table syntax. Calling
+`document_context(include_tables=true)` supplies column/row matrices,
+alignments and line spans, optionally scoped to one selected section.
+
+The Agent expresses the stable document intent:
+
+```text
+document_context(path="...", section="1.3", references=true)
+```
+
+The Document Context Service selects the heading through the configured
+Document Structure provider, requests references by its heading line through
+the `document-realtime` contract, removes the heading definition itself,
+and returns one integrated `references` result with:
+
+- `target`: canonical selected heading and line;
+- `referenced_by`: bounded, de-duplicated inbound locations;
+- `scope`: the workspace coverage boundary;
+- `status`, `complete`, and `truncated`: distinguish genuine zero
+  references from unavailable or partial results.
+
+A Markdown LSP's UTF-16 position mechanics and native methods remain private
+to its replaceable Provider. The Agent does not request symbols, raw
+`textDocument/references`, or LSP diagnostics. Goldmark owns the single
+authoritative outline; Marksman only enriches section references.
+
+### Lifecycle and cost
+
+`document.realtime.marksman` maintains one LSP process per configured
+workspace for the extension/host lifetime. It uses `didOpen` and `didChange`
+to synchronize changed files; the process is not created and destroyed for
+each Agent call. Requests are serialized per workspace, canceled requests
+terminate their stalled session, and the extension's `Close` releases its
+children. Session count is bounded and overflow requests are ephemeral.
+
+`workspace_roots` is configurable and the response explicitly reports the
+selected scope: searching `src/content/articles` is not a repository-wide
+guarantee about Notes. Missing Marksman returns `unavailable`, not an
+empty successful reference list.
+
+No provider-native Agent tools, no workflow DSL, no changes to Core, no
+implicit downloads, and no article-writing API have been introduced. A future
+structure-aware write contract must include preview, expected content hash,
+affected references and explicit application/verification.
