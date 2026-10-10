@@ -1,21 +1,21 @@
-# Configuration Reference
+# Configuration reference
 
-DevTool discovers project configuration from `.devtool.toml`.
+[中文](../cn/reference/configuration.md) · [Documentation](../index.md)
 
-Configuration has one responsibility:
+DevTool resolves `.devtool.toml` at the project root. It is a **declarative binding file**: extension code supplies behavior, configuration selects and connects it.
 
-> discover, select and wire extensions/services without embedding project workflow logic.
-
-The current configuration version is `1`.
-
-## Minimal shape
+## Project metadata
 
 ```toml
 version = 1
 
 [project]
-name = "Example"
+name = "DevTool"
+```
 
+## Loadable extensions
+
+```toml
 [extension.project]
 loader = "go"
 
@@ -24,84 +24,9 @@ module = "./devcontrol"
 package = "./cmd/provider"
 ```
 
-A useful project normally also wires environment/runtime/capability providers through `[extension.*]` and `[service.*]`.
+Extension settings belong in `[extension.<name>.settings]`. A provider is not activated merely by registering its extension; a service binding must select it.
 
----
-
-## `version`
-
-```toml
-version = 1
-```
-
-Required.
-
-DevTool rejects unsupported configuration versions.
-
----
-
-## `[project]`
-
-```toml
-[project]
-name = "DevTool"
-```
-
-Fields:
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `name` | yes | Human/project identity used by the control plane. |
-
----
-
-## `[extension.<name>]`
-
-Declares an extension instance that DevTool can load.
-
-Example:
-
-```toml
-[extension.codegraph]
-loader = "go"
-
-[extension.codegraph.loader_config]
-module = "."
-package = "./extensions/intelligence/codegraph/cmd/provider"
-
-[extension.codegraph.settings]
-some_setting = "value"
-```
-
-Fields:
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `loader` | yes | Loader mechanism used to resolve/start the extension. |
-| `loader_config` | no | Loader-specific configuration. |
-| `settings` | no | Provider/extension configuration passed to configurable extensions. |
-
-The extension table key is a local configuration name. Stable provider identity is declared by the loaded extension itself.
-
-### Current Go loader shape
-
-The DevTool repository currently uses:
-
-```toml
-[extension.<name>.loader_config]
-module = "."
-package = "./path/to/cmd/provider"
-```
-
-The loader/build adapter owns Go build mechanics. Core does not contain provider-specific build switches.
-
----
-
-## `[service.<name>]`
-
-Binds a stable service name to a provider ID.
-
-Example:
+## Service binding
 
 ```toml
 [service.code-indexed]
@@ -109,364 +34,49 @@ provider = "intelligence.codegraph"
 
 [service.code-realtime]
 provider = "intelligence.lsp.serena"
-
-[service.scm]
-provider = "scm.github"
-
-[service.document-context]
-provider = "context.document.composite"
-
-[service.document-structure]
-provider = "document.markdown.goldmark"
 ```
 
-Fields:
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `provider` | yes | Extension/provider ID selected to implement the service. |
-
-This is the main replacement boundary.
-
-For an existing capability, switching providers should normally happen here or through a profile.
-
-For document intelligence, a content repository can wire the stable service independently of the concrete parser:
-
-```toml
-[extension.document-capability]
-loader = "go-module"
-
-[extension.document-capability.loader_config]
-module = "github.com/thinkerqaq/devtool"
-version = "<pinned-commit>"
-package = "./extensions/capability/document/cmd/provider"
-
-[extension.document-context]
-loader = "go-module"
-
-[extension.document-context.loader_config]
-module = "github.com/thinkerqaq/devtool"
-version = "<pinned-commit>"
-package = "./extensions/context/document/cmd/provider"
-
-[extension.document-context.settings]
-review_max_lines = 300
-
-[extension.document-markdown]
-loader = "go-module"
-
-[extension.document-markdown.loader_config]
-module = "github.com/thinkerqaq/devtool"
-version = "<pinned-commit>"
-package = "./extensions/document/markdown/cmd/provider"
-
-[extension.document-markdown.settings]
-roots = ["src/content"]
-
-[extension.document-relations]
-loader = "go-module"
-
-[extension.document-relations.loader_config]
-module = "github.com/thinkerqaq/devtool"
-version = "<pinned-commit>"
-package = "./extensions/document/relations/content/cmd/provider"
-
-[extension.document-relations.settings]
-articles = "src/content/articles"
-series = "src/content/series"
-notes = "src/content/notes"
-projects = "src/content/projects"
-
-[service.document-context]
-provider = "context.document.composite"
-
-[service.document-structure]
-provider = "document.markdown.goldmark"
-
-[service.document-relations]
-provider = "document.relations.content"
-```
-
-The Agent surface remains `document_context`. The thin Capability delegates to `document-context`; bounded review/cursor/relation composition lives in the selected document-context provider, while parser-specific structure and content-relation behavior remain behind their own services. `review_max_lines` configures the document-context provider and defaults to 300 when omitted. Repositories that do not need cross-document relations can omit `document-relations` entirely.
-
-A content-only repository can use the reusable `project.workspace` Project Extension instead of creating a fake project-local build/runtime implementation:
-
-```toml
-[project]
-name = "Docs"
-
-[extension.project]
-loader = "go-module"
-
-[extension.project.loader_config]
-module = "github.com/thinkerqaq/devtool"
-version = "<pinned-commit>"
-package = "./extensions/project/workspace/cmd/provider"
-
-[extension.project.settings]
-name = "Docs"
-```
-
----
-
-## `[code]`
-
-Configures code-intelligence workspace roots.
-
-```toml
-[code]
-workspaces = [".", "./devcontrol"]
-```
-
-`workspaces` contains project-relative or absolute paths.
-
-Relative paths are resolved against the discovered project root.
-
-When no workspace is configured, DevTool uses the project root.
-
----
-
-## `[ui]`
-
-Declares generic control-surface features.
-
-```toml
-[ui]
-features = ["environment", "jobs", "logs"]
-```
-
-Current configuration model:
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `features` | no | Feature IDs consumed by the control-surface layer. |
-
-UI configuration enables generic features; it should not contain project-specific pages or a general-purpose UI scripting language.
-
----
+The actual DevTool repository also selects `workspace`, `environment`, `tooling-environment`, `portable-runtime`, `document-context`, `diagram-context`, `credential`, and `scm` services. Consult [the live config](../../.devtool.toml) for every binding.
 
 ## Profiles
 
-Profiles override extension and service wiring without mutating the base configuration.
-
-Example:
+Profiles override selected sections without editing the base configuration.
 
 ```toml
 [profile.local.service.environment]
 provider = "environment.local"
 
-[profile.local.service.tooling-environment]
-provider = "environment.local"
-
-[profile.railway.service.environment]
-provider = "environment.local"
-
-[profile.railway.service.tooling-environment]
-provider = "environment.local"
+[profile.sourcegraph.service.code-indexed]
+provider = "intelligence.sourcegraph"
 ```
-
-The base configuration keeps project execution and tooling as separate service contracts even when both select `environment.docker`. Profiles may switch either service independently without changing the intelligence providers.
-
-Activate:
 
 ```bash
-DEVTOOL_PROFILES=railway devtool project inspect --json
+DEVTOOL_PROFILES=local devtool project inspect --json
+DEVTOOL_PROFILES=local,sourcegraph devtool config validate
 ```
 
-### Composition
+Profile combinations must be validated. Provider settings and credentials remain provider-owned; do not hard-code them in Core.
 
-Profiles are comma-separated and applied left to right:
-
-```bash
-DEVTOOL_PROFILES=railway,sourcegraph ...
-```
-
-For the same extension/service key, a later profile replaces an earlier value.
-
-Current profile configuration can override:
-
-- `extension`
-- `service`
-
-It does not independently overlay `project`, `code`, or `ui`.
-
-Unknown profile names are rejected.
-
----
-
-## Current DevTool repository wiring
-
-The repository currently uses this service graph conceptually:
-
-```text
-environment
-  -> environment.docker
-
-tooling-environment
-  -> environment.docker
-
-portable-runtime
-  -> runtime.dagger
-
-code-indexed
-  -> intelligence.codegraph
-
-code-realtime
-  -> intelligence.lsp.serena
-
-scm
-  -> scm.github
-```
-
-The `sourcegraph` profile replaces only `code-indexed`:
-
-```text
-code-indexed
-  -> intelligence.sourcegraph
-```
-
-The default profile selects the shared DevEnvironment container for both project execution and developer tooling, while keeping `environment` and `tooling-environment` as independent services. This lets CI obtain CodeGraph/Serena from the configured DevEnvironment without coupling their contracts.
-
-The `local` and `railway` profiles select `environment.local` for both services. Use `local` when the required developer tools are installed on the host; use `railway` when the Railway runtime already provides them.
-
-These are provider choices, not Project Extension changes.
-
----
-
-## Full repository example
-
-The current shape is equivalent to:
+## Code workspaces
 
 ```toml
-version = 1
-
-[project]
-name = "DevTool"
-
-[extension.project]
-loader = "go"
-
-[extension.project.loader_config]
-module = "./devcontrol"
-package = "./cmd/provider"
-
-[extension.environment]
-loader = "go"
-
-[extension.environment.loader_config]
-module = "."
-package = "./extensions/environment/docker/cmd/provider"
-
-[extension.runtime]
-loader = "go"
-
-[extension.runtime.loader_config]
-module = "."
-package = "./extensions/runtime/dagger/cmd/provider"
-
-[extension.code-capability]
-loader = "go"
-
-[extension.code-capability.loader_config]
-module = "."
-package = "./extensions/capability/code/cmd/provider"
-
-[extension.codegraph]
-loader = "go"
-
-[extension.codegraph.loader_config]
-module = "."
-package = "./extensions/intelligence/codegraph/cmd/provider"
-
-[extension.lsp]
-loader = "go"
-
-[extension.lsp.loader_config]
-module = "."
-package = "./extensions/intelligence/serena/cmd/provider"
-
-[extension.scm]
-loader = "go"
-
-[extension.scm.loader_config]
-module = "."
-package = "./extensions/scm/github/cmd/provider"
-
-[service.environment]
-provider = "environment.docker"
-
-[service.tooling-environment]
-provider = "environment.local"
-
-[service.portable-runtime]
-provider = "runtime.dagger"
-
-[service.code-indexed]
-provider = "intelligence.codegraph"
-
-[service.code-realtime]
-provider = "intelligence.lsp.serena"
-
-[service.scm]
-provider = "scm.github"
-
 [code]
 workspaces = ["."]
 ```
 
-Refer to the repository's actual `.devtool.toml` for the complete current provider/profile list.
+CodeGraph works on indexed/structural repository context. Serena/LSP supplies realtime semantics. A provider change should preserve the stable agent capability contract.
 
----
-
-## What should not go in configuration
-
-Avoid:
-
-```toml
-build = "go build ./..."
-verify = "go test ./..."
-deploy = "some shell pipeline"
-```
-
-That turns configuration into a second workflow language.
-
-Instead:
-
-```text
-Project Extension
-  -> stable service
-  -> selected provider
-```
-
-Configuration chooses the implementation; code owns behavior.
-
----
-
-## Validation
-
-Run:
+## Validate
 
 ```bash
+devtool config path
 devtool config validate
-```
-
-or, while bootstrapping DevTool itself:
-
-```bash
-go run ./cmd/devtool config validate
-```
-
-Then inspect the resolved result:
-
-```bash
 devtool project inspect --json
+devtool init --json
 ```
 
-When profiles are active, validation and inspection use the profile-applied configuration.
+The first three commands detect parsing, bindings, and project wiring issues. `init` additionally checks active provider readiness. Missing executables and credentials are environment issues, not signals to build a second dependency manager into DevTool.
 
-## Related
+## Boundaries
 
-- [Quick Start](../quick-start.md)
-- [Agent Guide](../agent-guide.md)
-- [Architecture Principles](../architecture/principles.md)
-- [CLI Reference](cli.md)
+Do not put shell pipelines, application logic, access tokens, or provider-specific branches in configuration. Use a Project Extension for project behavior and a provider for integration behavior.
