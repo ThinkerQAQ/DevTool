@@ -1,312 +1,58 @@
-# Agent Guide
+# Agent development guide
 
-This guide describes the intended development workflow for an AI agent working in a repository managed by DevTool.
+[中文](cn/agent-guide.md) · [Agent instructions](../AGENTS.md)
 
-The core rule is simple:
+Use DevTool as the project-aware gateway, not as another name for a collection of direct provider tools.
 
-> Discover project intent through DevTool, use stable capabilities, keep provider details behind configuration and contracts.
-
-## 1. Establish project context
-
-Run:
+## Discover the project
 
 ```bash
-go run ./cmd/devtool config validate
-go run ./cmd/devtool project inspect --json
+DEVTOOL_PROFILES=local devtool config validate
+DEVTOOL_PROFILES=local devtool project inspect --json
+DEVTOOL_PROFILES=local devtool init --json
 ```
 
-The project inspection output tells you which Project Extension is active and which project commands/resources are available.
+Inspect the resolved Project Extension and available commands. If `init` reports unavailable providers, fix the environment or select an appropriate configured profile.
 
-Do not infer project semantics from filenames when DevTool already declares them.
-
-## 2. Check capability health
-
-For code work:
+## Connect the agent
 
 ```bash
-go run ./cmd/devtool code doctor
-go run ./cmd/devtool code verify
+devtool agent mcp --context codex
 ```
 
-If a configured provider is unhealthy, fix the provider/environment/configuration path instead of silently bypassing DevTool with a parallel toolchain.
+The MCP server gives callers engineering intents; configured extensions implement them. Relevant tools include:
 
-## 3. Use the Agent Gateway
+| Tool | Purpose |
+| --- | --- |
+| `code_context` | Indexed repository context plus realtime code semantics |
+| `document_context` | Markdown structure, bounded reviews, and related context |
+| `diagram_context` | Mermaid/PlantUML diagram discovery and configured validation |
+| `scm_publish` | Publish changes through the selected SCM provider |
+| `project_<command>` | Build, verify, package, or other Project Extension commands |
 
-Start:
+Use the tool schemas returned by the MCP gateway. Do not assume all tools have the same arguments in every release.
 
-```bash
-go run ./cmd/devtool agent mcp --context codex
-```
+## Work on a change
 
-The gateway is the stable agent-facing boundary.
+1. Determine the requested engineering intent and inspect the related contract.
+2. Use `code_context` or `document_context` instead of launching provider-specific code/Markdown utilities independently.
+3. Select existing components and configuration wiring before implementing infrastructure.
+4. Make one coherent change; examine status/diff; commit and push.
+5. Repeat as needed and run the project's configured verification command.
+6. Report what was verified, what was skipped, and any external blockers.
 
-Use intent-level capabilities:
+## Keep providers behind the contract
 
-### Understand code
+CodeGraph and Sourcegraph implement indexed intelligence; Serena/LSP provides realtime semantics. Agents should continue to call `code_context` after a provider switch. For documents, Markdown parsing and Marksman provide different structure/realtime roles; diagram capabilities follow the same pattern.
 
-Use `code_context`.
+Do not create a new agent tool for every provider method. Introduce a new capability only for a distinct, cross-provider intent.
 
-It may compose indexed and realtime providers, but the agent should not care whether the configured implementation is CodeGraph, Sourcegraph, Serena, gopls, or another provider.
+## Failure handling
 
-Typical objective:
+- **Missing executable:** install/configure the selected provider dependency, or switch a supported profile.
+- **Credential issue:** use the designated credential provider. Never embed tokens in docs, TOML, or commits.
+- **Stale indexed context:** re-run readiness/verification for the active workspace and branch; use realtime diagnostics for current edits.
+- **Project command unavailable:** inspect project commands instead of bypassing DevTool.
+- **Remote gateway:** use configured authentication. Do not expose an unauthenticated gateway on a public interface.
 
-```text
-Understand how ProjectHost resolves configured services and routes them to extensions.
-```
-
-Ask for the engineering context you need, not a provider method.
-
-### Understand documents
-
-Use `document_context`.
-
-The normal long-document workflow uses deterministic review traversal:
-
-```text
-document_context(path=document, review=true)
-  -> frontmatter + complete outline
-  -> explicit remaining coverage
-  -> next_cursor
-
-document_context(path=document, review=true, cursor=next_cursor)
-  -> exactly one bounded review unit
-  -> covered units
-  -> remaining units
-  -> next_cursor
-
-repeat until complete=true
-```
-
-For a focused lookup, keep using direct section selection:
-
-```text
-document_context(path=document, section="...", include_content=true)
-  -> one exact source section
-```
-
-Review mode is stateless: the continuation cursor carries traversal position and is rejected if the document structure or review plan changes. Large sections are recursively decomposed by heading boundaries according to the configured `review_max_lines` budget; structurally unsplittable oversized units are marked explicitly.
-
-When the review depends on series/project/note context, request deterministic relationships on the initial call:
-
-```text
-document_context(path=document, review=true, related=true)
-  -> document outline + review coverage
-  -> parent series/project
-  -> ordered sibling documents
-  -> explicit related notes / configured note scopes
-```
-
-The relationship graph discovers source-of-truth links; it does not automatically ingest every related body. Read only the related documents needed for the objective.
-
-The agent should not depend on Goldmark, the configured relation provider, Marksman, Serena, or another concrete provider.
-
-### Execute project operations
-
-Use `project_<command>` tools discovered from the Project Extension.
-
-Examples for DevTool:
-
-- `project_build`
-- `project_verify`
-- `project_package`
-
-These preserve project semantics and route execution through the configured service graph.
-
-### Publish source changes
-
-Use `scm_publish` when available.
-
-SCM publishing belongs to DevTool because authentication, provider choice and fallback policy must be deterministic and configuration-driven.
-
-Do not make the agent invent a GitHub-specific publication workflow when the capability is configured.
-
-## 4. Decide where a change belongs
-
-Use this decision tree.
-
-```text
-Need new behavior
-      |
-      v
-Can configuration select/wire it?
-      |
-      +-- yes --> change .devtool.toml/profile
-      |
-      v
-Does an existing contract express the intent?
-      |
-      +-- yes --> implement/replace provider
-      |
-      v
-Is it project-specific orchestration?
-      |
-      +-- yes --> Project Extension
-      |
-      v
-Is it a new stable cross-project capability?
-      |
-      +-- yes --> Capability/Service Contract + provider
-      |
-      v
-Only then consider Core mechanism
-```
-
-Core should not know project names, provider IDs, container commands, GitHub API details, CodeGraph arguments, Serena behavior, or Dagger semantics.
-
-## 5. Provider replacement test
-
-Before accepting a design, ask:
-
-> If I replace this provider tomorrow, what has to change?
-
-Good result:
-
-```text
-provider implementation
-+ .devtool.toml/profile
-```
-
-Suspicious result:
-
-```text
-Core switch
-+ Agent Gateway edits
-+ Project Extension edits
-+ provider implementation
-+ documentation rewrite
-```
-
-For an existing capability, provider replacement should remain local.
-
-## 6. Keep Agent tools coarse-grained
-
-Provider contracts can be fine-grained internally.
-
-Agent tools should model stable engineering intent.
-
-Good:
-
-```text
-code_context
-document_context
-scm_publish
-project_verify
-```
-
-Avoid mechanically mirroring provider APIs:
-
-```text
-codegraph_find_references
-serena_symbols
-sourcegraph_search
-github_create_tree
-```
-
-A new provider method does not justify a new agent tool by itself.
-
-## 7. Respect lifecycle ownership
-
-Long-lived provider clients/processes belong to the lifecycle of their owning ProjectHost/extension/provider, not to an individual RPC request.
-
-Do not create a reusable provider process from a request-scoped context that is canceled as soon as one `tools/list` or `tools/call` completes.
-
-See [Runtime Lifecycle](runtime-lifecycle.md) for the detailed ownership model.
-
-## 8. Change in small steps
-
-Preferred development rhythm:
-
-```text
-inspect
-  -> change one coherent thing
-  -> commit
-  -> push
-  -> change the next coherent thing
-  -> commit
-  -> push
-  -> concentrated verification
-```
-
-This makes progress visible and keeps rollback/review boundaries clean.
-
-Do not require a full regression suite after every tiny edit. Run focused verification after a coherent batch, then the full delivery path before merge.
-
-## 9. Fix structure, not symptoms
-
-When a failure reveals a contract or architecture problem:
-
-- fix the ownership/boundary/root cause;
-- remove obsolete paths;
-- avoid compatibility shims unless they are an explicit product requirement;
-- avoid parallel implementations for the same engineering capability.
-
-A short-term patch that leaves two control planes is normally worse than a focused refactor.
-
-## 10. Tests
-
-Add tests when they protect meaningful behavior:
-
-- contract compatibility;
-- provider replacement;
-- lifecycle ownership;
-- routing;
-- self-hosting;
-- side-effect boundaries;
-- a delivery regression that is likely to recur.
-
-Do not add tests mechanically when they do not improve confidence in the changed behavior.
-
-## 11. Self-hosting acceptance
-
-DevTool itself is the strongest architecture test.
-
-A meaningful DevTool change should preserve:
-
-```text
-DevTool N
-  -> configured Project Extension
-  -> configured services/providers
-  -> build DevTool N+1
-  -> N+1 inspect/verify
-  -> package
-```
-
-The repository CI also validates N+1 to N+2 self-hosting.
-
-If DevTool requires a special hidden path to develop itself, the architecture is incomplete.
-
-## 12. Remote environments
-
-A remote runtime such as Railway should change provider selection through configuration/profile, not create a second architecture.
-
-For the current repository:
-
-```bash
-DEVTOOL_PROFILES=railway ...
-```
-
-selects the local environment provider appropriate inside the already-running remote container.
-
-The same project commands and contracts remain valid.
-
-## 13. Final pre-merge checklist
-
-Before merge:
-
-- configuration validates;
-- project inspection resolves;
-- code intelligence verifies when relevant;
-- document intelligence is exercised on a representative document when relevant;
-- project verification passes;
-- self-host path passes for Core/runtime changes;
-- no provider-specific logic leaked into Core or Agent Gateway;
-- no project-local bootstrap was added for dependencies already owned by DevTool;
-- documentation reflects any new stable capability or configuration surface.
-
-## Related documentation
-
-- [Quick Start](quick-start.md)
-- [Architecture Principles](architecture/principles.md)
-- [CLI Reference](reference/cli.md)
-- [Configuration Reference](reference/configuration.md)
-- [Product Design](product-design.md)
+See [Quick Start](quick-start.md), [Architecture Principles](architecture/principles.md), and the [CLI Reference](reference/cli.md).

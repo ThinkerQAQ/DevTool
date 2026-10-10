@@ -1,189 +1,62 @@
-# Replace or Add a Provider
+# Replace or add a provider
 
-This guide shows the preferred way to change an implementation behind an existing DevTool capability.
+[中文](../cn/how-to/replace-or-add-provider.md) · [Documentation](../index.md)
 
-The rule is:
+A provider is the implementation behind a stable service contract. Selection belongs in TOML; behavior belongs in code.
 
-> Existing capability + new implementation = provider + configuration, not a Core switch.
+## Switch to an existing provider
 
-## Replace a configured provider
-
-DevTool already demonstrates this with indexed code intelligence.
-
-Base configuration:
+The repository selects CodeGraph for indexed intelligence:
 
 ```toml
 [service.code-indexed]
 provider = "intelligence.codegraph"
 ```
 
-Alternative profile:
+Its `sourcegraph` profile replaces that binding:
 
 ```toml
 [profile.sourcegraph.service.code-indexed]
 provider = "intelligence.sourcegraph"
 ```
 
-Activate it:
+Use it without changing any agent tool:
 
 ```bash
-DEVTOOL_PROFILES=sourcegraph go run ./cmd/devtool code verify
+DEVTOOL_PROFILES=sourcegraph devtool config validate
+DEVTOOL_PROFILES=sourcegraph devtool project inspect --json
+DEVTOOL_PROFILES=sourcegraph devtool code doctor
 ```
 
-The Agent Gateway still exposes the same stable `code_context` intent.
+Sourcegraph itself must be configured and reachable for verification to pass.
 
-No agent workflow changes are required.
+## Add an implementation
 
----
+1. Inspect the service/SDK contract and check whether a maintained provider, SDK, or protocol already covers the requirement.
+2. Implement the new provider as a loadable extension; keep external tool arguments and credentials in the provider.
+3. Register the extension and its settings in `.devtool.toml`.
+4. Bind the service to the provider, either in the base configuration or a named profile.
+5. Run `config validate`, `project inspect --json`, and the relevant capability/Project Extension verification.
+6. Confirm the MCP capability name and contract stay unchanged for callers.
 
-## Add a new provider for an existing service
-
-### 1. Identify the stable service contract
-
-Find the SDK/service contract that expresses the engineering intent.
-
-Examples in the current repository include:
-
-- environment;
-- portable runtime;
-- indexed code intelligence;
-- realtime code intelligence;
-- SCM.
-
-If the existing contract already represents the behavior, do not create a new Core abstraction.
-
-### 2. Implement an Extension
-
-The extension should declare:
-
-- a stable extension/provider ID;
-- extension kind;
-- provided service(s);
-- required service(s), if any;
-- configurable settings when needed.
-
-Provider implementation details stay inside this extension.
-
-### 3. Add loader configuration
-
-Example shape:
+Example Go extension registration (replace the placeholders with the actual module/package):
 
 ```toml
-[extension.my-provider]
+[extension.example]
 loader = "go"
 
-[extension.my-provider.loader_config]
+[extension.example.loader_config]
 module = "."
-package = "./extensions/example/my-provider/cmd/provider"
+package = "./extensions/example/cmd/provider"
+
+[profile.example.service.code-indexed]
+provider = "intelligence.example"
 ```
 
-The loader configuration tells DevTool how to resolve the extension. Core should not gain a `switch` for the provider ID.
+The provider must register the indicated provider ID and satisfy the `code-indexed` contract. The TOML alone does not create an implementation.
 
-### 4. Wire the service
+## When Core may change
 
-```toml
-[service.some-capability]
-provider = "example.my-provider"
-```
+Only change Core for cross-provider mechanisms, such as routing, lifecycle, discovery, or protocol invariants. Adding a provider-specific switch to Core is not a supported extension strategy.
 
-Or make it optional through a profile:
-
-```toml
-[profile.my-provider.service.some-capability]
-provider = "example.my-provider"
-```
-
-### 5. Verify the resolved project
-
-```bash
-DEVTOOL_PROFILES=my-provider \
-go run ./cmd/devtool project inspect --json
-```
-
-Then run the capability-specific verification path.
-
-For code intelligence:
-
-```bash
-DEVTOOL_PROFILES=my-provider \
-go run ./cmd/devtool code doctor
-
-DEVTOOL_PROFILES=my-provider \
-go run ./cmd/devtool code verify
-```
-
-### 6. Verify the stable agent surface
-
-If the provider implements an existing capability, the normal Agent Gateway should not need new provider-specific tools.
-
-Run:
-
-```bash
-DEVTOOL_PROFILES=my-provider \
-go run ./cmd/devtool agent mcp --context codex
-```
-
-The expected result is stable intent-level tools such as `code_context`, not `my_provider_search` or other implementation-specific names.
-
----
-
-## When a new Capability is justified
-
-Create a new stable capability only when the project needs a new cross-provider engineering intent.
-
-Good reason:
-
-```text
-multiple projects need "artifact_publish"
-and more than one backend could implement it
-```
-
-Weak reason:
-
-```text
-one provider added a new method
-```
-
-Provider API surface and Agent Capability surface have different stability requirements.
-
----
-
-## When to change Core
-
-A Core change is justified when the missing behavior is mechanism shared by every implementation.
-
-Examples:
-
-- extension lifecycle semantics;
-- registry/routing mechanics;
-- configuration discovery;
-- generic protocol behavior;
-- ownership/cleanup rules;
-- generic policy/side-effect enforcement.
-
-A Core change is suspicious when it mentions:
-
-- one provider ID;
-- one project name;
-- one infrastructure vendor;
-- one tool's command-line flags.
-
----
-
-## Acceptance checklist
-
-A provider addition/replacement is complete when:
-
-- the provider is loadable through generic extension loading;
-- service selection is configuration-driven;
-- no provider-ID switch was added to Core;
-- the Project Extension still depends on the stable service;
-- the Agent Gateway still exposes stable intent;
-- relevant doctor/verify paths pass;
-- self-hosting still works when the change affects DevTool's own dependency graph.
-
-## Related
-
-- [Architecture Principles](../architecture/principles.md)
-- [Configuration Reference](../reference/configuration.md)
-- [Agent Guide](../agent-guide.md)
+Further reading: [Configuration Reference](../reference/configuration.md) and [Architecture Principles](../architecture/principles.md).

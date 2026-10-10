@@ -1,83 +1,32 @@
-# DevTool Documentation
+# DevTool documentation
 
-DevTool documentation is organized by reader intent.
+**Language:** English (default) · [简体中文](cn/index.md)
 
-If you are an agent entering the repository, start with [AGENTS.md](../AGENTS.md).
+The guides below describe the current repository, not a proposed future implementation.
 
-## Get started
+## Tutorial
 
-- [Quick Start](quick-start.md) — validate configuration, inspect the project, verify code intelligence, self-host and connect an agent.
-- [Agent Guide](agent-guide.md) — the end-to-end development workflow for AI agents.
+- [Quick Start](quick-start.md) — start from a checkout, validate the configuration, and inspect the project.
+- [Agent Guide](agent-guide.md) — let an MCP-capable agent work through DevTool.
 
-## Understand the model
+## Concepts
 
-- [Architecture Principles](architecture/principles.md) — Minimal Core, replaceable providers, configuration wiring, self-hosting and lifecycle ownership.
-- [Product Design](product-design.md) — broader product goals, scope and extension model.
-- [Implementation Design](implementation-design.md) — implementation-level design.
-- [Runtime Lifecycle](runtime-lifecycle.md) — process/container/MCP lifecycle ownership.
-- [Microkernel Audit](architecture/microkernel-audit-20261005.md) — architecture audit and closure criteria.
-- [Log Intelligence and Remote Transport](architecture/log-intelligence-and-remote-transport.md) — arbitrary-log context, local-first providers, and the boundary to a future self-hosted ChatGPT remote transport.
-- [Developer Control Plane Boundaries](architecture/developer-control-plane-boundaries-20261007.md) — final boundary decision for ChatGPT, Remote Gateway, DevTool, GoTiny, Capability cleanup, and remote/log optimization.
+- [Architecture Overview](architecture/overview.md) — Core, extensions, contracts, and providers.
+- [Architecture Principles](architecture/principles.md) — decision rules for extending DevTool.
 
 ## How-to
 
-- [Replace or Add a Provider](how-to/replace-or-add-provider.md) — add an implementation behind an existing capability without introducing a Core switch.
-- [Migration Plan](migration-plan.md) — migrate projects onto the current architecture.
+- [Replace or Add a Provider](how-to/replace-or-add-provider.md).
+- [Build, Verify, and Activate](how-to/self-host.md).
 
 ## Reference
 
-- [CLI Reference](reference/cli.md) — stable Core CLI and DevTool's current Project Commands.
-- [Configuration Reference](reference/configuration.md) — `.devtool.toml`, extension/service wiring and profiles.
+- [CLI Reference](reference/cli.md).
+- [Configuration Reference](reference/configuration.md).
 
-## Reading path by task
+## Scope and maintenance
 
-### "I just need to use DevTool"
-
-```text
-Quick Start
-  -> CLI Reference
-  -> Configuration Reference
-```
-
-### "I am an AI agent changing this repository"
-
-```text
-AGENTS.md
-  -> Agent Guide
-  -> Architecture Principles
-  -> relevant Reference/How-to
-```
-
-### "I want to add or replace an implementation"
-
-```text
-Architecture Principles
-  -> Replace or Add a Provider
-  -> Configuration Reference
-```
-
-### "I want to change Core"
-
-Read these first:
-
-```text
-Architecture Principles
-  -> Product Design
-  -> Runtime Lifecycle
-  -> Microkernel Audit
-```
-
-Then verify that the change is genuinely cross-project mechanism rather than provider/project behavior.
-
-## Documentation rule
-
-Keep these document types separate:
-
-- **Quick Start** gets the reader to a working result quickly.
-- **Guide** teaches a workflow.
-- **Architecture/Concepts** explains why the system is shaped this way.
-- **How-to** solves a specific engineering task.
-- **Reference** describes exact commands/configuration.
-- **Design documents** preserve deeper rationale and decisions.
-
-Do not turn one page into all six at once.
+- English pages in `docs/` are canonical. The corresponding Chinese pages live in `docs/cn/` with the same relative names.
+- Commands must match the current CLI; settings must match `.devtool.toml` and the configuration parser.
+- Explain prerequisites, a runnable example, expected result, and common failure modes. Do not present a future feature as implemented.
+- Avoid release diaries, approval language, generic claims, and generated summaries in the user guide. Git history and pull requests hold old project decisions.
