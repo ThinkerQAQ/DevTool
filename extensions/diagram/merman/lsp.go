@@ -1,8 +1,6 @@
 package merman
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,9 +8,9 @@ import (
 	"net/url"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 
+	"github.com/creachadair/jrpc2"
+	"github.com/creachadair/jrpc2/channel"
 	diagram "github.com/thinkerqaq/devtool/sdk/diagram"
 )
 
@@ -21,99 +19,6 @@ type evidence struct {
 	Symbols     []diagram.DiagramSymbol
 	Diagnostics []diagram.DiagramDiagnostic
 }
-type rpc struct {
-	in  io.Writer
-	out *bufio.Reader
-}
-
-func (c *rpc) send(id int, method string, params any) error {
-	msg := map[string]any{"jsonrpc": "2.0", "method": method, "params": params}
-	if id > 0 {
-		msg["id"] = id
-	}
-	return c.write(msg)
-}
-func (c *rpc) write(msg any) error {
-	body, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	if _, err = c.in.Write([]byte(fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body)))); err != nil {
-		return err
-	}
-	_, err = c.in.Write(body)
-	return err
-}
-func (c *rpc) next() (json.RawMessage, error) {
-	size := -1
-	for {
-		line, err := c.out.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			break
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if ok && strings.EqualFold(strings.TrimSpace(key), "Content-Length") {
-			n, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil {
-				return nil, err
-			}
-			size = n
-		}
-	}
-	if size <= 0 || size > 8<<20 {
-		return nil, fmt.Errorf("invalid LSP frame size %d", size)
-	}
-	body := make([]byte, size)
-	if _, err := io.ReadFull(c.out, body); err != nil {
-		return nil, err
-	}
-	if !json.Valid(body) || !bytes.HasPrefix(bytes.TrimSpace(body), []byte("{")) {
-		return nil, fmt.Errorf("invalid LSP message")
-	}
-	return body, nil
-}
-func (c *rpc) call(id int, method string, params any) (json.RawMessage, error) {
-	if err := c.send(id, method, params); err != nil {
-		return nil, err
-	}
-	for {
-		payload, err := c.next()
-		if err != nil {
-			return nil, err
-		}
-		var msg struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(payload, &msg); err != nil {
-			return nil, err
-		}
-		if msg.Method != "" {
-			if len(msg.ID) > 0 {
-				if err := c.write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID), "result": nil}); err != nil {
-					return nil, err
-				}
-			}
-			continue
-		}
-		if string(msg.ID) == strconv.Itoa(id) {
-			if msg.Error != nil {
-				return nil, fmt.Errorf("%s: %s", method, msg.Error.Message)
-			}
-			return msg.Result, nil
-		}
-	}
-}
-
 type lspRange struct {
 	Start struct {
 		Line int `json:"line"`
@@ -179,7 +84,16 @@ func (e *Extension) language(ctx context.Context, root, path string, source []by
 		return nil, err
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
-	c := &rpc{in: stdin, out: bufio.NewReader(stdout)}
+	// The mature JSON-RPC SDK owns LSP Content-Length framing, request IDs,
+	// concurrent notifications and server callbacks. Stop the child before
+	// closing the client to release the reader goroutine deterministically.
+	client := jrpc2.NewClient(channel.LSP(stdout, stdin), &jrpc2.ClientOptions{
+		OnCallback: func(context.Context, *jrpc2.Request) (any, error) {
+			// Match the previous protocol bridge's empty callback response.
+			return nil, nil
+		},
+	})
+	defer func() { _ = cmd.Process.Kill(); _ = client.Close() }()
 	rootURI := (&url.URL{Scheme: "file", Path: filepath.ToSlash(root)}).String()
 	uri := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
 	init := map[string]any{
@@ -190,16 +104,18 @@ func (e *Extension) language(ctx context.Context, root, path string, source []by
 		},
 		"workspaceFolders": []map[string]string{{"uri": rootURI, "name": filepath.Base(root)}},
 	}
-	if _, err := c.call(1, "initialize", init); err != nil {
+	var initializeResult json.RawMessage
+	if err := client.CallResult(run, "initialize", init, &initializeResult); err != nil {
 		return nil, fmt.Errorf("Merman initialize: %w", err)
 	}
-	if err := c.send(0, "initialized", map[string]any{}); err != nil {
+	if err := client.Notify(run, "initialized", map[string]any{}); err != nil {
 		return nil, err
 	}
-	if err := c.send(0, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "markdown", "version": 1, "text": string(source)}}); err != nil {
+	if err := client.Notify(run, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "markdown", "version": 1, "text": string(source)}}); err != nil {
 		return nil, err
 	}
-	raw, err := c.call(2, "textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}})
+	var raw json.RawMessage
+	err = client.CallResult(run, "textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}}, &raw)
 	if err != nil {
 		return nil, fmt.Errorf("Merman document symbols: %w", err)
 	}
@@ -209,7 +125,8 @@ func (e *Extension) language(ctx context.Context, root, path string, source []by
 	}
 	ev := &evidence{Symbols: []diagram.DiagramSymbol{}, Diagnostics: []diagram.DiagramDiagnostic{}}
 	flatten(symbols, 0, &ev.Symbols, &ev.Truncated)
-	diagRaw, err := c.call(3, "textDocument/diagnostic", map[string]any{"textDocument": map[string]string{"uri": uri}})
+	var diagRaw json.RawMessage
+	err = client.CallResult(run, "textDocument/diagnostic", map[string]any{"textDocument": map[string]string{"uri": uri}}, &diagRaw)
 	if err != nil {
 		return nil, fmt.Errorf("Merman diagnostics: %w", err)
 	}

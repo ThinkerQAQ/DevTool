@@ -3,6 +3,7 @@ module github.com/thinkerqaq/devtool
 go 1.27.1
 
 require (
+	github.com/creachadair/jrpc2 v1.3.5
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/yuin/goldmark v1.8.6
@@ -10,6 +11,7 @@ require (
 )
 
 require (
+	github.com/creachadair/mds v0.26.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
