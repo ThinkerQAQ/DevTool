@@ -36,6 +36,8 @@ devtool agent mcp --context codex
 
 实际参数应以 MCP 返回的 Tool Schema 为准。
 
+查询特定文件或目录时，为 `code_context` 指定项目相对路径，例如 `"path":"go"`。索引检索先按目录过滤，再排序和截断，不再返回 Android 等目录外的结果。查询符号引用时还应传入 `symbol` 和具体文件路径。CodeGraph Provider 会拒绝绝对路径、无效路径及逃出项目根目录的路径。
+
 ## 开发循环
 
 1. 明确开发意图，使用 DevTool 查询相关代码与 Contract。

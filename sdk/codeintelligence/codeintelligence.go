@@ -31,6 +31,7 @@ type VerifyResponse struct {
 type SearchRequest struct {
 	Workspace
 	Query      string `json:"query"`
+	Path       string `json:"path,omitempty"`
 	Repository string `json:"repository,omitempty"`
 	Revision   string `json:"revision,omitempty"`
 	Limit      int    `json:"limit,omitempty"`

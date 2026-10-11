@@ -179,27 +179,36 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if limit <= 0 {
 			limit = 20
 		}
+		scope, err := resolveSearchScope(request.Workspace, request.Path)
+		if err != nil {
+			return nil, err
+		}
 		if request.Discovery {
-			return e.guardSearchResult(ctx, request.Workspace, func() (json.RawMessage, error) {
-				return e.discover(ctx, request.Workspace, query, limit)
+			return e.guardSearchResult(ctx, request.Workspace, scope, limit, func() (json.RawMessage, error) {
+				return e.discover(ctx, request.Workspace, query, limit, scope)
 			})
+		}
+		searchLimit := limit
+		if scope != "" {
+			// Request enough symbols to apply the directory filter before truncation.
+			searchLimit = min(max(limit*10, 100), 500)
 		}
 		args, err := json.Marshal(map[string]any{
 			"query":   query,
-			"limit":   limit,
+			"limit":   searchLimit,
 			"compact": true,
 		})
 		if err != nil {
 			return nil, err
 		}
-		return e.searchSymbols(ctx, request.Workspace, args)
+		return e.searchSymbols(ctx, request.Workspace, args, scope, limit)
 	default:
 		return nil, fmt.Errorf("%s does not support method %q", ExtensionID, method)
 	}
 }
 
-func (e *Extension) searchSymbols(ctx context.Context, workspace codeintelligence.Workspace, args json.RawMessage) (json.RawMessage, error) {
-	return e.guardSearchResult(ctx, workspace, func() (json.RawMessage, error) {
+func (e *Extension) searchSymbols(ctx context.Context, workspace codeintelligence.Workspace, args json.RawMessage, scope string, limit int) (json.RawMessage, error) {
+	return e.guardSearchResult(ctx, workspace, scope, limit, func() (json.RawMessage, error) {
 		return e.runTool(ctx, workspace, "codegraph_symbol_search", args)
 	})
 }
@@ -207,6 +216,8 @@ func (e *Extension) searchSymbols(ctx context.Context, workspace codeintelligenc
 func (e *Extension) guardSearchResult(
 	ctx context.Context,
 	workspace codeintelligence.Workspace,
+	scope string,
+	limit int,
 	query func() (json.RawMessage, error),
 ) (json.RawMessage, error) {
 	if err := e.ensureFresh(ctx, workspace); err != nil {
@@ -221,7 +232,7 @@ func (e *Extension) guardSearchResult(
 		return nil, err
 	}
 	if !stale {
-		return filtered, nil
+		return filterSearchResultScope(workspace, filtered, scope, limit)
 	}
 	if err := e.forceReindex(ctx, workspace); err != nil {
 		return nil, err
@@ -231,7 +242,10 @@ func (e *Extension) guardSearchResult(
 		return nil, err
 	}
 	filtered, _, err = filterSearchResultPaths(workspace, raw)
-	return filtered, err
+	if err != nil {
+		return nil, err
+	}
+	return filterSearchResultScope(workspace, filtered, scope, limit)
 }
 
 func (e *Extension) forceReindex(ctx context.Context, workspace codeintelligence.Workspace) error {
@@ -478,15 +492,20 @@ type discoveryCandidate struct {
 	Snippet     string  `json:"snippet,omitempty"`
 }
 
-func (e *Extension) discover(ctx context.Context, workspace codeintelligence.Workspace, query string, limit int) (json.RawMessage, error) {
+func (e *Extension) discover(ctx context.Context, workspace codeintelligence.Workspace, query string, limit int, scope string) (json.RawMessage, error) {
 	keywords := discoveryKeywords(query)
 	candidates := map[string]discoveryCandidate{}
+	searchLimit := limit
+	if scope != "" {
+		// Bound upstream overfetch so narrow scopes do not lose all candidates.
+		searchLimit = min(max(limit*10, 100), 200)
+	}
 
 	if len(keywords) != 0 {
 		// Symbol search has the cheaper cold-start path in CodeGraph and warms
 		// the persistent graph session. Run one focused symbol query first,
 		// then use repository-wide pattern discovery against the warm provider.
-		if err := e.mergeSymbolSearch(ctx, workspace, candidates, keywords[0], limit); err != nil {
+		if err := e.mergeSymbolSearch(ctx, workspace, candidates, keywords[0], searchLimit); err != nil {
 			return nil, err
 		}
 
@@ -497,7 +516,7 @@ func (e *Extension) discover(ctx context.Context, workspace codeintelligence.Wor
 		args, err := json.Marshal(map[string]any{
 			"pattern": strings.Join(patternParts, "|"),
 			"scope":   "any",
-			"limit":   max(limit*3, 20),
+			"limit":   max(searchLimit*3, 20),
 		})
 		if err != nil {
 			return nil, err
@@ -509,16 +528,17 @@ func (e *Extension) discover(ctx context.Context, workspace codeintelligence.Wor
 		mergePatternCandidates(candidates, raw, keywords)
 
 		for _, keyword := range keywords[1:min(len(keywords), 6)] {
-			if err := e.mergeSymbolSearch(ctx, workspace, candidates, keyword, limit); err != nil {
+			if err := e.mergeSymbolSearch(ctx, workspace, candidates, keyword, searchLimit); err != nil {
 				return nil, err
 			}
 		}
 	}
 
+	filterDiscoveryCandidates(workspace, candidates, scope)
 	if needsEntryPointDiscovery(keywords) || len(candidates) < min(limit, 5) {
 		args, _ := json.Marshal(map[string]any{
 			"entryType": "main",
-			"limit":     max(limit, 10),
+			"limit":     max(searchLimit, 10),
 			"compact":   true,
 		})
 		raw, err := e.runTool(ctx, workspace, "codegraph_find_entry_points", args)
@@ -527,6 +547,9 @@ func (e *Extension) discover(ctx context.Context, workspace codeintelligence.Wor
 		}
 	}
 
+	// Filter before ranking and limit, otherwise out-of-scope hits displace
+	// eligible candidates in small responses.
+	filterDiscoveryCandidates(workspace, candidates, scope)
 	pathText := map[string]string{}
 	for _, candidate := range candidates {
 		pathText[candidate.Path] += " " + candidate.Name + " " + candidate.Snippet

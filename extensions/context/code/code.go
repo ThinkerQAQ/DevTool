@@ -89,6 +89,7 @@ func (e *Extension) build(ctx context.Context, request codecontext.BuildRequest)
 	indexedRequest := codeintelligence.SearchRequest{
 		Workspace: request.Workspace,
 		Query:     query,
+		Path:      request.Path,
 		Limit:     request.Limit,
 		Discovery: request.Symbol == "",
 	}

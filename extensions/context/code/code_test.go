@@ -135,3 +135,42 @@ func TestNoUsableBranchFails(t *testing.T) {
 		t.Fatal("expected no usable branch to fail")
 	}
 }
+
+func TestBuildForwardsPathToIndexedSearch(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "go"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	reg := &fakeRegistrar{services: map[string]service.Invoker{
+		codeintelligence.IndexedServiceName: service.Func(func(_ context.Context, method string, payload json.RawMessage) (json.RawMessage, error) {
+			calls++
+			if method != codeintelligence.MethodSearch {
+				t.Fatalf("method=%q", method)
+			}
+			var req codeintelligence.SearchRequest
+			if err := json.Unmarshal(payload, &req); err != nil {
+				t.Fatal(err)
+			}
+			if req.Path != "go" || req.Query != "Find AreaAnchor" || req.Limit != 4 || !req.Discovery {
+				t.Fatalf("indexed request=%+v", req)
+			}
+			return json.RawMessage(`{"results":[]}`), nil
+		}),
+		codeintelligence.RealtimeServiceName: service.Func(func(_ context.Context, method string, _ json.RawMessage) (json.RawMessage, error) {
+			t.Fatalf("unexpected realtime method %s", method)
+			return nil, nil
+		}),
+	}}
+	ext := New()
+	ext.services = reg
+	response, err := ext.build(t.Context(), codecontext.BuildRequest{
+		Workspace: codeintelligence.Workspace{Root: root}, Objective: "Find AreaAnchor", Path: "go", Limit: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || len(response.Indexed) == 0 {
+		t.Fatalf("calls=%d response=%+v", calls, response)
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/thinkerqaq/devtool/core/agent/mcpbridge"
@@ -131,6 +133,11 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 		if revision := strings.TrimSpace(request.Revision); revision != "" {
 			query += " rev:" + revision
 		}
+		fileFilter, err := sourcegraphScopeFilter(request.Path)
+		if err != nil {
+			return nil, err
+		}
+		query += fileFilter
 		limit := request.Limit
 		if limit <= 0 {
 			limit = 20
@@ -158,4 +165,24 @@ func sourcegraphAuthorization(token string) string {
 		return ""
 	}
 	return "token " + token
+}
+
+// sourcegraphScopeFilter keeps the shared SearchRequest.Path contract when the
+// indexed provider is switched from CodeGraph to Sourcegraph.
+func sourcegraphScopeFilter(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("Sourcegraph search scope must be project-relative: %q", path)
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("Sourcegraph search scope escapes project root: %q", path)
+	}
+	if clean == "." {
+		return "", nil
+	}
+	return " file:^" + regexp.QuoteMeta(clean) + "(/|$)", nil
 }
