@@ -297,7 +297,7 @@ func hasDiagram(source []byte) bool { return len(diagramSources(source)) > 0 }
 // validateCandidate applies the patch only inside a temporary isolated file
 // tree. The configured renderer validates changed diagram blocks before the
 // actual worktree is modified.
-func (p *Gate) validateCandidate(ctx context.Context, path string, before, patch []byte) error {
+func (p *Gate) validateCandidate(ctx context.Context, path string, before, patch []byte, hasDiagramContext bool) error {
 	root, err := os.MkdirTemp("", "devtool-diagram-preview-")
 	if err != nil {
 		return err
@@ -322,6 +322,11 @@ func (p *Gate) validateCandidate(ctx context.Context, path string, before, patch
 	}
 	old := diagramSources(before)
 	fresh := diagramSources(after)
+	// The candidate AST, not text heuristics over patch lines, is the final
+	// authority for requiring diagram_context on introduced diagrams.
+	if (len(old) > 0 || len(fresh) > 0) && !hasDiagramContext {
+		return fmt.Errorf("patch requires diagram_context for %s", path)
+	}
 	seen := map[diagramSource]int{}
 	for _, d := range old {
 		seen[d]++
@@ -462,7 +467,7 @@ func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage
 		return nil, fmt.Errorf("patch check failed: %w", err)
 	}
 	if kind == "markdown" {
-		if err := p.validateCandidate(commandContext, path, file, patch); err != nil {
+		if err := p.validateCandidate(commandContext, path, file, patch, proof.contexts["diagram_context"]); err != nil {
 			return nil, err
 		}
 	}

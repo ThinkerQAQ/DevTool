@@ -255,3 +255,26 @@ func TestPolicyUnchangedDiagramDoesNotCallRenderer(t *testing.T) {
 		t.Fatalf("ordinary Markdown text edit failed: %v", err)
 	}
 }
+
+// Extended fenced-code info strings are parsed by Goldmark as Mermaid even
+// though the patch-line heuristic does not recognize their full label.
+func TestPolicyCandidateASTRequiresDiagramContext(t *testing.T) {
+	g, root := setupContextGateway(t)
+	orig, err := os.ReadFile(filepath.Join(root, "docs/guide.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := contextData(t, g, "document_context", "docs/guide.md")
+	token := tokenFrom(doc)
+	if token == "" {
+		t.Fatal("missing document context token")
+	}
+	patch := makePatch(t, root, "docs/guide.md", "# Guide\n\nBefore change.\n\n```mermaid {#graph}\ngraph TD\n  A --> B\n```\n")
+	if _, err := apply(t, g, token, patch); err == nil || !strings.Contains(err.Error(), "diagram_context") {
+		t.Fatalf("candidate bypassed diagram context: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "docs/guide.md"))
+	if err != nil || string(after) != string(orig) {
+		t.Fatalf("unapproved graph changed source: %v", err)
+	}
+}
