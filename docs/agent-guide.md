@@ -36,6 +36,8 @@ Use `document_context` when editing Markdown, and both `document_context` and `d
 
 Use the tool schemas returned by the MCP gateway. Do not assume all tools have the same arguments in every release.
 
+For code searches, pass `code_context.path` when you need a file or directory within the project (for example `"path":"go"`). Indexed search results must stay within that path; directories are filtered before ranking and truncation. For symbol references, also provide `symbol` and a concrete file path. Absolute paths, missing paths, and paths that escape the project root are rejected by the local CodeGraph Provider.
+
 ## Work on a change
 
 1. Determine the requested engineering intent and inspect the related contract.
