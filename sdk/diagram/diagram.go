@@ -1,5 +1,23 @@
 package diagram
 
+import (
+	"path/filepath"
+	"strings"
+)
+
+// SourceLanguage returns the supported standalone diagram source language.
+// Rendered assets (SVG/PNG) are not editable source diagrams.
+func SourceLanguage(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mmd", ".mermaid":
+		return "mermaid"
+	case ".puml", ".plantuml":
+		return "plantuml"
+	default:
+		return ""
+	}
+}
+
 const (
 	RenderServiceName       = "diagram-render"
 	RenderMethod            = "render"

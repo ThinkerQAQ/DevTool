@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	diagram "github.com/thinkerqaq/devtool/sdk/diagram"
@@ -61,6 +63,9 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	}
 	if req.Index < 0 {
 		return nil, fmt.Errorf("index must be positive")
+	}
+	if language := diagram.SourceLanguage(req.Path); language != "" {
+		return e.inspectStandalone(ctx, req, language)
 	}
 	svc, ok := e.registry.Service(document.ServiceName)
 	if !ok {
@@ -177,4 +182,84 @@ func findDiagramSection(outline []document.Section, line int) *sectionIdentity {
 	}
 	walk(outline)
 	return found
+}
+
+// inspectStandalone reuses the same renderer/intelligence contracts used for
+// Markdown blocks. It does not invent another diagram parser or model.
+func (e *Extension) inspectStandalone(ctx context.Context, req diagram.ContextRequest, language string) (json.RawMessage, error) {
+	if filepath.IsAbs(req.Path) || strings.Contains(req.Path, "\\") {
+		return nil, fmt.Errorf("standalone diagram path must be project-relative")
+	}
+	root, err := filepath.EvalSymlinks(req.Root)
+	if err != nil {
+		return nil, err
+	}
+	candidate, err := filepath.EvalSymlinks(filepath.Join(root, req.Path))
+	if err != nil {
+		return nil, err
+	}
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("diagram source escapes project root")
+	}
+	info, err := os.Stat(candidate)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 256<<10 {
+		return nil, fmt.Errorf("standalone diagram must be a nonempty regular source file of at most 256 KiB")
+	}
+	source, err := os.ReadFile(candidate)
+	if err != nil {
+		return nil, err
+	}
+	if req.Index > 1 {
+		return nil, fmt.Errorf("diagram #%d does not exist", req.Index)
+	}
+	sum := sha256.Sum256(source)
+	result := entry{Index: 1, Language: language, StartLine: 1, EndLine: strings.Count(string(source), "\n") + 1, SHA256: hex.EncodeToString(sum[:]), Status: "found"}
+	if req.IncludeSource {
+		result.Source = string(source)
+	}
+	providerStatus := "not_requested"
+	if req.Analyze {
+		providerStatus = "unconfigured"
+		if analyzer, ok := e.registry.Service(diagram.IntelligenceServiceName); ok {
+			request, _ := json.Marshal(diagram.IntelligenceRequest{Root: root, Path: relative, Diagrams: []diagram.DiagramSource{{Index: 1, Language: language, Source: string(source), StartLine: 1, EndLine: result.EndLine}}})
+			raw, err := analyzer.Invoke(ctx, diagram.IntelligenceMethod, request)
+			if err != nil {
+				return nil, fmt.Errorf("analyze standalone diagram: %w", err)
+			}
+			var analyzed diagram.IntelligenceResponse
+			if err := json.Unmarshal(raw, &analyzed); err != nil {
+				return nil, err
+			}
+			providerStatus = analyzed.DiagnosticsStatus
+			if len(analyzed.Results) > 0 {
+				result.Intelligence = &analyzed.Results[0]
+			}
+		}
+		if result.Intelligence == nil {
+			result.Intelligence = &diagram.IntelligenceResult{Index: 1, Status: providerStatus, Complete: false}
+		}
+	}
+	if req.Render {
+		renderer, ok := e.registry.Service(diagram.RenderServiceName)
+		if !ok {
+			return nil, fmt.Errorf("diagram-render service is not configured")
+		}
+		request, _ := json.Marshal(diagram.RenderRequest{Language: language, Source: string(source)})
+		raw, err := renderer.Invoke(ctx, diagram.RenderMethod, request)
+		if err != nil {
+			result.Status = "failed"
+			result.Diagnostic = err.Error()
+		} else {
+			var rendered diagram.RenderResult
+			if err := json.Unmarshal(raw, &rendered); err != nil {
+				return nil, err
+			}
+			result.Status, result.Renderer, result.Diagnostic, result.ArtifactPath = rendered.Status, rendered.Renderer, rendered.Diagnostic, rendered.ArtifactPath
+		}
+	}
+	return json.Marshal(map[string]any{"objective": req.Objective, "path": filepath.ToSlash(relative), "total_diagrams": 1, "reviewed_diagrams": 1, "render_requested": req.Render, "analysis_requested": req.Analyze, "diagnostics_status": providerStatus, "results": []entry{result}, "summary": map[string]int{result.Status: 1}})
 }

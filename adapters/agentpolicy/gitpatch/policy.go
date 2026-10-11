@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/thinkerqaq/devtool/core/config"
+	diagramcontract "github.com/thinkerqaq/devtool/sdk/diagram"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
@@ -25,7 +26,7 @@ import (
 
 // Gate is a deterministic MCP-boundary policy, not a second agent.
 // Git owns unified-patch parsing and application. Only a scoped successful
-// matching code/document/diagram contexts authorize a one-file mutation.
+// matching code/document/diagram context authorizes a one-file mutation.
 type Gate struct {
 	root            string
 	maxBytes        int
@@ -84,7 +85,7 @@ func (p *Gate) WithDiagramValidator(validator func(context.Context, string, stri
 func (p *Gate) Tool() json.RawMessage {
 	raw, _ := json.Marshal(map[string]any{
 		"name":        "workspace_apply_patch",
-		"description": "Apply a Git text patch to one existing file after scoped context: code_context for code, document_context for Markdown, and diagram_context for embedded Mermaid/PlantUML diagrams; log files are read-only and use log_context for inspection.",
+		"description": "Apply a Git text patch to one existing file after scoped context: code_context for code, document_context for Markdown, and diagram_context for embedded or standalone Mermaid/PlantUML diagrams; log files are read-only and use log_context for inspection.",
 		"annotations": map[string]any{"readOnlyHint": false, "destructiveHint": true, "openWorldHint": false},
 		"inputSchema": map[string]any{
 			"type": "object",
@@ -120,7 +121,9 @@ func (p *Gate) Attest(ctx context.Context, tool string, args, result json.RawMes
 	if kind == "log" || kind == "diagram-standalone" {
 		return result
 	}
-	if (kind == "markdown") != (tool != "code_context") {
+	if kind == "code" && tool != "code_context" ||
+		kind == "markdown" && tool == "code_context" ||
+		kind == "diagram-source" && tool != "diagram_context" {
 		return result
 	}
 
@@ -150,6 +153,9 @@ func (p *Gate) Attest(ctx context.Context, tool string, args, result json.RawMes
 		if err != nil {
 			return result
 		}
+		if kind == "diagram-source" && !validStandaloneContext(path, file, data) {
+			return result
+		}
 		head, err := p.git(ctx, nil, "rev-parse", "HEAD")
 		if err != nil {
 			return result
@@ -172,11 +178,14 @@ func (p *Gate) Attest(ctx context.Context, tool string, args, result json.RawMes
 		prior.head, prior.digest, prior.expires = currentHead, digest, expires
 		p.evidence[path] = prior
 		required := []string{"code_context"}
-		if kind == "markdown" {
+		switch kind {
+		case "markdown":
 			required = []string{"document_context"}
 			if needsDiagram {
 				required = append(required, "diagram_context")
 			}
+		case "diagram-source":
+			required = []string{"diagram_context"}
 		}
 		missing := make([]string, 0)
 		for _, name := range required {
@@ -248,14 +257,33 @@ func validContext(tool, path string, value map[string]json.RawMessage) bool {
 	}
 }
 
+// validStandaloneContext ensures the provider inspected the exact source,
+// not only a same-path response with unrelated diagram metadata.
+func validStandaloneContext(path string, content []byte, data map[string]json.RawMessage) bool {
+	var results []struct {
+		Index    int    `json:"index"`
+		Language string `json:"language"`
+		SHA256   string `json:"sha256"`
+	}
+	if json.Unmarshal(data["results"], &results) != nil || len(results) != 1 {
+		return false
+	}
+	hash := sha256.Sum256(content)
+	return results[0].Index == 1 && results[0].Language == diagramcontract.SourceLanguage(path) &&
+		results[0].SHA256 == fmt.Sprintf("%x", hash)
+}
+
 func contextKind(path string) string {
+	if diagramcontract.SourceLanguage(path) != "" {
+		return "diagram-source"
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".md", ".markdown":
 		return "markdown"
 	case ".log":
 		return "log"
-	case ".mmd", ".mermaid", ".puml", ".plantuml", ".svg", ".png", ".jpg", ".jpeg", ".webp":
+	case ".svg", ".png", ".jpg", ".jpeg", ".webp":
 		return "diagram-standalone"
 	default:
 		return "code"
@@ -322,6 +350,10 @@ func (p *Gate) validateCandidate(ctx context.Context, path string, before, patch
 	}
 	old := diagramSources(before)
 	fresh := diagramSources(after)
+	if language := diagramcontract.SourceLanguage(path); language != "" {
+		old = []diagramSource{{language: language, source: string(before)}}
+		fresh = []diagramSource{{language: language, source: string(after)}}
+	}
 	// The candidate AST, not text heuristics over patch lines, is the final
 	// authority for requiring diagram_context on introduced diagrams.
 	if (len(old) > 0 || len(fresh) > 0) && !hasDiagramContext {
@@ -409,11 +441,14 @@ func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage
 		return nil, fmt.Errorf("%s is not supported by workspace_apply_patch; use log_context for log queries", path)
 	}
 	required := []string{"code_context"}
-	if kind == "markdown" {
+	switch kind {
+	case "markdown":
 		required = []string{"document_context"}
 		if hasDiagram(file) || addsDiagramFence(request.Patch) {
 			required = append(required, "diagram_context")
 		}
+	case "diagram-source":
+		required = []string{"diagram_context"}
 	}
 	for _, name := range required {
 		if !proof.contexts[name] {
@@ -466,7 +501,7 @@ func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage
 	if _, err := p.git(commandContext, patch, "apply", "--check", "-"); err != nil {
 		return nil, fmt.Errorf("patch check failed: %w", err)
 	}
-	if kind == "markdown" {
+	if kind == "markdown" || kind == "diagram-source" {
 		if err := p.validateCandidate(commandContext, path, file, patch, proof.contexts["diagram_context"]); err != nil {
 			return nil, err
 		}

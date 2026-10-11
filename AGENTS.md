@@ -21,13 +21,13 @@ Start the configured MCP gateway with `devtool agent mcp --context codex` (or `a
 
 - `code_context`: indexed and realtime code context;
 - `document_context`: inspect Markdown before editing it;
-- `diagram_context`: inspect embedded Mermaid/PlantUML diagrams before changing them (in addition to `document_context`);
+- `diagram_context`: inspect standalone Mermaid/PlantUML sources, or Markdown-embedded diagrams (in addition to `document_context` for Markdown);
 - `log_context`: query project logs or journald for investigations (read-only);
 - `project_<command>`: commands provided by the Project Extension;
 - `scm_publish`: source publishing through the configured SCM provider;
 - `workspace_apply_patch`: when enabled, apply a single-file Git patch using a scoped, one-time context token.
 
-Before editing Go or other code, call `code_context`; before editing any Markdown, call `document_context`; before editing Mermaid/PlantUML blocks in Markdown, call **both** `document_context` and `diagram_context` for that path. Investigate log files or journald with `log_context`, not raw Shell log readers. If using `workspace_apply_patch`, the Gateway rejects mutations without the required context evidence.
+Before editing Go or other code, call `code_context`; before editing Markdown, call `document_context`; for Markdown-embedded Mermaid/PlantUML blocks, call **both** `document_context` and `diagram_context`; for standalone `.mmd`, `.mermaid`, `.puml`, and `.plantuml` source files, call `diagram_context` alone. Changed diagrams must pass the configured renderer before patch application. Investigate log files or journald with `log_context`, not raw Shell log readers. If using `workspace_apply_patch`, the Gateway rejects mutations without the required context evidence.
 
 Do not directly integrate CodeGraph, Serena, Sourcegraph, Dagger, or GitHub into agent workflows when DevTool already provides the intent.
 
