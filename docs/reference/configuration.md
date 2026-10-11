@@ -97,11 +97,14 @@ Disabled by default. The policy exposes `workspace_apply_patch` on the existing 
 ```bash
 devtool config path
 devtool config validate
+devtool config check
 devtool project inspect --json
 devtool init --json
 ```
 
-The first three commands detect parsing, bindings, and project wiring issues. `init` additionally checks active provider readiness. Missing executables and credentials are environment issues, not signals to build a second dependency manager into DevTool.
+`config validate` is intentionally fast: it validates the parsed TOML and basic configuration rules, without loading extension binaries. `config check` performs a **runtime wiring preflight** using the same Host and official MCP Gateway registration as `agent mcp`: it resolves configured Provider modules, checks selected services and extension dependencies, detects duplicate MCP tool names, and validates each tool definition. It does not execute project commands, verify credential availability, run Provider readiness checks, or listen on a network port. For those extra readiness checks use `init`.
+
+A first `config check` may be substantially slower if Go-module extensions require compilation; subsequent runs benefit from the Go build cache. Provider settings and credentials remain Provider-owned; do not build a second dependency manager into DevTool.
 
 ## Boundaries
 

@@ -8,6 +8,7 @@ From the repository root, use the installed `devtool` CLI when available:
 
 ```bash
 DEVTOOL_PROFILES=local devtool config validate
+DEVTOOL_PROFILES=local devtool config check
 DEVTOOL_PROFILES=local devtool project inspect --json
 DEVTOOL_PROFILES=local devtool init --json
 DEVTOOL_PROFILES=local devtool code doctor

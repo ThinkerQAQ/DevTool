@@ -93,10 +93,13 @@ context_ttl_seconds = 600
 ```bash
 devtool config path
 devtool config validate
+devtool config check
 devtool project inspect --json
 devtool init --json
 ```
 
-前三项检查配置与绑定，`init` 进一步检查 Provider 就绪情况。缺少可执行程序或凭据时，应修复环境而非改 Core 自行安装。
+`config validate` 是不加载扩展的快速 TOML 和基础规则校验。`config check` 使用**与 `agent mcp` 相同的 Host 和官方 MCP Gateway**，实际加载配置的 Provider、检查已选服务与依赖、检测 MCP 工具名冲突及工具定义错误；不执行项目构建/验证，不测试凭据的可用性，不运行 Provider readiness，也不会监听端口。需要完整环境就绪检查时再用 `init`。
+
+首次 `config check` 可能触发 Go-module 扩展编译而较慢，后续可使用 Go 缓存。Provider 设置与凭据仍由对应 Provider 负责，不在 Core 新建依赖管理器。
 
 不要在 TOML 中写 Shell 管道、业务算法、明文密钥或厂商特例；业务属于 Project Extension，集成属于 Provider。

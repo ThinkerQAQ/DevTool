@@ -36,7 +36,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	case "project":
 		return runProject(ctx, args[1:], out)
 	case "config":
-		return runConfig(args[1:], out)
+		return runConfig(ctx, args[1:], out)
 	case "code":
 		return runCode(ctx, args[1:], out)
 	case "agent":
@@ -90,9 +90,9 @@ func runProject(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
-func runConfig(args []string, out io.Writer) error {
+func runConfig(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("config requires subcommand: path or validate")
+		return errors.New("config requires subcommand: path, validate, or check")
 	}
 	p, err := project.Discover("")
 	if err != nil {
@@ -114,6 +114,24 @@ func runConfig(args []string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "VALID %s\n", p.ConfigPath)
 		return nil
+	case "check":
+		if len(args) != 1 {
+			return errors.New("config check does not accept arguments")
+		}
+		// Resolve the same configured Providers and service dependencies as
+		// normal project startup, but do not run any project commands.
+		h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
+		if err != nil {
+			return fmt.Errorf("config preflight: %w", err)
+		}
+		defer h.Close()
+		gateway := newPolicyGateway(h, projectAgentSession(h, "agent"))
+		tools, err := gateway.Preflight(ctx)
+		if err != nil {
+			return fmt.Errorf("config preflight: %w", err)
+		}
+		fmt.Fprintf(out, "CHECKED %s (%d MCP tools)\n", h.Project.ConfigPath, tools)
+		return nil
 	default:
 		return fmt.Errorf("unknown config subcommand %q", args[0])
 	}
@@ -128,6 +146,7 @@ func printUsage(out io.Writer) {
 	fmt.Fprintln(out, "  devtool project inspect [--json]")
 	fmt.Fprintln(out, "  devtool config path")
 	fmt.Fprintln(out, "  devtool config validate")
+	fmt.Fprintln(out, "  devtool config check")
 	fmt.Fprintln(out, "  devtool agent mcp [--context agent|codex|claude-code]")
 	fmt.Fprintln(out, "  devtool agent serve [--listen :8080] [--context agent] [--token-env DEVTOOL_AGENT_TOKEN]")
 	fmt.Fprintln(out, "  devtool code doctor")

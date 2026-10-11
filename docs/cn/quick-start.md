@@ -23,9 +23,10 @@ cd DevTool
 export DEVTOOL_PROFILES=local
 devtool config path
 devtool config validate
+devtool config check
 ```
 
-正常输出 `VALID <path>/.devtool.toml`。如果失败，检查 TOML 字段、Extension Loader 和 Service 绑定。
+`config validate` 快速输出 `VALID <path>/.devtool.toml`，只校验配置本身；`config check` 会实际加载 Provider 并核查服务依赖与 MCP 工具名，输出 `CHECKED <path>/.devtool.toml (N MCP tools)`。完整检查首次运行可能较慢，但不会执行项目构建/验证，也不会打开 MCP 监听端口。
 
 ## 3. 查看项目能力
 

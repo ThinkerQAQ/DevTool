@@ -78,6 +78,19 @@ func (g *Gateway) server(ctx context.Context) (*mcp.Server, error) {
 	return server, nil
 }
 
+// Preflight checks the exact MCP tool registration that will be used by
+// Serve/HTTPHandler, without opening any transport or executing tools.
+func (g *Gateway) Preflight(ctx context.Context) (int, error) {
+	if _, err := g.server(ctx); err != nil {
+		return 0, err
+	}
+	definitions, err := g.listTools(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return len(definitions), nil
+}
+
 // Serve uses the SDK's standard newline-delimited JSON stdio transport.
 func (g *Gateway) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	server, err := g.server(ctx)
@@ -151,7 +164,7 @@ func (g *Gateway) listTools(ctx context.Context) ([]json.RawMessage, error) {
 			if name == "" {
 				return nil, fmt.Errorf("extension %s exposed an unnamed tool", entry.ExtensionID)
 			}
-			if existing, ok := routes[name]; ok && existing != entry.Provider {
+			if _, ok := routes[name]; ok {
 				return nil, fmt.Errorf("agent tool %q is exposed by multiple extensions", name)
 			}
 			if !json.Valid(tool.Definition) {
