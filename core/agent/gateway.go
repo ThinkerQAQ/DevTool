@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/registry"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
@@ -28,10 +29,19 @@ type Gateway struct {
 	mu     sync.Mutex
 	routes map[string]agentsdk.ToolProvider
 	tools  []json.RawMessage
+	policy *patchGate
 }
 
 func NewGateway(reg *registry.Registry, session agentsdk.Session) *Gateway {
 	return &Gateway{registry: reg, session: session}
+}
+
+// WithAgentPolicy enables the opt-in deterministic execution boundary.
+func (g *Gateway) WithAgentPolicy(settings config.AgentPolicy) *Gateway {
+	if settings.Enabled {
+		g.policy = newPatchGate(g.session.ProjectRoot, settings)
+	}
+	return g
 }
 
 func (g *Gateway) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -192,6 +202,12 @@ func (g *Gateway) listTools(ctx context.Context) ([]json.RawMessage, error) {
 			definitions = append(definitions, append(json.RawMessage(nil), tool.Definition...))
 		}
 	}
+	if g.policy != nil {
+		if _, conflict := routes["workspace_apply_patch"]; conflict {
+			return nil, fmt.Errorf("workspace_apply_patch conflicts with a project agent tool")
+		}
+		definitions = append(definitions, g.policy.tool())
+	}
 	sort.Slice(definitions, func(i, j int) bool {
 		return toolName(definitions[i]) < toolName(definitions[j])
 	})
@@ -204,6 +220,9 @@ func (g *Gateway) callTool(ctx context.Context, name string, args json.RawMessag
 	if _, err := g.listTools(ctx); err != nil {
 		return nil, err
 	}
+	if g.policy != nil && name == "workspace_apply_patch" {
+		return g.policy.apply(ctx, args)
+	}
 	g.mu.Lock()
 	provider := g.routes[name]
 	g.mu.Unlock()
@@ -213,7 +232,11 @@ func (g *Gateway) callTool(ctx context.Context, name string, args json.RawMessag
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	return provider.CallTool(ctx, g.session, name, args)
+	result, err := provider.CallTool(ctx, g.session, name, args)
+	if err == nil && g.policy != nil && name == "code_context" {
+		result = g.policy.attest(ctx, args, result)
+	}
+	return result, err
 }
 
 func toolName(raw json.RawMessage) string {

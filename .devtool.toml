@@ -253,6 +253,12 @@ provider = "credential.github"
 [service.scm]
 provider = "scm.github"
 
+[agent.policy]
+enabled = true
+protected_branches = ["main", "master"]
+max_patch_bytes = 262144
+context_ttl_seconds = 600
+
 [code]
 workspaces = ["."]
 

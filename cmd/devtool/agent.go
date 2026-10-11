@@ -49,7 +49,7 @@ func runAgentMCP(ctx context.Context, args []string, out io.Writer) error {
 	}
 	defer h.Close()
 	session := projectAgentSession(h, strings.TrimSpace(*contextName))
-	return coreagent.NewGateway(h.Registry, session).Serve(ctx, os.Stdin, out)
+	return coreagent.NewGateway(h.Registry, session).WithAgentPolicy(h.Project.Config.Agent.Policy).Serve(ctx, os.Stdin, out)
 }
 
 func runAgentHTTP(ctx context.Context, args []string, out io.Writer) error {
@@ -86,7 +86,7 @@ func runAgentHTTP(ctx context.Context, args []string, out io.Writer) error {
 	defer h.Close()
 
 	session := projectAgentSession(h, strings.TrimSpace(*contextName))
-	gateway := coreagent.NewGateway(h.Registry, session)
+	gateway := coreagent.NewGateway(h.Registry, session).WithAgentPolicy(h.Project.Config.Agent.Policy)
 	server := &http.Server{
 		Addr:              strings.TrimSpace(*listen),
 		Handler:           gateway.HTTPHandler(token),
@@ -132,8 +132,8 @@ func projectAgentSession(h *host.ProjectHost, contextName string) agentsdk.Sessi
 		workspaces = []string{root}
 	}
 	return agentsdk.Session{
-		ProjectRoot:      root,
-		Workspaces:       workspaces,
-		Context:          contextName,
+		ProjectRoot: root,
+		Workspaces:  workspaces,
+		Context:     contextName,
 	}
 }

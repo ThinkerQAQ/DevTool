@@ -33,6 +33,18 @@ type UI struct {
 	Features []string `toml:"features" json:"features"`
 }
 
+// AgentPolicy governs optional, model-free workspace mutations at the MCP boundary.
+type AgentPolicy struct {
+	Enabled           bool     `toml:"enabled" json:"enabled"`
+	ProtectedBranches []string `toml:"protected_branches" json:"protected_branches,omitempty"`
+	MaxPatchBytes     int      `toml:"max_patch_bytes" json:"max_patch_bytes,omitempty"`
+	ContextTTLSeconds int      `toml:"context_ttl_seconds" json:"context_ttl_seconds,omitempty"`
+}
+
+type Agent struct {
+	Policy AgentPolicy `toml:"policy" json:"policy"`
+}
+
 type Profile struct {
 	Extension map[string]Extension `toml:"extension" json:"extension,omitempty"`
 	Service   map[string]Service   `toml:"service" json:"service,omitempty"`
@@ -44,6 +56,7 @@ type Config struct {
 	Extension map[string]Extension `toml:"extension" json:"extension,omitempty"`
 	Service   map[string]Service   `toml:"service" json:"service,omitempty"`
 	Code      Code                 `toml:"code" json:"code,omitempty"`
+	Agent     Agent                `toml:"agent" json:"agent,omitempty"`
 	UI        UI                   `toml:"ui" json:"ui"`
 	Profile   map[string]Profile   `toml:"profile" json:"profile,omitempty"`
 }
@@ -122,6 +135,17 @@ func Validate(cfg Config) error {
 	for index, workspace := range cfg.Code.Workspaces {
 		if strings.TrimSpace(workspace) == "" {
 			return fmt.Errorf("code.workspaces[%d] cannot be empty", index)
+		}
+	}
+	if cfg.Agent.Policy.MaxPatchBytes < 0 || cfg.Agent.Policy.MaxPatchBytes > 1024*1024 {
+		return fmt.Errorf("agent.policy.max_patch_bytes must be between 0 and 1048576")
+	}
+	if cfg.Agent.Policy.ContextTTLSeconds < 0 || cfg.Agent.Policy.ContextTTLSeconds > 3600 {
+		return fmt.Errorf("agent.policy.context_ttl_seconds must be between 0 and 3600")
+	}
+	for _, branch := range cfg.Agent.Policy.ProtectedBranches {
+		if strings.TrimSpace(branch) == "" {
+			return fmt.Errorf("agent.policy.protected_branches cannot contain an empty branch")
 		}
 	}
 	for index, feature := range cfg.UI.Features {
