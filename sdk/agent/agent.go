@@ -26,6 +26,6 @@ type ToolProvider interface {
 // a sandbox, or another mature execution backend.
 type ExecutionPolicy interface {
 	Tool() json.RawMessage
-	Attest(context.Context, json.RawMessage, json.RawMessage) json.RawMessage
+	Attest(context.Context, string, json.RawMessage, json.RawMessage) json.RawMessage
 	Apply(context.Context, json.RawMessage) (json.RawMessage, error)
 }

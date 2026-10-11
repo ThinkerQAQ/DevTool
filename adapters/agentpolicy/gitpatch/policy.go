@@ -18,26 +18,38 @@ import (
 	"time"
 
 	"github.com/thinkerqaq/devtool/core/config"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 // Gate is a deterministic MCP-boundary policy, not a second agent.
 // Git owns unified-patch parsing and application. Only a scoped successful
-// code_context result can authorize a one-file mutation on a development branch.
+// matching code/document/diagram contexts authorize a one-file mutation.
 type Gate struct {
 	root      string
 	maxBytes  int
 	ttl       time.Duration
 	protected map[string]bool
 
-	mu     sync.Mutex
-	proofs map[string]patchProof
+	mu       sync.Mutex
+	proofs   map[string]patchProof
+	evidence map[string]contextEvidence
 }
 
 type patchProof struct {
-	path    string
-	digest  [sha256.Size]byte
-	head    string
-	expires time.Time
+	path     string
+	digest   [sha256.Size]byte
+	head     string
+	expires  time.Time
+	contexts map[string]bool
+}
+
+type contextEvidence struct {
+	digest   [sha256.Size]byte
+	head     string
+	expires  time.Time
+	contexts map[string]bool
 }
 
 func New(root string, settings config.AgentPolicy) *Gate {
@@ -53,7 +65,7 @@ func New(root string, settings config.AgentPolicy) *Gate {
 	branches := append([]string{"main", "master"}, settings.ProtectedBranches...)
 	gate := &Gate{
 		root: root, maxBytes: maxBytes, ttl: time.Duration(ttl) * time.Second,
-		protected: make(map[string]bool), proofs: make(map[string]patchProof),
+		protected: make(map[string]bool), proofs: make(map[string]patchProof), evidence: make(map[string]contextEvidence),
 	}
 	for _, branch := range branches {
 		gate.protected[branch] = true
@@ -64,12 +76,12 @@ func New(root string, settings config.AgentPolicy) *Gate {
 func (p *Gate) Tool() json.RawMessage {
 	raw, _ := json.Marshal(map[string]any{
 		"name":        "workspace_apply_patch",
-		"description": "Apply one Git unified diff to an existing file in the current development worktree. Requires a fresh context_token returned by a scoped code_context tool call; never permitted on protected branches.",
+		"description": "Apply a Git text patch to one existing file after scoped context: code_context for code, document_context for Markdown, and diagram_context for embedded Mermaid/PlantUML diagrams; log files are read-only and use log_context for inspection.",
 		"annotations": map[string]any{"readOnlyHint": false, "destructiveHint": true, "openWorldHint": false},
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"context_token": map[string]any{"type": "string", "description": "One-time token from the preceding scoped code_context."},
+				"context_token": map[string]any{"type": "string", "description": "One-time token issued by the required source-specific context tool(s)."},
 				"patch":         map[string]any{"type": "string", "description": "Single-file text patch in 'git diff' format (no create/delete/rename/mode change)."},
 			},
 			"required":             []string{"context_token", "patch"},
@@ -79,9 +91,13 @@ func (p *Gate) Tool() json.RawMessage {
 	return raw
 }
 
-// attest wraps the original tool result only after both code backends succeed.
-// A degraded or malformed context remains readable but has no write authority.
-func (p *Gate) Attest(ctx context.Context, args, result json.RawMessage) json.RawMessage {
+// Attest grants one-use tokens only after the correct capability has inspected
+// the exact file. Markdown with embedded diagrams needs both context tools.
+// Log querying is handled by log_context and never grants write permission.
+func (p *Gate) Attest(ctx context.Context, tool string, args, result json.RawMessage) json.RawMessage {
+	if tool != "code_context" && tool != "document_context" && tool != "diagram_context" {
+		return result
+	}
 	var request struct {
 		Path string `json:"path"`
 	}
@@ -92,7 +108,14 @@ func (p *Gate) Attest(ctx context.Context, args, result json.RawMessage) json.Ra
 	if err != nil {
 		return result
 	}
-	// Preserve provider-specific fields in the original MCP envelope.
+	kind := contextKind(path)
+	if kind == "log" || kind == "diagram-standalone" {
+		return result
+	}
+	if (kind == "markdown") != (tool != "code_context") {
+		return result
+	}
+
 	var envelope map[string]json.RawMessage
 	if json.Unmarshal(result, &envelope) != nil {
 		return result
@@ -106,16 +129,13 @@ func (p *Gate) Attest(ctx context.Context, args, result json.RawMessage) json.Ra
 		return result
 	}
 	for i, content := range contents {
-		var contentType, text string
+		var contentType, message string
 		if json.Unmarshal(content["type"], &contentType) != nil ||
-			json.Unmarshal(content["text"], &text) != nil || contentType != "text" {
+			json.Unmarshal(content["text"], &message) != nil || contentType != "text" {
 			continue
 		}
 		var data map[string]json.RawMessage
-		if json.Unmarshal([]byte(text), &data) != nil {
-			continue
-		}
-		if !validContext(data) {
+		if json.Unmarshal([]byte(message), &data) != nil || !validContext(tool, path, data) {
 			continue
 		}
 		file, err := os.ReadFile(filename)
@@ -126,11 +146,9 @@ func (p *Gate) Attest(ctx context.Context, args, result json.RawMessage) json.Ra
 		if err != nil {
 			return result
 		}
-		tokenBytes := make([]byte, 32)
-		if _, err := rand.Read(tokenBytes); err != nil {
-			return result
-		}
-		token := hex.EncodeToString(tokenBytes)
+		currentHead := strings.TrimSpace(string(head))
+		digest := sha256.Sum256(file)
+		needsDiagram := kind == "markdown" && hasDiagram(file)
 		expires := time.Now().Add(p.ttl)
 		p.mu.Lock()
 		for key, proof := range p.proofs {
@@ -138,14 +156,46 @@ func (p *Gate) Attest(ctx context.Context, args, result json.RawMessage) json.Ra
 				delete(p.proofs, key)
 			}
 		}
-		p.proofs[token] = patchProof{
-			path: path, digest: sha256.Sum256(file),
-			head: strings.TrimSpace(string(head)), expires: expires,
+		prior := p.evidence[path]
+		if prior.head != currentHead || prior.digest != digest || time.Now().After(prior.expires) {
+			prior = contextEvidence{contexts: make(map[string]bool)}
+		}
+		prior.contexts[tool] = true
+		prior.head, prior.digest, prior.expires = currentHead, digest, expires
+		p.evidence[path] = prior
+		required := []string{"code_context"}
+		if kind == "markdown" {
+			required = []string{"document_context"}
+			if needsDiagram {
+				required = append(required, "diagram_context")
+			}
+		}
+		missing := make([]string, 0)
+		for _, name := range required {
+			if !prior.contexts[name] {
+				missing = append(missing, name)
+			}
+		}
+		var token string
+		if len(missing) == 0 {
+			tokenBytes := make([]byte, 32)
+			if _, err := rand.Read(tokenBytes); err == nil {
+				token = hex.EncodeToString(tokenBytes)
+				copyContexts := make(map[string]bool, len(prior.contexts))
+				for name, success := range prior.contexts {
+					copyContexts[name] = success
+				}
+				p.proofs[token] = patchProof{path: path, digest: digest, head: currentHead, expires: expires, contexts: copyContexts}
+			}
 		}
 		p.mu.Unlock()
-		data["context_token"], _ = json.Marshal(token)
-		data["context_expires_at"], _ = json.Marshal(expires.UTC().Format(time.RFC3339))
 		data["context_path"], _ = json.Marshal(path)
+		if token != "" {
+			data["context_token"], _ = json.Marshal(token)
+			data["context_expires_at"], _ = json.Marshal(expires.UTC().Format(time.RFC3339))
+		} else if len(missing) != 0 {
+			data["required_context_tools"], _ = json.Marshal(missing)
+		}
 		updatedText, err := json.Marshal(data)
 		if err != nil {
 			return result
@@ -161,15 +211,84 @@ func (p *Gate) Attest(ctx context.Context, args, result json.RawMessage) json.Ra
 	return result
 }
 
-func validContext(value map[string]json.RawMessage) bool {
-	for _, name := range []string{"indexed", "realtime"} {
-		raw := bytes.TrimSpace(value[name])
-		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-			return false
+func validContext(tool, path string, value map[string]json.RawMessage) bool {
+	switch tool {
+	case "code_context":
+		for _, name := range []string{"indexed", "realtime"} {
+			raw := bytes.TrimSpace(value[name])
+			if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+				return false
+			}
+		}
+		degraded := bytes.TrimSpace(value["degraded"])
+		return len(degraded) == 0 || bytes.Equal(degraded, []byte("null")) || bytes.Equal(degraded, []byte("{}"))
+	case "document_context":
+		var doc struct {
+			Path   string `json:"path"`
+			Format string `json:"format"`
+		}
+		return json.Unmarshal(value["document"], &doc) == nil && doc.Path == path && doc.Format == "markdown"
+	case "diagram_context":
+		var actualPath string
+		var total int
+		var results []json.RawMessage
+		return json.Unmarshal(value["path"], &actualPath) == nil && actualPath == path &&
+			json.Unmarshal(value["total_diagrams"], &total) == nil && total >= 0 &&
+			json.Unmarshal(value["results"], &results) == nil && len(results) == total
+	default:
+		return false
+	}
+}
+
+func contextKind(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".md", ".markdown":
+		return "markdown"
+	case ".log":
+		return "log"
+	case ".mmd", ".mermaid", ".puml", ".plantuml", ".svg", ".png", ".jpg", ".jpeg", ".webp":
+		return "diagram-standalone"
+	default:
+		return "code"
+	}
+}
+
+// hasDiagram uses the existing Goldmark Markdown parser (also used by the
+// document provider), not a new fence parser.
+func hasDiagram(source []byte) bool {
+	md := goldmark.DefaultParser()
+	doc := md.Parse(text.NewReader(source))
+	found := false
+	ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering {
+			if fenced, ok := node.(*ast.FencedCodeBlock); ok {
+				lang := strings.ToLower(strings.TrimSpace(string(fenced.Language(source))))
+				if lang == "mermaid" || lang == "plantuml" {
+					found = true
+					return ast.WalkStop, nil
+				}
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	return found
+}
+
+func addsDiagramFence(patch string) bool {
+	for _, line := range strings.Split(patch, "\n") {
+		if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, "+"))
+		if strings.HasPrefix(value, "\x60\x60\x60") || strings.HasPrefix(value, "~~~") {
+			label := strings.ToLower(strings.TrimSpace(strings.TrimLeft(value, "~\x60")))
+			if label == "mermaid" || label == "plantuml" {
+				return true
+			}
 		}
 	}
-	degraded := bytes.TrimSpace(value["degraded"])
-	return len(degraded) == 0 || bytes.Equal(degraded, []byte("null")) || bytes.Equal(degraded, []byte("{}"))
+	return false
 }
 
 func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
@@ -190,17 +309,17 @@ func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	proof, ok := p.proofs[request.Token]
-	// One-time even for failed validation: call code_context again to retry.
+	// One-time even for failed validation: refresh the required context tools to retry.
 	delete(p.proofs, request.Token)
 	if !ok || time.Now().After(proof.expires) {
-		return nil, errors.New("missing or expired context_token; run scoped code_context")
+		return nil, errors.New("missing or expired context_token; run the required scoped context tools")
 	}
 	path, filename, err := p.existingFile(proof.path)
 	if err != nil {
 		return nil, err
 	}
 	if path != proof.path {
-		return nil, errors.New("file path changed since code_context")
+		return nil, errors.New("file path changed since context inspection")
 	}
 	if err := p.checkWorktree(ctx, proof.head); err != nil {
 		return nil, err
@@ -210,9 +329,26 @@ func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage
 		return nil, err
 	}
 	if sha256.Sum256(file) != proof.digest {
-		return nil, errors.New("file changed since code_context; refresh context")
+		return nil, errors.New("file changed since context inspection; refresh context")
 	}
 
+	// A context issued for one file type cannot authorize another capability.
+	kind := contextKind(path)
+	if kind == "log" || kind == "diagram-standalone" {
+		return nil, fmt.Errorf("%s is not supported by workspace_apply_patch; use log_context for log queries", path)
+	}
+	required := []string{"code_context"}
+	if kind == "markdown" {
+		required = []string{"document_context"}
+		if hasDiagram(file) || addsDiagramFence(request.Patch) {
+			required = append(required, "diagram_context")
+		}
+	}
+	for _, name := range required {
+		if !proof.contexts[name] {
+			return nil, fmt.Errorf("patch requires %s for %s", name, path)
+		}
+	}
 	// Restrict the accepted Git syntax; git apply itself remains the parser.
 	// This first version intentionally excludes new/deleted/renamed/binary files.
 	header := "diff --git a/" + path + " b/" + path + "\n"
@@ -249,7 +385,7 @@ func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage
 	}
 	fields := bytes.SplitN(entries[0], []byte("\t"), 3)
 	if len(fields) != 3 || string(fields[2]) != path {
-		return nil, errors.New("patch scope does not match code_context")
+		return nil, errors.New("patch scope does not match context inspection")
 	}
 	for _, field := range fields[:2] {
 		if _, err := strconv.ParseUint(string(field), 10, 64); err != nil {
@@ -262,6 +398,7 @@ func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage
 	if _, err := p.git(commandContext, patch, "apply", "-"); err != nil {
 		return nil, fmt.Errorf("patch apply failed: %w", err)
 	}
+	delete(p.evidence, path)
 	changed, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("verify patched file: %w", err)
@@ -296,7 +433,7 @@ func (p *Gate) checkWorktree(ctx context.Context, head string) error {
 	}
 	current, err := p.git(ctx, nil, "rev-parse", "HEAD")
 	if err != nil || strings.TrimSpace(string(current)) != head {
-		return errors.New("Git HEAD changed since code_context; refresh context")
+		return errors.New("Git HEAD changed since context inspection; refresh context")
 	}
 	return nil
 }

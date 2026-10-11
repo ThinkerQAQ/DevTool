@@ -230,8 +230,8 @@ func (g *Gateway) callTool(ctx context.Context, name string, args json.RawMessag
 		args = json.RawMessage(`{}`)
 	}
 	result, err := provider.CallTool(ctx, g.session, name, args)
-	if err == nil && g.policy != nil && name == "code_context" {
-		result = g.policy.Attest(ctx, args, result)
+	if err == nil && g.policy != nil {
+		result = g.policy.Attest(ctx, name, args, result)
 	}
 	return result, err
 }
