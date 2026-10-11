@@ -17,16 +17,17 @@ python3 scripts/benchmark-extension-cache.py \
   --output /tmp/devtool-go-provider-benchmark.json
 ```
 
-脚本交错运行 A/B、B/A，测量 `config check` 与 `project inspect --json`，通过临时 PATH 包装器记录实际 `go list` 启动次数。不修改项目文件、不依赖新的网络服务，也不替代原有 Go 工具链。任意验证命令失败，基准随之失败。
+脚本交错运行 A/B、B/A，测量 `config check`、`project inspect --json`，以及真实 `agent mcp --context agent` 初始化和工具列表获取，通过临时 PATH 包装器记录实际 `go list` 启动次数。不修改项目文件、不依赖新的网络服务，也不替代原有 Go 工具链。任意验证命令失败，基准随之失败。
 
 ## 2026-10-11 WSL 热缓存实测
 
-每组 6 次，基准版本 `82910ce`：
+两个 CLI 场景每组 6 次，MCP 初始化每组 3 次；基准版本 `82910ce`：
 
 | 操作 | 原实现中位数 | 优化后中位数 | 耗时下降 |
 | --- | ---: | ---: | ---: |
 | `config check` | 2,154 ms | 356 ms | 83.5% |
 | `project inspect --json` | 2,194 ms | 301 ms | 86.3% |
+| `agent mcp --context agent`（3 次） | 2,294 ms | 332 ms | 85.5% |
 | 每次执行的 `go list` | 25 次 | 2 次 | 92% |
 
 这些数据只表示**本地 DevTool 启动和 Provider 依赖发现性能**，不能作为 ChatGPT 到 Desktop Commander 远程网络加速结论。首次编译和缓存失效时仍可能触发 Go 构建。

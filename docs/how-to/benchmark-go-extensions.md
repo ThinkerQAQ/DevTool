@@ -17,16 +17,17 @@ python3 scripts/benchmark-extension-cache.py \
   --output /tmp/devtool-go-provider-benchmark.json
 ```
 
-The script alternates A/B and B/A, times `config check` and `project inspect --json`, and records the number of `go list` invocations using a temporary PATH shim. It does not mutate the project, modify Desktop Commander, use a network service, or bundle a custom Go toolchain. It fails if any tested command fails.
+The script alternates A/B and B/A, times `config check`, `project inspect --json`, and a real `agent mcp --context agent` initialize/tools-list exchange, and records the number of `go list` invocations using a temporary PATH shim. It does not mutate the project, modify Desktop Commander, use a network service, or bundle a custom Go toolchain. It fails if any tested command fails.
 
 ## Observed warm-cache comparison
 
-WSL Ubuntu, October 11, 2026; 6 runs per variant for each command. Original baseline `82910ce` versus the batched implementation:
+WSL Ubuntu, October 11, 2026; 6 runs per variant for the two CLI commands and 3 runs per variant for MCP initialization. Original baseline `82910ce` versus the batched implementation:
 
 | Command | Baseline median | Batched median | Relative reduction |
 | --- | ---: | ---: | ---: |
 | `config check` | 2,154 ms | 356 ms | 83.5% |
 | `project inspect --json` | 2,194 ms | 301 ms | 86.3% |
+| `agent mcp --context agent` (3 runs) | 2,294 ms | 332 ms | 85.5% |
 | `go list` per invocation | 25 | 2 | 92% |
 
 This measures **local DevTool startup/provider discovery**, not ChatGPT/Remote Desktop Commander round trips or actual build/download throughput. Cold build/cache misses may still require full Go compilation.

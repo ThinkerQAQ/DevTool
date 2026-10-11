@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import select
 from pathlib import Path
 import shutil
 import statistics
@@ -38,20 +39,55 @@ with tempfile.TemporaryDirectory(prefix="dv2-dep-bench-") as temp:
         env = dict(os.environ, PATH=temp + os.pathsep + os.environ.get("PATH", ""),
                    DEVTOOL_PROFILES="local", DV2_BENCH_LOG=str(log), DV2_REAL_GO=go)
         start = time.perf_counter()
-        outcome = subprocess.run([tools[mode], *action.split()], cwd=root, env=env,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, timeout=120)
+        tool_count = None
+        if action == "agent mcp --context agent":
+            # MCP is a persistent session: initialize, enumerate tools,
+            # then terminate only this benchmark-owned server process.
+            process = subprocess.Popen([tools[mode], *action.split()], cwd=root, env=env,
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.DEVNULL, text=True, bufsize=1)
+            def request(method, params=None, request_id=None):
+                payload = {"jsonrpc": "2.0", "method": method}
+                if params is not None: payload["params"] = params
+                if request_id is not None: payload["id"] = request_id
+                process.stdin.write(json.dumps(payload) + "\n")
+                process.stdin.flush()
+                if request_id is None: return None
+                ready, _, _ = select.select([process.stdout], [], [], 60)
+                if not ready: raise TimeoutError("MCP did not respond to " + method)
+                line = process.stdout.readline()
+                if not line: raise RuntimeError("MCP terminated during " + method)
+                reply = json.loads(line)
+                if reply.get("id") != request_id or reply.get("error"):
+                    raise RuntimeError("MCP invalid response " + line[:350])
+                return reply["result"]
+            try:
+                request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                      "clientInfo": {"name": "DevTool-A-B", "version": "1"}}, 1)
+                request("notifications/initialized")
+                tool_count = len(request("tools/list", {}, 2)["tools"])
+                if not tool_count: raise RuntimeError("MCP returned no tools")
+            finally:
+                process.stdin.close()
+                process.terminate()
+                try: process.wait(timeout=5)
+                except subprocess.TimeoutExpired: process.kill()
+        else:
+            outcome = subprocess.run([tools[mode], *action.split()], cwd=root, env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, timeout=120)
+            if outcome.returncode:
+                raise RuntimeError(mode + " " + action + ": " + outcome.stderr[-900:])
         elapsed = round((time.perf_counter() - start) * 1000)
-        if outcome.returncode:
-            raise RuntimeError(mode + " " + action + ": " + outcome.stderr[-900:])
         calls = log.read_text().splitlines()
         item = {"mode": mode, "action": action, "ms": elapsed,
                 "go_list": calls.count("list"), "go_build": calls.count("build")}
+        if tool_count is not None: item["mcp_tools"] = tool_count
         if not warmup:
             results.append(item)
             print("SAMPLE", json.dumps(item), flush=True)
 
-    for action in ("config check", "project inspect --json"):
+    for action in ("config check", "project inspect --json", "agent mcp --context agent"):
         for mode in tools:
             run(mode, action, warmup=True)
         for i in range(args.repeats):
@@ -60,7 +96,7 @@ with tempfile.TemporaryDirectory(prefix="dv2-dep-bench-") as temp:
                 run(mode, action)
 
 summaries = []
-for action in ("config check", "project inspect --json"):
+for action in ("config check", "project inspect --json", "agent mcp --context agent"):
     subset = {mode: [s for s in results if s["action"] == action and s["mode"] == mode] for mode in tools}
     before = statistics.median(row["ms"] for row in subset["baseline"])
     after = statistics.median(row["ms"] for row in subset["candidate"])
