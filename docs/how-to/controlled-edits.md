@@ -7,7 +7,7 @@ DevTool can apply a **single-file, text-only Git patch** only after the caller o
 ## Prerequisites
 
 - A Git development **branch or worktree**, not `main` or `master`.
-- Git on PATH. For source-code edits, the configured indexed CodeGraph and realtime Serena/LSP providers must both respond. Markdown uses the existing document provider; embedded diagrams use the existing diagram provider.
+- Git on PATH. For source-code edits, both indexed and realtime context must succeed. The default profile currently lacks realtime LSP, so source-code patch authorization is unavailable until a provider is configured. Markdown uses the existing document provider; embedded diagrams use the existing diagram provider.
 - A **new DevTool binary built from this checkout**. Do not assume an older system-wide `devtool` binary includes this tool.
 
 ```bash
@@ -101,10 +101,6 @@ One token authorizes **one attempt on one existing file**. Re-run the appropriat
 ## 4. Verify and publish
 
 Run `project_verify` and `project_build` through the configured DevTool capabilities. The normal `scm_checkpoint` and `scm_publish` tools remain governed by existing SCM contracts; this first feature only constrains the **new** patch tool. For strict protection of every file write, place the outer caller in a filesystem sandbox or remove its unrestricted shell/file tools.
-
-## Tested on DevTool itself
-
-On 2026-10-11 the new binary returned real CodeGraph and Serena context for `core/agent/gateway.go`, issued a scoped token, and applied a one-line comment change through `workspace_apply_patch`. Repeating the same token returned an error. Protected branches, cross-file/multi-file changes, symlinks, stale hashes/HEAD, degraded context, expired tokens, mode changes and oversize patches were checked in local Git-repository tests.
 
 ## Known limits
 

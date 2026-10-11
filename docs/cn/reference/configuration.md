@@ -32,8 +32,9 @@ package = "./cmd/provider"
 [service.code-indexed]
 provider = "intelligence.codegraph"
 
-[service.code-realtime]
-provider = "intelligence.lsp.serena"
+# 可选。安装 LSP Provider 扩展后再配置。
+# [service.code-realtime]
+# provider = "<你的 LSP Provider ID>"
 ```
 
 仓库也定义 workspace、environment、tooling-environment、portable-runtime、document-context、diagram-context、credential、scm 等服务。具体以[实际 TOML](../../../.devtool.toml)为准。
@@ -74,7 +75,7 @@ Markdown 修改必须使用 `document_context`；Markdown 内 Mermaid/PlantUML �
 workspaces = ["."]
 ```
 
-CodeGraph 负责索引/结构信息，Serena/LSP 负责实时语义。更换 Provider 时仍保留稳定 Capability。
+CodeGraph 负责索引/结构信息。实时语义需要额外安装并配置 LSP Provider；默认 Profile 尚未启用。更换 Provider 时仍保留稳定 Capability。
 
 ## 受控 Agent 修改
 

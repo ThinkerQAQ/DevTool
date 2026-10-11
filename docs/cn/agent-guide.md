@@ -49,6 +49,6 @@ devtool agent mcp --context codex
 
 缺程序时检查环境或切换 Profile；授权不足时使用 Credential Provider，不得提交密钥；索引与分支不一致时重新检查活动工作区并参考 LSP 实时诊断；缺项目命令时重新执行 `project inspect`。远程网关必须启用恰当认证。
 
-CodeGraph/Sourcegraph 和 Serena/LSP 只是 Provider；切换它们不应改变 Agent 的 `code_context` 接口。
+CodeGraph/Sourcegraph 提供索引能力。默认配置暂不包含 LSP Provider；`code_context` 会在 `not_applied` 中说明没有实时语义结果，Agent 不得将索引结果冒充 LSP 结果。
 
 参阅[架构原则](architecture/principles.md)和[CLI 命令](reference/cli.md)。

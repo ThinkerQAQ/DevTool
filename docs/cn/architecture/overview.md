@@ -28,7 +28,7 @@ DevTool 是工程开发控制面：上层表达开发意图，配置将稳定能
 | Project Extension | build、verify、package 等项目命令 | 具体基础设施实现 |
 | Capability | code_context、scm_publish 等稳定开发意图 | 原始 Provider 方法 |
 | Service | 可替换能力的 Contract | 项目 UI 和业务流程 |
-| Provider | CodeGraph、Serena、Dagger、GitHub 等集成 | 跨 Provider Core 策略 |
+| Provider | CodeGraph、LSP、Dagger、GitHub 等集成 | 跨 Provider Core 策略 |
 
 ## MCP 协议与传输
 
@@ -38,7 +38,7 @@ DevTool 是工程开发控制面：上层表达开发意图，配置将稳定能
 
 ## 代码智能
 
-`code-indexed` 提供仓库索引/结构信息，默认 CodeGraph，也可切换 Sourcegraph；`code-realtime` 通过 Serena/LSP 获取实时语义。Agent 使用 `code_context`，由 Capability 调度服务，Provider 切换不影响调用方。
+`code-indexed` 提供仓库索引/结构信息，默认 CodeGraph，也可切换 Sourcegraph；`code-realtime` 是可选 LSP 服务，默认 Profile 当前没有配置。现有 `code_context` 仅返回索引结果，并明确标记实时能力未配置；后续将改为正交代码工具，避免固定编排多种操作。
 
 文档和图表能力采用相同分层。Merman 图表智能复用成熟的 [jrpc2](https://github.com/creachadair/jrpc2) LSP 传输与 JSON-RPC Client，负责消息分帧、请求关联和服务端回调；DevTool 仅保留图表专用的符号与诊断映射。底层 `merman-lsp` 可执行文件仍通过 `.devtool.toml` 配置替换，不再维护自研 LSP 帧解析器。
 

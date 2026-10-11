@@ -13,6 +13,7 @@
 
 - [架构概览](architecture/overview.md)：Core、Capability、Service 和 Provider。
 - [架构原则](architecture/principles.md)：配置化、可扩展、自举、成熟组件优先。
+- [代码智能](architecture/code-intelligence.md)：当前索引能力及原生 MCP/LSP 迁移边界。
 
 ## 操作指南
 

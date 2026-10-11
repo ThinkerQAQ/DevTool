@@ -32,8 +32,9 @@ Extension settings belong in `[extension.<name>.settings]`. A provider is not ac
 [service.code-indexed]
 provider = "intelligence.codegraph"
 
-[service.code-realtime]
-provider = "intelligence.lsp.serena"
+# Optional. Configure only after installing an LSP provider extension.
+# [service.code-realtime]
+# provider = "<your LSP provider ID>"
 ```
 
 The actual DevTool repository also selects `workspace`, `environment`, `tooling-environment`, `portable-runtime`, `document-context`, `diagram-context`, `credential`, and `scm` services. Consult [the live config](../../.devtool.toml) for every binding.
@@ -78,7 +79,7 @@ A Markdown edit requires `document_context`; embedded Mermaid/PlantUML edits add
 workspaces = ["."]
 ```
 
-CodeGraph works on indexed/structural repository context. Serena/LSP supplies realtime semantics. A provider change should preserve the stable agent capability contract.
+CodeGraph provides indexed/structural context. Realtime semantics require a separately installed and configured LSP provider; none is selected by default. A provider change should preserve the stable agent capability contract.
 
 ## Controlled agent edits
 

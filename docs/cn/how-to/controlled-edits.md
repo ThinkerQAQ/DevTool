@@ -7,7 +7,7 @@ DevTool 新增可选的、**只支持单个既有文本文件**的 Git 补丁执
 ## 运行条件
 
 - 位于独立的 Git 开发分支或 Worktree；不能直接修改 `main`、`master`。
-- 已安装 Git。源代码修改要求 CodeGraph 与 Serena/LSP 均成功响应；Markdown 和图表分别使用现有 Document/Diagram Provider。
+- 已安装 Git。源代码修改要求 CodeGraph 与实时 LSP Provider 均成功响应。默认 Profile 暂未配置实时 LSP，因此源码补丁门禁无法放行；Markdown 和图表分别使用现有 Document/Diagram Provider。
 - 从**当前源码**构建 DevTool；已安装的旧版二进制可能没有新功能。
 
 ```bash
@@ -106,11 +106,6 @@ Gateway 依据实际文件类型决定上下文门禁；Markdown 图块识别复
 
 后续调用 DV2 已有的 `project_build`、`project_verify`、`scm_checkpoint`、`scm_publish`。当前门禁只直接约束新补丁工具，尚未限制所有外部工具；若 Desktop Commander 能直接写文件，仍可能绕过本门禁。要做到物理不可绕过，须结合独立账户或容器权限。
 
-## 2026-10-11 实测
-
-通过新编译的 DEV2 自举测试：`code_context` 实际调用 CodeGraph 与 Serena，获得无降级的上下文及一次性令牌；再通过 `workspace_apply_patch` 成功修改 `core/agent/gateway.go` 的一处注释。旧令牌再次使用被拒绝。
-
-此外已测试：主分支保护、路径越界、符号链接、文件/HEAD 变化、跨文件与多文件补丁、降级的 Provider、令牌过期、超大补丁、文件模式修改。
 
 ## 当前限制
 

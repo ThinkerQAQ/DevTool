@@ -30,7 +30,7 @@ Start the configured MCP gateway with `devtool agent mcp --context codex` (or `a
 
 Before editing Go or other code, call `code_context`; before editing Markdown, call `document_context`; for Markdown-embedded Mermaid/PlantUML blocks, call **both** `document_context` and `diagram_context`; for standalone `.mmd`, `.mermaid`, `.puml`, and `.plantuml` source files, call `diagram_context` alone. Changed diagrams must pass the configured renderer before patch application. Investigate log files or journald with `log_context`, not raw Shell log readers. If using `workspace_apply_patch`, the Gateway rejects mutations without the required context evidence.
 
-Do not directly integrate CodeGraph, Serena, Sourcegraph, Dagger, or GitHub into agent workflows when DevTool already provides the intent.
+Do not directly integrate CodeGraph, Sourcegraph, Dagger, or GitHub into agent workflows when DevTool already provides the intent.
 
 Remote Shell process hygiene: in non-interactive Desktop Commander calls, pass explicit search roots (e.g., `rg -l 'pattern' .` instead of `rg -l 'pattern'`), because the tool's stdin can remain open on a socket. Bound potentially long scans with `timeout`; do not blindly append `head` to an unbounded stdin-reading command. Prefer one existing project-level DevTool command to an improvised chain of redundant Shell calls. Terminate only verified, task-owned child processes; never kill Desktop Commander's shared process group or globally `pkill chrome`.
 

@@ -24,7 +24,7 @@ The MCP server gives callers engineering intents; configured extensions implemen
 
 | Tool | Purpose |
 | --- | --- |
-| `code_context` | Indexed repository context plus realtime code semantics |
+| `code_context` | Indexed repository context; optional realtime intelligence is reported separately |
 | `workspace_apply_patch` | Opt-in, context-authorized Git patch for one existing file |
 | `document_context` | Markdown structure, bounded reviews, and related context |
 | `diagram_context` | Inspect and validate embedded diagrams (with document context) or standalone Mermaid/PlantUML sources (without document context) |
@@ -47,7 +47,7 @@ Use the tool schemas returned by the MCP gateway. Do not assume all tools have t
 
 ## Keep providers behind the contract
 
-CodeGraph and Sourcegraph implement indexed intelligence; Serena/LSP provides realtime semantics. Agents should continue to call `code_context` after a provider switch. For documents, Markdown parsing and Marksman provide different structure/realtime roles; diagram capabilities follow the same pattern.
+CodeGraph and Sourcegraph implement indexed intelligence. The default profile has no realtime LSP provider; check `not_applied` in `code_context` results rather than assuming LSP ran. For documents, Markdown parsing and Marksman provide different structure/realtime roles; diagram capabilities follow the same pattern.
 
 Do not create a new agent tool for every provider method. Introduce a new capability only for a distinct, cross-provider intent.
 

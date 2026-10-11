@@ -13,6 +13,7 @@ The guides below describe the current repository, not a proposed future implemen
 
 - [Architecture Overview](architecture/overview.md) — Core, extensions, contracts, and providers.
 - [Architecture Principles](architecture/principles.md) — decision rules for extending DevTool.
+- [Code Intelligence](architecture/code-intelligence.md) — current indexed-only behavior and planned native MCP/LSP boundary.
 
 ## How-to
 

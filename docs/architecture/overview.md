@@ -28,7 +28,7 @@ DevTool is a thin engineering control plane that selects concrete implementation
 | Project Extension | Project commands (`build`, `verify`, `package`) and project resources | Selection of a concrete infrastructure provider |
 | Capability | Stable user/agent intent such as `code_context` or `scm_publish` | Provider-specific tool names |
 | Service | Contract for one replaceable class of implementation | User interface or application workflows |
-| Provider | Integration with CodeGraph, Serena, Sourcegraph, Dagger, GitHub, etc. | Cross-provider Core policy |
+| Provider | Integration with CodeGraph, LSP, Sourcegraph, Dagger, GitHub, etc. | Cross-provider Core policy |
 
 ## MCP transport
 
@@ -41,9 +41,9 @@ Both older MCP clients that negotiate `2025-06-18` and modern SDK clients are su
 Two independently configured services answer different questions:
 
 - `code-indexed`: indexed/structural repository search. The default example uses CodeGraph, with Sourcegraph available as an alternative.
-- `code-realtime`: live language-server semantics. The repository uses Serena/LSP.
+- `code-realtime`: live language-server semantics. No realtime LSP provider is configured in the default profile.
 
-An agent requests `code_context`; the capability coordinates the appropriate services. Switching providers should not require changing the caller.
+For now `code_context` returns indexed context and reports when realtime intelligence is not configured. A future revision will expose direct, orthogonal provider-backed code tools instead of composing unrelated operations.
 
 Document and diagram capabilities use the same pattern. Merman diagram intelligence uses the mature [jrpc2](https://github.com/creachadair/jrpc2) LSP transport and JSON-RPC client for framing, request/response correlation and server callbacks; DevTool retains diagram-specific symbol and diagnostic mapping. The configured `merman-lsp` executable remains replaceable through `.devtool.toml`. No custom LSP framing implementation is maintained.
 

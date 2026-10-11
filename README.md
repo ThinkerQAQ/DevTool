@@ -9,7 +9,7 @@ DevTool exposes project operations and engineering capabilities through stable c
 ## What it does
 
 - **Project operations:** discover, build, verify, and package projects through a Project Extension.
-- **Code intelligence:** combine indexed repository context (CodeGraph or Sourcegraph) with live language-server context (Serena/LSP).
+- **Code intelligence:** query indexed repository context (CodeGraph or Sourcegraph); realtime LSP is optional and currently not configured by default.
 - **Document and diagram context:** inspect Markdown documents and Mermaid/PlantUML diagrams using configured providers.
 - **SCM and environments:** use configured source-control, environment, and runtime providers.
 - **Agent access:** expose intention-level tools over MCP rather than requiring agents to call every provider separately.
