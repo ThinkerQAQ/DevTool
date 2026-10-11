@@ -24,11 +24,17 @@ DevTool is a thin engineering control plane that selects concrete implementation
 
 | Layer | Responsibility | Does not own |
 | --- | --- | --- |
-| Core | Project discovery, extension registration/loading, routing, protocol, lifecycle | Container, GitHub, or project-specific behavior |
+| Core | Project discovery, extension registration/loading, routing, policy and lifecycle | MCP wire protocol, container, GitHub, or project-specific behavior |
 | Project Extension | Project commands (`build`, `verify`, `package`) and project resources | Selection of a concrete infrastructure provider |
 | Capability | Stable user/agent intent such as `code_context` or `scm_publish` | Provider-specific tool names |
 | Service | Contract for one replaceable class of implementation | User interface or application workflows |
 | Provider | Integration with CodeGraph, Serena, Sourcegraph, Dagger, GitHub, etc. | Cross-provider Core policy |
+
+## MCP transport
+
+The official [Go MCP SDK](https://github.com/modelcontextprotocol/go-sdk) owns the Server, stdio/Streamable HTTP transports, Client bridges, protocol version negotiation, request correlation, and cancellation. DevTool owns **engineering capabilities**, project-aware routing, selected Providers, and optional context-bound patch policies. Do not add a second JSON-RPC protocol implementation to Core.
+
+Both older MCP clients that negotiate `2025-06-18` and modern SDK clients are supported. SDK sessions are transport-level; the active DevTool Gateway retains one-use patch authorization in memory. Bearer token authentication remains required for remote HTTP access.
 
 ## Code intelligence
 

@@ -29,44 +29,8 @@ jobs:
           go run ./cmd/devtool code verify
       - name: Agent Gateway through configured extensions
         run: |
-          cat <<'EOF' | go run ./cmd/devtool agent mcp > /tmp/devtool-agent-mcp.jsonl
-          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-          {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-          {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"code_context","arguments":{"objective":"understand Registry routing","symbol":"Registry","path":"core/registry/registry.go","limit":5}}}
-          EOF
-          python - <<'PY'
-          import json
-
-          messages = {}
-          with open("/tmp/devtool-agent-mcp.jsonl", encoding="utf-8") as fh:
-              for line in fh:
-                  line = line.strip()
-                  if not line:
-                      continue
-                  message = json.loads(line)
-                  if "id" in message:
-                      messages[message["id"]] = message
-
-          for request_id in (1, 2, 3):
-              assert request_id in messages, f"missing MCP response {request_id}: {messages}"
-              assert "error" not in messages[request_id], messages[request_id]
-
-          tools = messages[2]["result"]["tools"]
-          names = {tool["name"] for tool in tools}
-          assert "scm_publish" in names, names
-          assert "code_context" in names, names
-          assert "project_build" in names, names
-          assert "project_verify" in names, names
-          assert "project_activate" in names, names
-          assert "project_rollback" in names, names
-          assert not any(name in {"code_search", "code_symbols", "code_references", "code_diagnostics"} for name in names), names
-          assert not any(name.startswith("codegraph_") for name in names), names
-          assert not any(name.startswith("sourcegraph_") for name in names), names
-          assert "find_symbol" not in names, names
-
-          call = messages[3]["result"]
-          assert call.get("isError") is not True, call
-          PY
+          go build -o /tmp/devtool-mcp-ci ./cmd/devtool
+          python3 scripts/verify-agent-mcp.py /tmp/devtool-mcp-ci
       - name: Reject project-local code intelligence bootstrap
         run: |
           if git grep -n -E 'npm (install|exec)|pip install|uv tool install|go install .*gopls|CODEGRAPH_VERSION|SERENA_VERSION|GOPLS_VERSION' -- ':!docs/**' ':!.github/workflows/**' ':!.serena/**'; then

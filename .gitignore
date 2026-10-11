@@ -4,3 +4,7 @@
 .serena/memories/
 .serena/project.local.yml
 .serena/.gitignore
+
+# Python test tooling
+__pycache__/
+*.pyc

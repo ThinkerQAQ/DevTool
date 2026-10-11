@@ -71,13 +71,16 @@ func TestMCPBridgeHelperProcess(t *testing.T) {
 			continue
 		}
 		switch request.Method {
+		case "server/discover":
+			_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32601, "message": "method not found"}})
 		case "initialize":
 			_ = encoder.Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      request.ID,
 				"result": map[string]any{
 					"protocolVersion": "2025-06-18",
-					"capabilities":    map[string]any{},
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+					"serverInfo":      map[string]string{"name": "mock-mcp", "version": "1"},
 				},
 			})
 		case "notifications/initialized":
