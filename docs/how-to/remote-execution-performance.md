@@ -65,3 +65,19 @@ In the sampled 3-hour activity log, there were about 817 `start_process` request
 4. Do not build another generic Agent Runner or duplicate the official MCP SDK solely to reduce a few shell calls. Add a direct DevTool MCP connection to the client only through explicit configuration, not a hidden fallback.
 
 Further improvement requires instrumenting the **end-to-end** remote client/transport separately; this local A/B does not justify claims of major network speedups.
+
+## Remote round-trip versus command execution, October 11, 2026
+
+Use Desktop Commander's supported `verbose_timing` on a trivial `start_process`, and measure the outer tool call independently. In a five-call sample of `printf 'REMOTE_PROBE_OK'`, remote execution time was 8–9 ms, while request-to-response wall time ranged from 2,577 to 3,388 ms (median 2,731 ms). The outer measurement includes client orchestration, transport and result handling; **it must not be labeled pure network latency**.
+
+A second, paired A/B used the same three read-only shell checks: print a marker, verify the DevTool TOML exists, and read the DevTool main commit. Both variants returned equivalent output. A made three sequential Desktop Commander `start_process` calls; B made one call executing those three checks in a bounded, short shell command.
+
+| Round | Three separate remote calls | One combined remote call |
+| --- | ---: | ---: |
+| AB | 7,781 ms | 2,571 ms |
+| BA | 7,518 ms | 2,560 ms |
+| Median | 7,650 ms | 2,566 ms |
+
+For this controlled trivial workload, one call was about **2.98× faster** (66.5% less wall time). This measures the full outer request path in the actual connected ChatGPT/Desktop Commander environment; it is not a local microbenchmark, and different network loads may change the result.
+
+**Action:** batch only adjacent deterministic steps that require no intermediate Agent decision, with explicit search roots, bounded output and appropriate `set -e`/`pipefail` error handling. Keep meaningful build, test and SCM operations behind the existing DevTool commands. Do not assemble arbitrary long-running tasks into opaque Shell scripts, merge Desktop Commander's two active Node processes, or add a second remote MCP service. Retain detailed journald logs; use structured call statistics alongside them.

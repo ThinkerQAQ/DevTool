@@ -63,3 +63,19 @@ timeout 10s rg -l 'some heading' docs
 4. 不为减少几次 Shell 调用而自研新的通用 Agent Runner 或 MCP 协议层。直接接入 ChatGPT 需要用户明确配置对应 MCP 连接。
 
 端到端网络性能还需单独埋点，当前本地 A/B **不支持宣称远程加速几十倍**。
+
+## 真实远程往返与命令耗时（2026-10-11）
+
+使用 Desktop Commander 自带的 `verbose_timing` 测量简单 `start_process` 内部耗时，同时独立记录外层工具调用往返。连续五次运行 `printf 'REMOTE_PROBE_OK'`，内部执行耗时为 8–9 ms；外层请求到响应为 2,577–3,388 ms（中位数 2,731 ms）。外层耗时包含客户端编排、传输及响应处理，**不能全部认定为网络延迟**。
+
+另外将三个相同的只读操作（输出标记、检查 DevTool 配置文件、读取 main 提交号）交错 A/B。A 为三个独立的 Desktop Commander `start_process` 调用；B 为单次远程调用执行这三个很短的检查，输出结果一致。
+
+| 轮次 | 3 次独立远程调用 | 1 次合并远程调用 |
+| --- | ---: | ---: |
+| AB | 7,781 ms | 2,571 ms |
+| BA | 7,518 ms | 2,560 ms |
+| 中位数 | 7,650 ms | 2,566 ms |
+
+本次极短任务中合并调用约 **2.98 倍快**（总耗时降低 66.5%）。这是实际 ChatGPT/Desktop Commander 环境中的整条外层调用链路耗时，不是本地单机微基准；并发和网络状况不同会影响结果。
+
+**建议：** 只合并无需 Agent 在中间判断的连续确定性步骤，设置明确目录、有限输出和合理的 `set -e` / `pipefail` 错误处理；构建、验证、SCM 仍使用已有 DevTool 项目命令。不要将任意长任务塞入不透明 Shell 脚本，不必合并 Desktop Commander 的两个正常 Node 进程，更不新增第二套远程 MCP 服务。原始 journald 日志维持不变。
