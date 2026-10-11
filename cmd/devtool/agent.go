@@ -46,7 +46,7 @@ func runAgentMCP(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected agent mcp arguments: %v", fs.Args())
 	}
 
-	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
+	h, err := host.OpenProject(ctx, "", extensionloader.NewResolver())
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func runAgentHTTP(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("%s is required; use --allow-unauthenticated only for trusted local environments", strings.TrimSpace(*tokenEnv))
 	}
 
-	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
+	h, err := host.OpenProject(ctx, "", extensionloader.NewResolver())
 	if err != nil {
 		return err
 	}

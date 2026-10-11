@@ -42,7 +42,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	case "agent":
 		return runAgent(ctx, args[1:], out)
 	default:
-		h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
+		h, err := host.OpenProject(ctx, "", extensionloader.NewResolver())
 		if err != nil {
 			return err
 		}
@@ -65,7 +65,7 @@ func runProject(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
 
-	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
+	h, err := host.OpenProject(ctx, "", extensionloader.NewResolver())
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func runConfig(ctx context.Context, args []string, out io.Writer) error {
 		}
 		// Resolve the same configured Providers and service dependencies as
 		// normal project startup, but do not run any project commands.
-		h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
+		h, err := host.OpenProject(ctx, "", extensionloader.NewResolver())
 		if err != nil {
 			return fmt.Errorf("config preflight: %w", err)
 		}

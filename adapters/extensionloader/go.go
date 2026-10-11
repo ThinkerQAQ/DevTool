@@ -2,8 +2,8 @@ package extensionloader
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +33,10 @@ func Resolve(ctx context.Context, p project.Project, name string, configured con
 }
 
 func resolveGo(ctx context.Context, p project.Project, name string, loaderConfig map[string]any) (string, error) {
+	return resolveGoWithSnapshot(ctx, p, name, loaderConfig, nil)
+}
+
+func resolveGoWithSnapshot(ctx context.Context, p project.Project, name string, loaderConfig map[string]any, snapshot *dependencySnapshot) (string, error) {
 	var configured struct {
 		Module  string `json:"module"`
 		Package string `json:"package"`
@@ -72,7 +76,7 @@ func resolveGo(ctx context.Context, p project.Project, name string, loaderConfig
 	}
 	output := filepath.Join(cacheDir, outputName)
 
-	rebuild, err := goBuildNeedsBuild(ctx, p.Root, moduleDir, pkg, output)
+	rebuild, err := goBuildNeedsBuildWithSnapshot(ctx, p.Root, moduleDir, pkg, output, snapshot)
 	if err != nil {
 		return "", fmt.Errorf("check extension %q build cache: %w", name, err)
 	}
@@ -188,6 +192,10 @@ func goModuleTarget(module, version, pkg string) (target, binaryName string, err
 }
 
 func goBuildNeedsBuild(ctx context.Context, projectRoot, moduleDir, pkg, output string) (bool, error) {
+	return goBuildNeedsBuildWithSnapshot(ctx, projectRoot, moduleDir, pkg, output, nil)
+}
+
+func goBuildNeedsBuildWithSnapshot(ctx context.Context, projectRoot, moduleDir, pkg, output string, snapshot *dependencySnapshot) (bool, error) {
 	outputInfo, err := os.Stat(output)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -196,10 +204,15 @@ func goBuildNeedsBuild(ctx context.Context, projectRoot, moduleDir, pkg, output 
 		return false, err
 	}
 
-	dependencies, moduleRoots, err := goDependencyDirs(ctx, projectRoot, moduleDir, pkg)
-	if err != nil {
-		// Let go build produce the authoritative compile/dependency error.
-		return true, nil
+	var dependencies, moduleRoots []string
+	if snapshot != nil {
+		dependencies, moduleRoots = snapshot.dirs, snapshot.modules
+	} else {
+		dependencies, moduleRoots, err = goDependencyDirs(ctx, projectRoot, moduleDir, pkg)
+		if err != nil {
+			// Let go build produce the authoritative compile/dependency error.
+			return true, nil
+		}
 	}
 
 	outputTime := outputInfo.ModTime()
