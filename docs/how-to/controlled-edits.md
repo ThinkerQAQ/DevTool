@@ -87,7 +87,7 @@ After ChatGPT has evaluated that response, generate a Git-format unified diff an
 
 The example patch is illustrative; provide a real diff with correct file content and hunk positions. A successful call returns `structuredContent.status = "applied"`, the changed path, and its SHA-256.
 
-One token authorizes **one attempt on one existing file**. Re-run the appropriate source/document/diagram context for each subsequent edit. The gateway checks the source content digest, Git HEAD, actual worktree root, branch name, patch scope, and token lifetime; `git apply --check` must succeed before application.
+One token authorizes **one attempt on one existing file**. Re-run the appropriate source/document/diagram context for each subsequent edit. The gateway checks the source content digest, Git HEAD, actual worktree root, branch name, patch scope, and token lifetime. Before a Markdown patch is committed, Git applies it inside a temporary preview tree. Changed or newly introduced Mermaid/PlantUML blocks are validated by the **already configured** `diagram-render` Provider. Only a successful renderer result allows the real `git apply`; missing renderers and syntax errors fail closed. Pure prose changes do not rerender unchanged diagrams.
 
 ## 4. Verify and publish
 
@@ -100,6 +100,6 @@ On 2026-10-11 the new binary returned real CodeGraph and Serena context for `cor
 ## Known limits
 
 - Tokens are held **in memory** by one Gateway instance. Restarting it invalidates them. They do not transfer between independent CLI invocations.
-- Existing regular text files only: no file creation, deletion, rename, permission changes, log edits, standalone image/diagram file edits, or binary patches.
+- Existing regular text files only: no file creation, deletion, rename, permission changes, log edits, standalone image/diagram file edits, or binary patches. A missing Mermaid/PlantUML renderer blocks a changed diagram, but not ordinary Markdown prose edits.
 - Policy applies to this tool boundary; Desktop Commander or another agent with unrestricted local filesystem rights can bypass it. A true isolation boundary requires operating-system permissions or a sandbox.
 - This is a conservative minimal adapter. The MCP Server, stdio/Streamable HTTP and internal MCP Client bridges now use the [official Go MCP SDK](https://github.com/modelcontextprotocol/go-sdk); project-aware authorization remains in DevTool. A CEL or OPA engine is unnecessary for the current static constraints.

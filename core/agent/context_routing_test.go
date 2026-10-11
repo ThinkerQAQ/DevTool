@@ -3,11 +3,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/thinkerqaq/devtool/adapters/agentpolicy/gitpatch"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
 
@@ -65,6 +67,7 @@ func setupContextGateway(t *testing.T) (*Gateway, string) {
 	t.Helper()
 	g, root := testGateway(t, "feature/context-routing", false)
 	setupContextFixtures(t, root)
+	g.policy.(*gitpatch.Gate).WithDiagramValidator(func(context.Context, string, string) error { return nil })
 	for _, x := range []routingContextProvider{
 		{"document_context", `{"objective":"inspect","document":{"path":"docs/guide.md","format":"markdown","line_count":3}}`},
 		{"diagram_context", `{"objective":"inspect","path":"docs/graph.md","total_diagrams":1,"results":[{"index":1,"language":"mermaid","status":"found"}]}`},
@@ -204,5 +207,51 @@ func TestPolicyMismatchedCapabilityNotAttested(t *testing.T) {
 	}
 	if token := tokenFrom(contextData(t, g, "diagram_context", "src/app.go")); token != "" {
 		t.Fatal("diagram context allowed code file")
+	}
+}
+
+func TestPolicyRejectsBrokenDiagramBeforeTouchingWorktree(t *testing.T) {
+	g, root := setupContextGateway(t)
+	g.policy.(*gitpatch.Gate).WithDiagramValidator(func(_ context.Context, language, source string) error {
+		if language != "mermaid" || !strings.Contains(source, "invalid") {
+			t.Fatalf("wrong diagram candidate: %q %q", language, source)
+		}
+		return errors.New("invalid diagram syntax")
+	})
+	contextData(t, g, "document_context", "docs/graph.md")
+	token := tokenFrom(contextData(t, g, "diagram_context", "docs/graph.md"))
+	before, err := os.ReadFile(filepath.Join(root, "docs/graph.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := makePatch(t, root, "docs/graph.md", "# Graph\n\n```mermaid\ninvalid syntax\n```\n")
+	if _, err := apply(t, g, token, patch); err == nil || !strings.Contains(err.Error(), "invalid diagram syntax") {
+		t.Fatalf("bad candidate accepted: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "docs/graph.md"))
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("rejected candidate changed source: %v", err)
+	}
+}
+
+func TestPolicyRequiresConfiguredRendererForChangedDiagram(t *testing.T) {
+	g, root := setupContextGateway(t)
+	g.policy.(*gitpatch.Gate).WithDiagramValidator(nil)
+	contextData(t, g, "document_context", "docs/graph.md")
+	token := tokenFrom(contextData(t, g, "diagram_context", "docs/graph.md"))
+	patch := makePatch(t, root, "docs/graph.md", "# Graph\n\n```mermaid\ngraph TD\n    X-->Y\n```\n")
+	if _, err := apply(t, g, token, patch); err == nil || !strings.Contains(err.Error(), "diagram-render provider required") {
+		t.Fatalf("missing renderer accepted: %v", err)
+	}
+}
+
+func TestPolicyUnchangedDiagramDoesNotCallRenderer(t *testing.T) {
+	g, root := setupContextGateway(t)
+	g.policy.(*gitpatch.Gate).WithDiagramValidator(func(context.Context, string, string) error { t.Fatal("unchanged diagram rendered"); return nil })
+	contextData(t, g, "document_context", "docs/graph.md")
+	token := tokenFrom(contextData(t, g, "diagram_context", "docs/graph.md"))
+	patch := makePatch(t, root, "docs/graph.md", "# Graph updated\n\n```mermaid\ngraph TD\n    A-->B\n```\n")
+	if _, err := apply(t, g, token, patch); err != nil {
+		t.Fatalf("ordinary Markdown text edit failed: %v", err)
 	}
 }

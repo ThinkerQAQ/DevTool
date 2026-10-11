@@ -12,11 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
 	"github.com/thinkerqaq/devtool/adapters/agentpolicy/gitpatch"
 	"github.com/thinkerqaq/devtool/adapters/extensionloader"
 	coreagent "github.com/thinkerqaq/devtool/core/agent"
 	"github.com/thinkerqaq/devtool/core/host"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
+	diagramcontract "github.com/thinkerqaq/devtool/sdk/diagram"
 )
 
 func runAgent(ctx context.Context, args []string, out io.Writer) error {
@@ -143,7 +145,28 @@ func projectAgentSession(h *host.ProjectHost, contextName string) agentsdk.Sessi
 func newPolicyGateway(h *host.ProjectHost, session agentsdk.Session) *coreagent.Gateway {
 	gateway := coreagent.NewGateway(h.Registry, session)
 	if h.Project.Config.Agent.Policy.Enabled {
-		gateway.WithPolicy(gitpatch.New(session.ProjectRoot, h.Project.Config.Agent.Policy))
+		gate := gitpatch.New(session.ProjectRoot, h.Project.Config.Agent.Policy)
+		if renderer, ok := h.Registry.Service(diagramcontract.RenderServiceName); ok {
+			gate.WithDiagramValidator(func(ctx context.Context, language, source string) error {
+				request, err := json.Marshal(diagramcontract.RenderRequest{Language: language, Source: source})
+				if err != nil {
+					return err
+				}
+				raw, err := renderer.Invoke(ctx, diagramcontract.RenderMethod, request)
+				if err != nil {
+					return err
+				}
+				var rendered diagramcontract.RenderResult
+				if err := json.Unmarshal(raw, &rendered); err != nil {
+					return err
+				}
+				if rendered.Status != "rendered" {
+					return fmt.Errorf("renderer %s status %s: %s", rendered.Renderer, rendered.Status, rendered.Diagnostic)
+				}
+				return nil
+			})
+		}
+		gateway.WithPolicy(gate)
 	}
 	return gateway
 }

@@ -32,7 +32,7 @@ devtool agent mcp --context codex
 | `scm_publish` | 通过选定 SCM Provider 提交发布 |
 | `project_<command>` | 调用 Project Extension 定义的命令 |
 
-修改 Markdown 先调用 `document_context`；修改 Markdown 内的 Mermaid/PlantUML 图同时调用 `document_context` 和 `diagram_context`；查询日志必须通过 `log_context`，不能用源码编辑工具替代。可选的 `workspace_apply_patch` 在执行前校验相应上下文。
+修改 Markdown 先调用 `document_context`；修改 Markdown 内的 Mermaid/PlantUML 图同时调用 `document_context` 和 `diagram_context`；新图或变更图还必须在临时 Git 预览中通过已有 `diagram-render` Provider 的渲染校验；查询日志必须通过 `log_context`，不能用源码编辑工具替代。可选的 `workspace_apply_patch` 在执行前校验相应上下文。
 
 实际参数应以 MCP 返回的 Tool Schema 为准。
 
