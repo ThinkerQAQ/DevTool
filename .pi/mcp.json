@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "devtool": {
+      "command": "devtool",
+      "args": [
+        "agent",
+        "mcp",
+        "--context",
+        "agent"
+      ],
+      "env": {
+        "DEVTOOL_PROFILES": "local"
+      },
+      "exposure": "hidden",
+      "toolExposure": {
+        "code_context": "direct",
+        "document_context": "direct",
+        "workspace_list": "direct",
+        "workspace_inspect": "direct",
+        "project_build": "direct",
+        "project_verify": "direct",
+        "project_package": "direct"
+      }
+    }
+  }
+}
