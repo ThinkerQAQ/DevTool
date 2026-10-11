@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
@@ -38,100 +36,71 @@ func (r *fakeRegistrar) Service(name string) (service.Invoker, bool) {
 	return value, ok
 }
 
-func TestDirectoryScopeSkipsFileDiagnostics(t *testing.T) {
-	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, "pkg"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	realtimeCalls := 0
+func TestIndexedOnlyUsesNativeSymbolSearch(t *testing.T) {
+	var searches []codeintelligence.SearchRequest
 	reg := &fakeRegistrar{services: map[string]service.Invoker{
-		codeintelligence.IndexedServiceName: service.Func(func(_ context.Context, method string, _ json.RawMessage) (json.RawMessage, error) {
+		codeintelligence.IndexedServiceName: service.Func(func(_ context.Context, method string, raw json.RawMessage) (json.RawMessage, error) {
 			if method != codeintelligence.MethodSearch {
-				t.Fatalf("indexed method = %q", method)
+				t.Fatalf("method = %q", method)
 			}
-			return json.RawMessage("{\"results\":[]}"), nil
+			var request codeintelligence.SearchRequest
+			if err := json.Unmarshal(raw, &request); err != nil {
+				t.Fatal(err)
+			}
+			searches = append(searches, request)
+			return json.RawMessage(`{"results":[{"name":"AreaAnchor","path":"Models.kt"}]}`), nil
 		}),
-		codeintelligence.RealtimeServiceName: service.Func(func(_ context.Context, method string, _ json.RawMessage) (json.RawMessage, error) {
-			realtimeCalls++
-			return nil, fmt.Errorf("unexpected realtime method %s", method)
+		codeintelligence.RealtimeServiceName: service.Func(func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+			t.Fatal("realtime provider must not be invoked by code context")
+			return nil, nil
 		}),
 	}}
 	ext := New()
 	ext.services = reg
-
-	response, err := ext.build(t.Context(), codecontext.BuildRequest{
-		Workspace: codeintelligence.Workspace{Root: root},
-		Objective: "review capability package",
-		Path:      "pkg",
-	})
-	if err != nil {
-		t.Fatal(err)
+	for _, path := range []string{"", "Models.kt"} {
+		response, err := ext.build(t.Context(), codecontext.BuildRequest{
+			Workspace: codeintelligence.Workspace{Root: t.TempDir()},
+			Objective: "Find AreaAnchor definition",
+			Symbol:    "AreaAnchor",
+			Path:      path,
+			Limit:     5,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Indexed) == 0 || len(response.Realtime) != 0 || len(response.Degraded) != 0 {
+			t.Fatalf("unexpected context: %+v", response)
+		}
+		if len(response.NotApplied) == 0 || response.NotApplied[0] != "realtime code intelligence is not configured" {
+			t.Fatalf("missing realtime marker: %+v", response.NotApplied)
+		}
+		if path != "" && len(response.NotApplied) != 2 {
+			t.Fatalf("scope note missing: %+v", response.NotApplied)
+		}
 	}
-	if realtimeCalls != 0 {
-		t.Fatalf("realtime calls = %d, want 0", realtimeCalls)
+	if len(searches) != 2 {
+		t.Fatalf("search calls = %d", len(searches))
 	}
-	if len(response.Indexed) == 0 {
-		t.Fatal("expected indexed result")
-	}
-	if len(response.NotApplied) != 1 || response.NotApplied[0] != "realtime.diagnostics: directory scope" {
-		t.Fatalf("not applied = %#v", response.NotApplied)
+	for _, request := range searches {
+		if request.Discovery || request.Query != "AreaAnchor" || request.Limit != 5 {
+			t.Fatalf("expected direct native indexed search, got %+v", request)
+		}
 	}
 }
 
-func TestIndexedFailureReturnsRealtimePartialResult(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+func TestIndexedProviderFailurePropagates(t *testing.T) {
 	reg := &fakeRegistrar{services: map[string]service.Invoker{
 		codeintelligence.IndexedServiceName: service.Func(func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
 			return nil, fmt.Errorf("index unavailable")
 		}),
-		codeintelligence.RealtimeServiceName: service.Func(func(_ context.Context, method string, _ json.RawMessage) (json.RawMessage, error) {
-			if method != codeintelligence.MethodDiagnostics {
-				t.Fatalf("realtime method = %q", method)
-			}
-			return json.RawMessage("{\"diagnostics\":[]}"), nil
-		}),
 	}}
 	ext := New()
 	ext.services = reg
-
-	response, err := ext.build(t.Context(), codecontext.BuildRequest{
-		Workspace: codeintelligence.Workspace{Root: root},
-		Objective: "inspect file",
-		Path:      "main.go",
+	_, err := ext.build(t.Context(), codecontext.BuildRequest{
+		Workspace: codeintelligence.Workspace{Root: t.TempDir()},
+		Objective: "inspect source",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(response.Realtime["diagnostics"]) == 0 {
-		t.Fatal("expected realtime diagnostics")
-	}
-	if response.Degraded["indexed"] == "" {
-		t.Fatalf("degraded = %#v", response.Degraded)
-	}
-}
-
-func TestNoUsableBranchFails(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	failed := service.Func(func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
-		return nil, fmt.Errorf("unavailable")
-	})
-	ext := New()
-	ext.services = &fakeRegistrar{services: map[string]service.Invoker{
-		codeintelligence.IndexedServiceName:  failed,
-		codeintelligence.RealtimeServiceName: failed,
-	}}
-
-	if _, err := ext.build(t.Context(), codecontext.BuildRequest{
-		Workspace: codeintelligence.Workspace{Root: root},
-		Objective: "inspect file",
-		Path:      "main.go",
-	}); err == nil {
-		t.Fatal("expected no usable branch to fail")
+	if err == nil {
+		t.Fatal("expected indexed provider failure")
 	}
 }

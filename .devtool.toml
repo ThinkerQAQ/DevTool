@@ -160,13 +160,6 @@ loader = "go"
 module = "."
 package = "./extensions/intelligence/codegraph/cmd/provider"
 
-[extension.lsp]
-loader = "go"
-
-[extension.lsp.loader_config]
-module = "."
-package = "./extensions/intelligence/serena/cmd/provider"
-
 [extension.sourcegraph]
 loader = "go"
 
@@ -216,9 +209,6 @@ provider = "runtime.dagger"
 
 [service.code-indexed]
 provider = "intelligence.codegraph"
-
-[service.code-realtime]
-provider = "intelligence.lsp.serena"
 
 [service.code-context]
 provider = "context.code.composite"

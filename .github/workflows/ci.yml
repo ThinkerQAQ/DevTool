@@ -33,7 +33,7 @@ jobs:
           python3 scripts/verify-agent-mcp.py /tmp/devtool-mcp-ci
       - name: Reject project-local code intelligence bootstrap
         run: |
-          if git grep -n -E 'npm (install|exec)|pip install|uv tool install|go install .*gopls|CODEGRAPH_VERSION|SERENA_VERSION|GOPLS_VERSION' -- ':!docs/**' ':!.github/workflows/**' ':!.serena/**'; then
+          if git grep -n -E 'npm (install|exec)|pip install|uv tool install|go install .*gopls|CODEGRAPH_VERSION|GOPLS_VERSION' -- ':!docs/**' ':!.github/workflows/**'; then
             echo "project-local code-intelligence dependency bootstrap is forbidden"
             exit 1
           fi

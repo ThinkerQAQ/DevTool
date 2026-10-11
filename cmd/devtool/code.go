@@ -37,12 +37,16 @@ func runCode(ctx context.Context, args []string, out io.Writer) error {
 		if _, err := invokeCodeService(ctx, h, codeintelligence.IndexedServiceName, codeintelligence.MethodVerify, workspace); err != nil {
 			return fmt.Errorf("indexed intelligence verify: %w", err)
 		}
-		if _, err := invokeCodeService(ctx, h, codeintelligence.RealtimeServiceName, codeintelligence.MethodVerify, workspace); err != nil {
-			return fmt.Errorf("realtime intelligence verify: %w", err)
-		}
 		fmt.Fprintln(out, "Code intelligence VERIFIED")
 		fmt.Fprintln(out, "- Indexed: PASS")
-		fmt.Fprintln(out, "- Realtime: PASS")
+		if _, ok := h.Registry.Service(codeintelligence.RealtimeServiceName); ok {
+			if _, err := invokeCodeService(ctx, h, codeintelligence.RealtimeServiceName, codeintelligence.MethodVerify, workspace); err != nil {
+				return fmt.Errorf("realtime intelligence verify: %w", err)
+			}
+			fmt.Fprintln(out, "- Realtime: PASS")
+		} else {
+			fmt.Fprintln(out, "- Realtime: NOT CONFIGURED")
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown code subcommand %q; use doctor or verify", args[0])
@@ -71,6 +75,10 @@ func projectCodeWorkspace(h *host.ProjectHost) codeintelligence.Workspace {
 
 func runCodeDoctor(ctx context.Context, h *host.ProjectHost, workspace codeintelligence.Workspace, out io.Writer) error {
 	for _, serviceName := range []string{codeintelligence.IndexedServiceName, codeintelligence.RealtimeServiceName} {
+		if _, ok := h.Registry.Service(serviceName); !ok {
+			fmt.Fprintf(out, "%s NOT CONFIGURED\n", serviceName)
+			continue
+		}
 		raw, err := invokeCodeService(ctx, h, serviceName, codeintelligence.MethodDoctor, workspace)
 		if err != nil {
 			return fmt.Errorf("%s doctor: %w", serviceName, err)

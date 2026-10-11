@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/thinkerqaq/devtool/sdk/codecontext"
@@ -17,6 +15,9 @@ import (
 
 const ExtensionID = "context.code.composite"
 
+// This is an indexed-only transitional service. It does not attempt
+// realtime LSP operations or infer provider availability across RPC.
+// Native CodeGraph and LSP MCP tools will replace this composite.
 type Extension struct {
 	services extensioncontract.Registrar
 }
@@ -28,10 +29,7 @@ func (e *Extension) Descriptor() extensioncontract.Descriptor {
 		ID:       ExtensionID,
 		Kind:     extensioncontract.KindCodeIntelligence,
 		Provides: []string{codecontext.ServiceName},
-		Requires: []string{
-			codeintelligence.IndexedServiceName,
-			codeintelligence.RealtimeServiceName,
-		},
+		Requires: []string{codeintelligence.IndexedServiceName},
 	}
 }
 
@@ -56,12 +54,9 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	}
 
 	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
-		Name:         "code-context",
-		Layer:        "service",
-		Service:      codecontext.ServiceName,
-		Provider:     ExtensionID,
-		Method:       method,
-		RequestBytes: len(payload),
+		Name: "code-context", Layer: "service",
+		Service: codecontext.ServiceName, Provider: ExtensionID,
+		Method: method, RequestBytes: len(payload),
 	})
 	defer func() { span.End(len(result), err) }()
 
@@ -72,164 +67,42 @@ func (e *Extension) Invoke(ctx context.Context, method string, payload json.RawM
 	return json.Marshal(response)
 }
 
-type branchResult struct {
-	name     string
-	indexed  json.RawMessage
-	realtime map[string]json.RawMessage
-	degraded map[string]string
-	skipped  []string
-	err      error
-}
-
 func (e *Extension) build(ctx context.Context, request codecontext.BuildRequest) (codecontext.BuildResponse, error) {
+	if e.services == nil {
+		return codecontext.BuildResponse{}, fmt.Errorf("code context service registry is unavailable")
+	}
+	invoker, ok := e.services.Service(codeintelligence.IndexedServiceName)
+	if !ok {
+		return codecontext.BuildResponse{}, fmt.Errorf("indexed code intelligence is not configured")
+	}
 	query := request.Objective
 	if request.Symbol != "" {
 		query = request.Symbol
 	}
-	indexedRequest := codeintelligence.SearchRequest{
+	search := codeintelligence.SearchRequest{
 		Workspace: request.Workspace,
 		Query:     query,
 		Limit:     request.Limit,
-		Discovery: request.Symbol == "",
+		// Use CodeGraph's native symbol search rather than the bespoke
+		// keyword splitter and ranking-based discovery path.
+		Discovery: false,
 	}
-
-	response := codecontext.BuildResponse{Objective: request.Objective}
-	if request.Symbol == "" && request.Path == "" {
-		indexed, err := e.invoke(ctx, codeintelligence.IndexedServiceName, codeintelligence.MethodSearch, indexedRequest)
-		if err != nil {
-			return codecontext.BuildResponse{}, fmt.Errorf("build indexed code context: %w", err)
-		}
-		response.Indexed = indexed
-		return response, nil
-	}
-
-	results := make(chan branchResult, 2)
-	go func() {
-		raw, err := e.invoke(ctx, codeintelligence.IndexedServiceName, codeintelligence.MethodSearch, indexedRequest)
-		results <- branchResult{name: "indexed", indexed: raw, err: err}
-	}()
-	go func() {
-		realtime, degraded, skipped := e.fetchRealtime(ctx, request)
-		results <- branchResult{name: "realtime", realtime: realtime, degraded: degraded, skipped: skipped}
-	}()
-
-	var indexedErr error
-	for range 2 {
-		branch := <-results
-		switch branch.name {
-		case "indexed":
-			if branch.err != nil {
-				indexedErr = branch.err
-				response.Degraded = addDegraded(response.Degraded, "indexed", branch.err)
-			} else {
-				response.Indexed = branch.indexed
-			}
-		case "realtime":
-			response.Realtime = branch.realtime
-			for key, message := range branch.degraded {
-				if response.Degraded == nil {
-					response.Degraded = map[string]string{}
-				}
-				response.Degraded[key] = message
-			}
-			response.NotApplied = append(response.NotApplied, branch.skipped...)
-		}
-	}
-
-	if len(response.Indexed) == 0 && len(response.Realtime) == 0 {
-		if indexedErr != nil {
-			return codecontext.BuildResponse{}, fmt.Errorf("code context providers produced no usable result: %w", indexedErr)
-		}
-		return codecontext.BuildResponse{}, fmt.Errorf("code context providers produced no usable result")
-	}
-	return response, nil
-}
-
-func (e *Extension) fetchRealtime(ctx context.Context, request codecontext.BuildRequest) (map[string]json.RawMessage, map[string]string, []string) {
-	realtime := map[string]json.RawMessage{}
-	degraded := map[string]string{}
-	var skipped []string
-
-	if request.Symbol != "" {
-		raw, err := e.invoke(ctx, codeintelligence.RealtimeServiceName, codeintelligence.MethodSymbols, codeintelligence.SymbolRequest{
-			Workspace:   request.Workspace,
-			Symbol:      request.Symbol,
-			Path:        request.Path,
-			IncludeBody: request.IncludeBody,
-		})
-		if err != nil {
-			degraded["realtime.symbols"] = err.Error()
-		} else {
-			realtime["symbols"] = raw
-		}
-	}
-
-	if request.Symbol != "" && request.Path != "" {
-		raw, err := e.invoke(ctx, codeintelligence.RealtimeServiceName, codeintelligence.MethodReferences, codeintelligence.ReferencesRequest{
-			Workspace: request.Workspace,
-			Symbol:    request.Symbol,
-			Path:      request.Path,
-		})
-		if err != nil {
-			degraded["realtime.references"] = err.Error()
-		} else {
-			realtime["references"] = raw
-		}
-	}
-
-	if request.Path != "" {
-		if isDirectory(request.Root, request.Path) {
-			skipped = append(skipped, "realtime.diagnostics: directory scope")
-		} else {
-			raw, err := e.invoke(ctx, codeintelligence.RealtimeServiceName, codeintelligence.MethodDiagnostics, codeintelligence.DiagnosticsRequest{
-				Workspace: request.Workspace,
-				Path:      request.Path,
-			})
-			if err != nil {
-				degraded["realtime.diagnostics"] = err.Error()
-			} else {
-				realtime["diagnostics"] = raw
-			}
-		}
-	}
-
-	if len(realtime) == 0 {
-		realtime = nil
-	}
-	if len(degraded) == 0 {
-		degraded = nil
-	}
-	return realtime, degraded, skipped
-}
-
-func (e *Extension) invoke(ctx context.Context, serviceName, method string, request any) (json.RawMessage, error) {
-	if e.services == nil {
-		return nil, fmt.Errorf("code context service registry is unavailable")
-	}
-	invoker, ok := e.services.Service(serviceName)
-	if !ok {
-		return nil, fmt.Errorf("service %q is not configured", serviceName)
-	}
-	payload, err := json.Marshal(request)
+	raw, err := json.Marshal(search)
 	if err != nil {
-		return nil, err
+		return codecontext.BuildResponse{}, err
 	}
-	return invoker.Invoke(ctx, method, payload)
-}
+	indexed, err := invoker.Invoke(ctx, codeintelligence.MethodSearch, raw)
+	if err != nil {
+		return codecontext.BuildResponse{}, fmt.Errorf("indexed code intelligence: %w", err)
+	}
 
-func addDegraded(current map[string]string, key string, err error) map[string]string {
-	if current == nil {
-		current = map[string]string{}
+	skipped := []string{"realtime code intelligence is not configured"}
+	if request.Path != "" {
+		skipped = append(skipped, "indexed search does not guarantee a file or directory scope")
 	}
-	current[key] = err.Error()
-	return current
-}
-
-func isDirectory(root, path string) bool {
-	candidate := path
-	if !filepath.IsAbs(candidate) {
-		candidate = filepath.Join(root, candidate)
-	}
-	info, err := os.Stat(candidate)
-	return err == nil && info.IsDir()
+	return codecontext.BuildResponse{
+		Objective:  request.Objective,
+		Indexed:    indexed,
+		NotApplied: skipped,
+	}, nil
 }
