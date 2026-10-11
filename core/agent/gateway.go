@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -12,15 +11,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/thinkerqaq/devtool/core/registry"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
-const protocolVersion = "2025-06-18"
-
-// Gateway exposes DevTool capabilities over MCP. It is a model-free protocol adapter,
-// not an Agent runtime: it owns no planning, durable run state, retry policy, or workflow semantics.
+// Gateway implements the project-aware engineering tool contract. The official
+// MCP SDK owns protocol parsing, version negotiation and transport lifecycle.
 type Gateway struct {
 	registry *registry.Registry
 	session  agentsdk.Session
@@ -35,139 +33,104 @@ func NewGateway(reg *registry.Registry, session agentsdk.Session) *Gateway {
 	return &Gateway{registry: reg, session: session}
 }
 
-// WithPolicy installs an optional deterministic execution policy adapter.
+// WithPolicy connects a deterministic execution policy adapter.
 func (g *Gateway) WithPolicy(policy agentsdk.ExecutionPolicy) *Gateway {
 	g.policy = policy
 	return g
 }
 
-func (g *Gateway) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
-	encoder := json.NewEncoder(out)
-
-	for scanner.Scan() {
-		line := append([]byte(nil), scanner.Bytes()...)
-		if len(strings.TrimSpace(string(line))) == 0 {
-			continue
-		}
-		var request rpcRequest
-		if err := json.Unmarshal(line, &request); err != nil {
-			if err := encoder.Encode(errorResponse(nil, -32700, "parse error")); err != nil {
-				return err
-			}
-			continue
-		}
-		if request.ID == nil {
-			continue
-		}
-		response := g.handle(ctx, request)
-		if err := encoder.Encode(response); err != nil {
-			return err
-		}
+func (g *Gateway) server(ctx context.Context) (*mcp.Server, error) {
+	definitions, err := g.listTools(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return scanner.Err()
+	server := mcp.NewServer(&mcp.Implementation{Name: "devtool-mcp", Version: "1"}, nil)
+	for _, raw := range definitions {
+		var tool mcp.Tool
+		if err := json.Unmarshal(raw, &tool); err != nil {
+			return nil, fmt.Errorf("decode MCP tool definition: %w", err)
+		}
+		if tool.Name == "" || tool.InputSchema == nil {
+			return nil, fmt.Errorf("MCP tool name and input schema are required")
+		}
+		name := tool.Name
+		server.AddTool(&tool, func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := request.Params.Arguments
+			if len(args) == 0 {
+				args = json.RawMessage(`{}`)
+			}
+			ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+				Name: "tools/call", Layer: "gateway", Tool: name,
+				RequestBytes: len(args),
+			})
+			result, err := g.callTool(ctx, name, args)
+			if err != nil {
+				result = toolErrorResult(err)
+			}
+			span.End(len(result), err)
+			var out mcp.CallToolResult
+			if err := json.Unmarshal(result, &out); err != nil {
+				return nil, fmt.Errorf("decode tool result %s: %w", name, err)
+			}
+			return &out, nil
+		})
+	}
+	return server, nil
 }
 
+// Serve uses the SDK's standard newline-delimited JSON stdio transport.
+func (g *Gateway) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
+	server, err := g.server(ctx)
+	if err != nil {
+		return err
+	}
+	return server.Run(ctx, &mcp.IOTransport{
+		Reader: io.NopCloser(in),
+		Writer: writeOnlyCloser{Writer: out},
+	})
+}
+
+type writeOnlyCloser struct{ io.Writer }
+
+func (writeOnlyCloser) Close() error { return nil }
+
+// HTTPHandler delegates the MCP wire protocol and session lifecycle to the SDK
+// while keeping DevTool's bearer authorization and health endpoint.
 func (g *Gateway) HTTPHandler(token string) http.Handler {
+	server, err := g.server(context.Background())
+	if err != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		})
+	}
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+		return server
+	}, &mcp.StreamableHTTPOptions{
+		Stateless:           true,
+		JSONResponse:        true,
+		MaxRequestBodyBytes: 8 << 20,
+	})
 	token = strings.TrimSpace(token)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "{\"status\":\"ok\"}\n")
 	})
-	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", http.MethodPost)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+	mux.Handle("/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token != "" && !authorizedBearer(r.Header.Get("Authorization"), token) {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		defer r.Body.Close()
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024*1024))
-		var request rpcRequest
-		if err := decoder.Decode(&request); err != nil {
-			writeHTTPRPC(w, http.StatusBadRequest, errorResponse(nil, -32700, "parse error"))
-			return
-		}
-		if request.ID == nil {
-			// MCP notifications do not receive JSON-RPC responses.
-			w.WriteHeader(http.StatusAccepted)
-			return
-		}
-		writeHTTPRPC(w, http.StatusOK, g.handle(r.Context(), request))
-	})
+		handler.ServeHTTP(w, r)
+	}))
 	return mux
 }
 
 func authorizedBearer(header, token string) bool {
 	expected := "Bearer " + token
-	if len(header) != len(expected) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(header), []byte(expected)) == 1
-}
-
-func writeHTTPRPC(w http.ResponseWriter, status int, response rpcResponse) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(response)
-}
-
-func (g *Gateway) handle(ctx context.Context, request rpcRequest) rpcResponse {
-	switch request.Method {
-	case "initialize":
-		return successResponse(request.ID, map[string]any{
-			"protocolVersion": protocolVersion,
-			"capabilities": map[string]any{
-				"tools": map[string]any{"listChanged": false},
-			},
-			"serverInfo": map[string]any{
-				"name":    "devtool-mcp",
-				"version": "1",
-			},
-		})
-	case "ping":
-		return successResponse(request.ID, map[string]any{})
-	case "tools/list":
-		tools, err := g.listTools(ctx)
-		if err != nil {
-			return errorResponse(request.ID, -32603, err.Error())
-		}
-		return successResponse(request.ID, map[string]any{"tools": tools})
-	case "tools/call":
-		var params struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
-		if err := json.Unmarshal(request.Params, &params); err != nil {
-			return errorResponse(request.ID, -32602, "invalid tools/call params")
-		}
-		ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
-			Name:         "tools/call",
-			Layer:        "gateway",
-			Tool:         params.Name,
-			RequestBytes: len(params.Arguments),
-		})
-		result, err := g.callTool(ctx, params.Name, params.Arguments)
-		if err != nil {
-			failure := toolErrorResult(err)
-			span.End(len(failure), err)
-			return successRawResponse(request.ID, failure)
-		}
-		span.End(len(result), nil)
-		return successRawResponse(request.ID, result)
-	default:
-		return errorResponse(request.ID, -32601, fmt.Sprintf("method %q not found", request.Method))
-	}
+	return len(header) == len(expected) && subtle.ConstantTimeCompare([]byte(header), []byte(expected)) == 1
 }
 
 func (g *Gateway) listTools(ctx context.Context) ([]json.RawMessage, error) {
@@ -176,7 +139,6 @@ func (g *Gateway) listTools(ctx context.Context) ([]json.RawMessage, error) {
 	if g.routes != nil {
 		return cloneRawMessages(g.tools), nil
 	}
-
 	routes := map[string]agentsdk.ToolProvider{}
 	var definitions []json.RawMessage
 	for _, entry := range g.registry.AgentToolProviders() {
@@ -252,49 +214,10 @@ func cloneRawMessages(values []json.RawMessage) []json.RawMessage {
 	return out
 }
 
-type rpcRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
-
-type rpcResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *rpcError       `json:"error,omitempty"`
-}
-
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-func successResponse(id json.RawMessage, result any) rpcResponse {
-	raw, _ := json.Marshal(result)
-	return successRawResponse(id, raw)
-}
-
-func successRawResponse(id json.RawMessage, result json.RawMessage) rpcResponse {
-	return rpcResponse{JSONRPC: "2.0", ID: cloneID(id), Result: append(json.RawMessage(nil), result...)}
-}
-
-func errorResponse(id json.RawMessage, code int, message string) rpcResponse {
-	return rpcResponse{JSONRPC: "2.0", ID: cloneID(id), Error: &rpcError{Code: code, Message: message}}
-}
-
-func cloneID(id json.RawMessage) json.RawMessage {
-	if id == nil {
-		return json.RawMessage(`null`)
-	}
-	return append(json.RawMessage(nil), id...)
-}
-
 func toolErrorResult(err error) json.RawMessage {
-	raw, _ := json.Marshal(map[string]any{
+	result, _ := json.Marshal(map[string]any{
 		"content": []map[string]string{{"type": "text", "text": err.Error()}},
 		"isError": true,
 	})
-	return raw
+	return result
 }

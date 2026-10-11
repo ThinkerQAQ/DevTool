@@ -1,12 +1,13 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"testing"
 
 	"github.com/thinkerqaq/devtool/core/registry"
@@ -32,33 +33,45 @@ func (f fakeProvider) CallTool(context.Context, agentsdk.Session, string, json.R
 
 func TestGatewayDiscoversToolsFromRegistry(t *testing.T) {
 	reg := registry.New()
-	if err := reg.ProvideAgentTools("z.extension", fakeProvider{name: "z_tool"}); err != nil {
+	for _, name := range []string{"z_tool", "a_tool"} {
+		if err := reg.ProvideAgentTools(name, fakeProvider{name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server, err := NewGateway(reg, agentsdk.Session{ProjectRoot: "/tmp/example"}).server(t.Context())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.ProvideAgentTools("a.extension", fakeProvider{name: "a_tool"}); err != nil {
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"a_tool","arguments":{}}}`,
-	}, "\n") + "\n"
-	var out bytes.Buffer
-	if err := NewGateway(reg, agentsdk.Session{ProjectRoot: "/tmp/example"}).Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+	defer serverSession.Close()
+	clientSession, err := mcp.NewClient(&mcp.Implementation{Name: "devtool-test", Version: "1"}, nil).Connect(t.Context(), clientTransport, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("responses = %d, want 3: %s", len(lines), out.String())
+	defer clientSession.Close()
+	listed, err := clientSession.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(lines[1], `"name":"a_tool"`) || !strings.Contains(lines[1], `"name":"z_tool"`) {
-		t.Fatalf("tools/list response = %s", lines[1])
+	if len(listed.Tools) != 2 || listed.Tools[0].Name != "a_tool" || listed.Tools[1].Name != "z_tool" {
+		t.Fatalf("unexpected tool order: %+v", listed.Tools)
 	}
-	if !strings.Contains(lines[2], `"text":"ok"`) {
-		t.Fatalf("tools/call response = %s", lines[2])
+	result, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{Name: "a_tool", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || len(result.Content) != 1 {
+		t.Fatalf("tool call failed: %+v", result)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || text.Text != "ok" {
+		t.Fatalf("unexpected tool result: %+v", result.Content)
 	}
 }
-
 
 func TestGatewayHTTPTransport(t *testing.T) {
 	reg := registry.New()
@@ -79,6 +92,8 @@ func TestGatewayHTTPTransport(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Mcp-Protocol-Version", "2025-06-18")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -90,6 +105,9 @@ func TestGatewayHTTPTransport(t *testing.T) {
 
 	notification := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`))
 	notification.Header.Set("Authorization", "Bearer secret")
+	notification.Header.Set("Content-Type", "application/json")
+	notification.Header.Set("Accept", "application/json, text/event-stream")
+	notification.Header.Set("Mcp-Protocol-Version", "2025-06-18")
 	notificationRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(notificationRecorder, notification)
 	if notificationRecorder.Code != http.StatusAccepted {

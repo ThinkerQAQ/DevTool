@@ -7,69 +7,26 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 )
 
 func TestHTTPProviderListsAndCallsTools(t *testing.T) {
-	var sessionID string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "remote-fake", Version: "1"}, nil)
+	server.AddTool(&mcp.Tool{Name: "find_references", Description: "find references", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil
+	})
+	endpoint := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "token test" {
-			t.Fatalf("Authorization = %q", got)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
 		}
-		var request struct {
-			ID     json.RawMessage `json:"id,omitempty"`
-			Method string          `json:"method"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatal(err)
-		}
-		switch request.Method {
-		case "initialize":
-			sessionID = "session-test"
-			w.Header().Set("Mcp-Session-Id", sessionID)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      request.ID,
-				"result": map[string]any{
-					"protocolVersion": "2025-06-18",
-					"capabilities":    map[string]any{},
-				},
-			})
-		case "notifications/initialized":
-			if got := r.Header.Get("Mcp-Session-Id"); got != sessionID {
-				t.Fatalf("notification session = %q", got)
-			}
-			w.WriteHeader(http.StatusAccepted)
-		case "tools/list":
-			if got := r.Header.Get("Mcp-Session-Id"); got != sessionID {
-				t.Fatalf("tools/list session = %q", got)
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      request.ID,
-				"result": map[string]any{
-					"tools": []map[string]any{{
-						"name":        "find_references",
-						"description": "find references",
-						"inputSchema": map[string]any{"type": "object"},
-					}},
-				},
-			})
-		case "tools/call":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      request.ID,
-				"result": map[string]any{
-					"content": []map[string]string{{"type": "text", "text": "ok"}},
-				},
-			})
-		default:
-			t.Fatalf("unexpected method %q", request.Method)
-		}
+		endpoint.ServeHTTP(w, r)
 	}))
-	defer server.Close()
-
-	provider := NewHTTP(server.URL, "token test")
+	defer httpServer.Close()
+	provider := NewHTTP(httpServer.URL, "token test")
+	defer provider.Close()
 	tools, err := provider.ListTools(context.Background(), agentsdk.Session{})
 	if err != nil {
 		t.Fatal(err)
@@ -77,12 +34,16 @@ func TestHTTPProviderListsAndCallsTools(t *testing.T) {
 	if len(tools) != 1 || tools[0].Name != "find_references" {
 		t.Fatalf("tools = %#v", tools)
 	}
-
 	raw, err := provider.CallTool(context.Background(), agentsdk.Session{}, "find_references", json.RawMessage(`{"symbol":"Foo"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !json.Valid(raw) {
-		t.Fatalf("result is not JSON: %s", raw)
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || len(result.Content) != 1 || result.Content[0].Text != "ok" {
+		t.Fatalf("unexpected tool result: %s err=%v", raw, err)
 	}
 }

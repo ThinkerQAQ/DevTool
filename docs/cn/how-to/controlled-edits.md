@@ -108,4 +108,4 @@ Gateway 依据实际文件类型决定上下文门禁；Markdown 图块识别复
 - 令牌保存在**同一 MCP Gateway 进程的内存**中，进程重启后失效；不能跨两次独立 CLI 运行复用。
 - 暂不支持新增、删除、重命名文件、修改文件权限、编辑日志、独立 SVG/PNG/图文件和二进制补丁。
 - 这是 Gateway 的流程校验，不是操作系统安全边界；外部 Agent 仍可通过不受限 Shell 绕过它。
-- DV2 既有 MCP JSON-RPC 实现暂时保留；[官方 Go MCP SDK](https://github.com/modelcontextprotocol/go-sdk) 可用于未来协议层迁移，但本次没有必要替换已经正常运行的 MCP Server。当前静态条件也不需要额外引入 CEL 或 OPA。
+- MCP Server、stdio/Streamable HTTP 和内部 MCP Client Bridge 已改用[官方 Go MCP SDK](https://github.com/modelcontextprotocol/go-sdk)；项目感知的修改门禁仍由 DV2 管理。当前静态约束无需引入 CEL 或 OPA。

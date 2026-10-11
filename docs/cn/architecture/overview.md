@@ -24,11 +24,17 @@ DevTool 是工程开发控制面：上层表达开发意图，配置将稳定能
 
 | 层 | 负责 | 不负责 |
 | --- | --- | --- |
-| Core | 发现、扩展注册/加载、路由、协议、生命周期 | 厂商细节与项目业务 |
+| Core | 项目发现、扩展注册/加载、路由、策略、生命周期 | MCP 底层协议、厂商细节与项目业务 |
 | Project Extension | build、verify、package 等项目命令 | 具体基础设施实现 |
 | Capability | code_context、scm_publish 等稳定开发意图 | 原始 Provider 方法 |
 | Service | 可替换能力的 Contract | 项目 UI 和业务流程 |
 | Provider | CodeGraph、Serena、Dagger、GitHub 等集成 | 跨 Provider Core 策略 |
+
+## MCP 协议与传输
+
+[官方 Go MCP SDK](https://github.com/modelcontextprotocol/go-sdk) 负责 Server、stdio/Streamable HTTP、Client Bridge、协议版本协商、请求关联与取消。DevTool 自身负责**开发意图、项目感知路由、可配置 Provider 及上下文修改策略**，不再额外实现 MCP JSON-RPC 协议层。
+
+旧版 `2025-06-18` 客户端与新版 SDK 客户端可协商兼容。一次性修改令牌仍存储于活动 DevTool Gateway 的内存；远程 HTTP 入口保留 Bearer Token 认证。
 
 ## 代码智能
 

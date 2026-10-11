@@ -13,6 +13,7 @@ import (
 
 func TestVerifyRequiresKeywordSearch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		var request struct {
 			ID     json.RawMessage `json:"id,omitempty"`
 			Method string          `json:"method"`
@@ -21,13 +22,16 @@ func TestVerifyRequiresKeywordSearch(t *testing.T) {
 			t.Fatal(err)
 		}
 		switch request.Method {
+		case "server/discover":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32601, "message": "method not found"}})
 		case "initialize":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      request.ID,
 				"result": map[string]any{
 					"protocolVersion": "2025-06-18",
-					"capabilities":    map[string]any{},
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+					"serverInfo":      map[string]string{"name": "sourcegraph-test", "version": "1"},
 				},
 			})
 		case "notifications/initialized":
@@ -79,6 +83,7 @@ func TestSourcegraphAuthorization(t *testing.T) {
 
 func TestSearchMapsToKeywordSearch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		var request struct {
 			ID     json.RawMessage `json:"id,omitempty"`
 			Method string          `json:"method"`
@@ -91,11 +96,13 @@ func TestSearchMapsToKeywordSearch(t *testing.T) {
 			t.Fatal(err)
 		}
 		switch request.Method {
+		case "server/discover":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32601, "message": "method not found"}})
 		case "initialize":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      request.ID,
-				"result":  map[string]any{"protocolVersion": "2025-06-18"},
+				"result":  map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "sourcegraph-test", "version": "1"}},
 			})
 		case "notifications/initialized":
 			w.WriteHeader(http.StatusAccepted)

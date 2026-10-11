@@ -1,23 +1,23 @@
 package mcpbridge
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"sync"
-	"sync/atomic"
+	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 type CommandFactory func(context.Context, agentsdk.Session) (*exec.Cmd, error)
 
+// Provider reuses the official MCP SDK for child-process transports, request
+// correlation, protocol negotiation and cancellation.
 type Provider struct {
 	factory CommandFactory
 
@@ -25,18 +25,14 @@ type Provider struct {
 	cancel       context.CancelFunc
 
 	mu        sync.Mutex
-	client    *client
+	client    *mcp.ClientSession
 	sessionID string
 	closed    bool
 }
 
 func New(factory CommandFactory) *Provider {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Provider{
-		factory:      factory,
-		lifecycleCtx: ctx,
-		cancel:       cancel,
-	}
+	return &Provider{factory: factory, lifecycleCtx: ctx, cancel: cancel}
 }
 
 func (p *Provider) Close() error {
@@ -46,316 +42,127 @@ func (p *Provider) Close() error {
 		return nil
 	}
 	p.closed = true
-	if p.cancel != nil {
-		p.cancel()
+	p.cancel()
+	if p.client != nil {
+		err := p.client.Close()
+		p.client = nil
+		p.sessionID = ""
+		return err
 	}
-	if p.client == nil {
-		return nil
-	}
-	err := p.client.close()
-	p.client = nil
-	p.sessionID = ""
-	return err
+	return nil
 }
 
 func (p *Provider) ListTools(ctx context.Context, session agentsdk.Session) ([]agentsdk.Tool, error) {
-	c, err := p.ensureClient(ctx, session)
+	client, err := p.ensureClient(ctx, session)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.request(ctx, "tools/list", map[string]any{})
-	if err != nil {
-		return nil, err
-	}
-	var result struct {
-		Tools []json.RawMessage `json:"tools"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("decode child MCP tools/list: %w", err)
-	}
-	tools := make([]agentsdk.Tool, 0, len(result.Tools))
-	for _, definition := range result.Tools {
-		var value struct {
-			Name string `json:"name"`
+	var tools []agentsdk.Tool
+	for {
+		result, err := client.ListTools(ctx, nil)
+		if err != nil {
+			p.discard(client)
+			return nil, err
 		}
-		if err := json.Unmarshal(definition, &value); err != nil {
-			return nil, fmt.Errorf("decode child MCP tool: %w", err)
+		for _, tool := range result.Tools {
+			raw, err := json.Marshal(tool)
+			if err != nil {
+				return nil, err
+			}
+			tools = append(tools, agentsdk.Tool{Name: tool.Name, Definition: raw})
 		}
-		tools = append(tools, agentsdk.Tool{
-			Name:       value.Name,
-			Definition: append(json.RawMessage(nil), definition...),
-		})
+		if result.NextCursor == "" {
+			break
+		}
+		// For paged tool listings, use the explicit cursor rather than first-page caching.
+		return p.listPaginated(ctx, client, tools, result.NextCursor)
+	}
+	return tools, nil
+}
+
+func (p *Provider) listPaginated(ctx context.Context, client *mcp.ClientSession, tools []agentsdk.Tool, cursor string) ([]agentsdk.Tool, error) {
+	for cursor != "" {
+		response, err := client.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
+		if err != nil {
+			p.discard(client)
+			return nil, err
+		}
+		for _, tool := range response.Tools {
+			raw, err := json.Marshal(tool)
+			if err != nil {
+				return nil, err
+			}
+			tools = append(tools, agentsdk.Tool{Name: tool.Name, Definition: raw})
+		}
+		cursor = response.NextCursor
 	}
 	return tools, nil
 }
 
 func (p *Provider) CallTool(ctx context.Context, session agentsdk.Session, name string, args json.RawMessage) (json.RawMessage, error) {
-	c, err := p.ensureClient(ctx, session)
+	client, err := p.ensureClient(ctx, session)
 	if err != nil {
 		return nil, err
 	}
 	var arguments any = map[string]any{}
-	if len(args) != 0 {
+	if len(args) > 0 {
 		if err := json.Unmarshal(args, &arguments); err != nil {
 			return nil, fmt.Errorf("decode tool arguments: %w", err)
 		}
 	}
-	return c.request(ctx, "tools/call", map[string]any{
-		"name":      name,
-		"arguments": arguments,
-	})
+	result, err := client.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments})
+	if err != nil {
+		p.discard(client)
+		return nil, err
+	}
+	return json.Marshal(result)
 }
 
-func (p *Provider) ensureClient(ctx context.Context, session agentsdk.Session) (*client, error) {
+func (p *Provider) discard(client *mcp.ClientSession) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.client == client {
+		p.client = nil
+		p.sessionID = ""
+		_ = client.Close()
+	}
+}
+
+func (p *Provider) ensureClient(ctx context.Context, session agentsdk.Session) (*mcp.ClientSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	keyBytes, _ := json.Marshal(session)
 	key := string(keyBytes)
-
-	_, lockSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
-		Name:  "MCP lock_wait",
-		Layer: "bridge",
-	})
+	_, span := devtooltrace.Start(ctx, devtooltrace.Attributes{Name: "MCP lock_wait", Layer: "bridge"})
 	p.mu.Lock()
-	lockSpan.End(0, nil)
+	span.End(0, nil)
 	defer p.mu.Unlock()
 	if p.closed {
 		return nil, fmt.Errorf("MCP bridge is closed")
 	}
-	if p.client != nil && p.sessionID == key && p.client.usable() {
-		_, reuseSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
-			Name:   "MCP provider lifecycle",
-			Layer:  "bridge",
-			Method: "warm_reuse",
-		})
-		reuseSpan.End(0, nil)
+	if p.client != nil && p.sessionID == key {
 		return p.client, nil
 	}
 	if p.client != nil {
-		_ = p.client.close()
+		_ = p.client.Close()
 		p.client = nil
 	}
-	_, coldSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
-		Name:   "MCP provider lifecycle",
-		Layer:  "bridge",
-		Method: "cold_start",
-	})
-	cmd, err := p.factory(p.lifecycleCtx, session)
+	_, startup := devtooltrace.Start(ctx, devtooltrace.Attributes{Name: "MCP provider lifecycle", Layer: "bridge", Method: "cold_start"})
+	command, err := p.factory(p.lifecycleCtx, session)
 	if err != nil {
-		coldSpan.End(0, err)
+		startup.End(0, err)
 		return nil, err
 	}
-	c, err := startClient(cmd)
+	command.Stderr = os.Stderr
+	client := mcp.NewClient(&mcp.Implementation{Name: "devtool-mcp-bridge", Version: "1"}, nil)
+	mcpSession, err := client.Connect(ctx, &mcp.CommandTransport{Command: command, TerminateDuration: 100 * time.Millisecond}, nil)
 	if err != nil {
-		coldSpan.End(0, err)
+		startup.End(0, err)
 		return nil, err
 	}
-	if err := c.initialize(ctx); err != nil {
-		_ = c.close()
-		coldSpan.End(0, err)
-		return nil, err
-	}
-	coldSpan.End(0, nil)
-	p.client = c
+	p.client = mcpSession
 	p.sessionID = key
-	return c, nil
-}
-
-type client struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	scanner *bufio.Scanner
-	encoder *json.Encoder
-
-	mu     sync.Mutex
-	nextID int64
-	dead   atomic.Bool
-}
-
-func startClient(cmd *exec.Cmd) (*client, error) {
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("open child MCP stdin: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("open child MCP stdout: %w", err)
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("start child MCP: %w", err)
-	}
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
-	return &client{
-		cmd:     cmd,
-		stdin:   stdin,
-		stdout:  stdout,
-		scanner: scanner,
-		encoder: json.NewEncoder(stdin),
-	}, nil
-}
-
-func (c *client) usable() bool {
-	return c != nil && !c.dead.Load()
-}
-
-func (c *client) initialize(ctx context.Context) error {
-	if _, err := c.request(ctx, "initialize", map[string]any{
-		"protocolVersion": "2025-06-18",
-		"capabilities":    map[string]any{},
-		"clientInfo": map[string]any{
-			"name":    "devtool-mcp-bridge",
-			"version": "1",
-		},
-	}); err != nil {
-		return fmt.Errorf("initialize child MCP: %w", err)
-	}
-	return c.notify("notifications/initialized", map[string]any{})
-}
-
-func (c *client) request(ctx context.Context, method string, params any) (result json.RawMessage, err error) {
-	_, lockSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
-		Name:   "MCP request lock_wait",
-		Layer:  "bridge",
-		Method: method,
-	})
-	c.mu.Lock()
-	lockSpan.End(0, nil)
-	defer c.mu.Unlock()
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if !c.usable() {
-		return nil, fmt.Errorf("child MCP is unavailable")
-	}
-
-	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
-		Name:   "MCP request",
-		Layer:  "bridge",
-		Method: method,
-	})
-	defer func() { span.End(len(result), err) }()
-
-	c.nextID++
-	id := c.nextID
-	if err := c.encoder.Encode(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"method":  method,
-		"params":  params,
-	}); err != nil {
-		c.dead.Store(true)
-		return nil, fmt.Errorf("write child MCP request: %w", err)
-	}
-
-	type response struct {
-		result json.RawMessage
-		err    error
-		dead   bool
-	}
-	done := make(chan response, 1)
-	go func() {
-		raw, scanErr, dead := c.scanResponse(id, method)
-		done <- response{result: raw, err: scanErr, dead: dead}
-	}()
-
-	select {
-	case response := <-done:
-		if response.dead {
-			c.dead.Store(true)
-		}
-		return response.result, response.err
-	case <-ctx.Done():
-		c.dead.Store(true)
-		_ = c.stdout.Close()
-		_ = c.stdin.Close()
-		if c.cmd.Process != nil {
-			_ = c.cmd.Process.Kill()
-		}
-		<-done
-		return nil, ctx.Err()
-	}
-}
-
-func (c *client) scanResponse(id int64, method string) (json.RawMessage, error, bool) {
-	for c.scanner.Scan() {
-		line := append([]byte(nil), c.scanner.Bytes()...)
-		var envelope struct {
-			ID     json.RawMessage `json:"id,omitempty"`
-			Method string          `json:"method,omitempty"`
-			Result json.RawMessage `json:"result,omitempty"`
-			Error  *struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-			} `json:"error,omitempty"`
-		}
-		if err := json.Unmarshal(line, &envelope); err != nil {
-			continue
-		}
-		if envelope.Method != "" {
-			continue
-		}
-		var responseID int64
-		if len(envelope.ID) == 0 || json.Unmarshal(envelope.ID, &responseID) != nil || responseID != id {
-			continue
-		}
-		if envelope.Error != nil {
-			return nil, fmt.Errorf("child MCP %s error %d: %s", method, envelope.Error.Code, envelope.Error.Message), false
-		}
-		if len(envelope.Result) == 0 {
-			return json.RawMessage(`null`), nil, false
-		}
-		return append(json.RawMessage(nil), envelope.Result...), nil, false
-	}
-	if err := c.scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read child MCP response: %w", err), true
-	}
-	return nil, fmt.Errorf("child MCP exited while waiting for %s", method), true
-}
-
-func (c *client) notify(method string, params any) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.encoder.Encode(map[string]any{
-		"jsonrpc": "2.0",
-		"method":  method,
-		"params":  params,
-	})
-}
-
-func (c *client) close() error {
-	c.dead.Store(true)
-	_ = c.stdin.Close()
-	_ = c.stdout.Close()
-	if c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-	}
-	err := c.cmd.Wait()
-	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
-			return nil
-		}
-	}
-	return err
-}
-
-func parseID(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var number int64
-	if json.Unmarshal(raw, &number) == nil {
-		return strconv.FormatInt(number, 10)
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		return text
-	}
-	return string(raw)
+	startup.End(0, nil)
+	return mcpSession, nil
 }
