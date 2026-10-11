@@ -150,6 +150,7 @@ func analyze(ctx context.Context, request logintelligence.AnalyzeRequest) (login
 	scanner := bufio.NewScanner(source.reader)
 	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
 	patterns := map[string]*patternState{}
+	toolCalls := newCallTracker()
 	firstContentSeen := false
 	candidateEvidence := 0
 	continuationIndex := -1
@@ -160,6 +161,9 @@ func analyze(ctx context.Context, request logintelligence.AnalyzeRequest) (login
 		lineNo := int(response.Summary.Lines)
 		line := scanner.Text()
 		record := parseRecord(source.kind, line)
+		if source.kind == logintelligence.SourceJournald {
+			toolCalls.record(record)
+		}
 		trimmed := strings.TrimSpace(record.Text)
 
 		if source.kind == logintelligence.SourceFile && !firstContentSeen && strings.TrimSpace(line) != "" {
@@ -217,6 +221,7 @@ func analyze(ctx context.Context, request logintelligence.AnalyzeRequest) (login
 		return logintelligence.AnalyzeResponse{}, fmt.Errorf("scan log source: %w", err)
 	}
 
+	response.ToolCalls = toolCalls.result()
 	response.Patterns = topPatterns(patterns, 10)
 	response.Summary.Truncated = candidateEvidence > len(response.Evidence)
 	if source.kind == logintelligence.SourceJournald && source.maxEntries > 0 && response.Summary.Lines >= int64(source.maxEntries) {

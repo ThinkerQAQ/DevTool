@@ -20,6 +20,7 @@
 - [构建、验证与激活](how-to/self-host.md)。
 - [受控代码修改](how-to/controlled-edits.md)：先获取代码上下文，再使用一次性凭据执行 Git 补丁。
 - [Go Provider 加载基准](how-to/benchmark-go-extensions.md)：复现热缓存启动耗时及缓存失效验证。
+- [远程执行性能](how-to/remote-execution-performance.md)：Desktop Commander 结构化日志、调用方式和可重复基准。
 
 ## 参考手册
 
