@@ -20,9 +20,14 @@ If DevTool is not yet installed, `go run ./cmd/devtool <command>` is the bootstr
 Start the configured MCP gateway with `devtool agent mcp --context codex` (or `agent` / `claude-code`). Prefer stable intent-level tools:
 
 - `code_context`: indexed and realtime code context;
-- `document_context` / `diagram_context`: documents and diagrams;
+- `document_context`: inspect Markdown before editing it;
+- `diagram_context`: inspect embedded Mermaid/PlantUML diagrams before changing them (in addition to `document_context`);
+- `log_context`: query project logs or journald for investigations (read-only);
 - `project_<command>`: commands provided by the Project Extension;
-- `scm_publish`: source publishing through the configured SCM provider.
+- `scm_publish`: source publishing through the configured SCM provider;
+- `workspace_apply_patch`: when enabled, apply a single-file Git patch using a scoped, one-time context token.
+
+Before editing Go or other code, call `code_context`; before editing any Markdown, call `document_context`; before editing Mermaid/PlantUML blocks in Markdown, call **both** `document_context` and `diagram_context` for that path. Investigate log files or journald with `log_context`, not raw Shell log readers. If using `workspace_apply_patch`, the Gateway rejects mutations without the required context evidence.
 
 Do not directly integrate CodeGraph, Serena, Sourcegraph, Dagger, or GitHub into agent workflows when DevTool already provides the intent.
 

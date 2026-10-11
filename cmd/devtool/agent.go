@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thinkerqaq/devtool/adapters/agentpolicy/gitpatch"
 	"github.com/thinkerqaq/devtool/adapters/extensionloader"
 	coreagent "github.com/thinkerqaq/devtool/core/agent"
 	"github.com/thinkerqaq/devtool/core/host"
@@ -49,7 +50,7 @@ func runAgentMCP(ctx context.Context, args []string, out io.Writer) error {
 	}
 	defer h.Close()
 	session := projectAgentSession(h, strings.TrimSpace(*contextName))
-	return coreagent.NewGateway(h.Registry, session).Serve(ctx, os.Stdin, out)
+	return newPolicyGateway(h, session).Serve(ctx, os.Stdin, out)
 }
 
 func runAgentHTTP(ctx context.Context, args []string, out io.Writer) error {
@@ -86,7 +87,7 @@ func runAgentHTTP(ctx context.Context, args []string, out io.Writer) error {
 	defer h.Close()
 
 	session := projectAgentSession(h, strings.TrimSpace(*contextName))
-	gateway := coreagent.NewGateway(h.Registry, session)
+	gateway := newPolicyGateway(h, session)
 	server := &http.Server{
 		Addr:              strings.TrimSpace(*listen),
 		Handler:           gateway.HTTPHandler(token),
@@ -132,8 +133,17 @@ func projectAgentSession(h *host.ProjectHost, contextName string) agentsdk.Sessi
 		workspaces = []string{root}
 	}
 	return agentsdk.Session{
-		ProjectRoot:      root,
-		Workspaces:       workspaces,
-		Context:          contextName,
+		ProjectRoot: root,
+		Workspaces:  workspaces,
+		Context:     contextName,
 	}
+}
+
+// newPolicyGateway keeps optional policy implementations outside Core.
+func newPolicyGateway(h *host.ProjectHost, session agentsdk.Session) *coreagent.Gateway {
+	gateway := coreagent.NewGateway(h.Registry, session)
+	if h.Project.Config.Agent.Policy.Enabled {
+		gateway.WithPolicy(gitpatch.New(session.ProjectRoot, h.Project.Config.Agent.Policy))
+	}
+	return gateway
 }

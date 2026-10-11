@@ -53,6 +53,20 @@ DEVTOOL_PROFILES=local devtool project inspect --json
 DEVTOOL_PROFILES=local,sourcegraph devtool config validate
 ```
 
+## Markdown / 图表覆盖范围
+
+项目把已有的 Markdown 和 Marksman Provider 的作用域扩展至整个仓库，根目录的 `README.md`、`AGENTS.md` 也可以先通过 `document_context` 检查，再执行受控修改：
+
+```toml
+[extension.document-markdown.settings]
+roots = ["."]
+
+[extension.document-realtime.settings]
+workspace_roots = ["."]
+```
+
+Markdown 修改必须使用 `document_context`；Markdown 内 Mermaid/PlantUML 图的修改还须调用 `diagram_context`。查询项目日志和 journald 使用只读 `log_context`。
+
 ## 代码工作区
 
 ```toml
@@ -61,6 +75,18 @@ workspaces = ["."]
 ```
 
 CodeGraph 负责索引/结构信息，Serena/LSP 负责实时语义。更换 Provider 时仍保留稳定 Capability。
+
+## 受控 Agent 修改
+
+```toml
+[agent.policy]
+enabled = true
+protected_branches = ["main", "master"]
+max_patch_bytes = 262144
+context_ttl_seconds = 600
+```
+
+默认关闭；启用后，现有 MCP Gateway 新增 `workspace_apply_patch`。修改既有文件前必须通过**同一个 Gateway 进程**取得一次性 `code_context` 凭据。`main` 和 `master` 始终受保护。操作方法参见[受控代码修改](../how-to/controlled-edits.md)。
 
 ## 验证
 

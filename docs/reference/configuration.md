@@ -57,6 +57,20 @@ DEVTOOL_PROFILES=local,sourcegraph devtool config validate
 
 Profile combinations must be validated. Provider settings and credentials remain provider-owned; do not hard-code them in Core.
 
+## Document and diagram scopes
+
+The repository also configures its existing Markdown and Marksman providers at project scope so root-level `README.md` and `AGENTS.md` can be inspected before edits:
+
+```toml
+[extension.document-markdown.settings]
+roots = ["."]
+
+[extension.document-realtime.settings]
+workspace_roots = ["."]
+```
+
+A Markdown edit requires `document_context`; embedded Mermaid/PlantUML edits additionally require `diagram_context`. Project logs and journald are queried through the read-only `log_context`.
+
 ## Code workspaces
 
 ```toml
@@ -65,6 +79,18 @@ workspaces = ["."]
 ```
 
 CodeGraph works on indexed/structural repository context. Serena/LSP supplies realtime semantics. A provider change should preserve the stable agent capability contract.
+
+## Controlled agent edits
+
+```toml
+[agent.policy]
+enabled = true
+protected_branches = ["main", "master"]
+max_patch_bytes = 262144
+context_ttl_seconds = 600
+```
+
+Disabled by default. The policy exposes `workspace_apply_patch` on the existing MCP Gateway and requires a same-process, one-time `code_context` token. `main` and `master` are always protected even with additional custom branch names. For the full workflow see [Controlled Code Edits](../how-to/controlled-edits.md).
 
 ## Validate
 

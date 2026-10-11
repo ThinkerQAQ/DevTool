@@ -19,7 +19,7 @@ import (
 
 const protocolVersion = "2025-06-18"
 
-// Gateway exposes DevTool capabilities over MCP. It is an Agent-facing protocol adapter,
+// Gateway exposes DevTool capabilities over MCP. It is a model-free protocol adapter,
 // not an Agent runtime: it owns no planning, durable run state, retry policy, or workflow semantics.
 type Gateway struct {
 	registry *registry.Registry
@@ -28,10 +28,17 @@ type Gateway struct {
 	mu     sync.Mutex
 	routes map[string]agentsdk.ToolProvider
 	tools  []json.RawMessage
+	policy agentsdk.ExecutionPolicy
 }
 
 func NewGateway(reg *registry.Registry, session agentsdk.Session) *Gateway {
 	return &Gateway{registry: reg, session: session}
+}
+
+// WithPolicy installs an optional deterministic execution policy adapter.
+func (g *Gateway) WithPolicy(policy agentsdk.ExecutionPolicy) *Gateway {
+	g.policy = policy
+	return g
 }
 
 func (g *Gateway) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -192,6 +199,12 @@ func (g *Gateway) listTools(ctx context.Context) ([]json.RawMessage, error) {
 			definitions = append(definitions, append(json.RawMessage(nil), tool.Definition...))
 		}
 	}
+	if g.policy != nil {
+		if _, conflict := routes["workspace_apply_patch"]; conflict {
+			return nil, fmt.Errorf("workspace_apply_patch conflicts with a project agent tool")
+		}
+		definitions = append(definitions, g.policy.Tool())
+	}
 	sort.Slice(definitions, func(i, j int) bool {
 		return toolName(definitions[i]) < toolName(definitions[j])
 	})
@@ -204,6 +217,9 @@ func (g *Gateway) callTool(ctx context.Context, name string, args json.RawMessag
 	if _, err := g.listTools(ctx); err != nil {
 		return nil, err
 	}
+	if g.policy != nil && name == "workspace_apply_patch" {
+		return g.policy.Apply(ctx, args)
+	}
 	g.mu.Lock()
 	provider := g.routes[name]
 	g.mu.Unlock()
@@ -213,7 +229,11 @@ func (g *Gateway) callTool(ctx context.Context, name string, args json.RawMessag
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	return provider.CallTool(ctx, g.session, name, args)
+	result, err := provider.CallTool(ctx, g.session, name, args)
+	if err == nil && g.policy != nil {
+		result = g.policy.Attest(ctx, name, args, result)
+	}
+	return result, err
 }
 
 func toolName(raw json.RawMessage) string {
