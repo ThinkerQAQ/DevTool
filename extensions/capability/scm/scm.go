@@ -122,6 +122,9 @@ func (e *Extension) invoke(ctx context.Context, method string, request any) (jso
 }
 
 func tool(name, description string, properties map[string]any, required []string) agentsdk.Tool {
+	if required == nil {
+		required = []string{}
+	}
 	raw, _ := json.Marshal(map[string]any{
 		"name": name, "description": description,
 		"inputSchema": map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false},

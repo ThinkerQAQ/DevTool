@@ -187,6 +187,9 @@ func tool(
 	properties map[string]any,
 	required []string,
 ) agentsdk.Tool {
+	if required == nil {
+		required = []string{}
+	}
 	definition, _ := json.Marshal(map[string]any{
 		"name":        name,
 		"description": description,
