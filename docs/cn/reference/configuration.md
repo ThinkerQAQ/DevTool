@@ -53,6 +53,20 @@ DEVTOOL_PROFILES=local devtool project inspect --json
 DEVTOOL_PROFILES=local,sourcegraph devtool config validate
 ```
 
+## Markdown / 图表覆盖范围
+
+项目把已有的 Markdown 和 Marksman Provider 的作用域扩展至整个仓库，根目录的 `README.md`、`AGENTS.md` 也可以先通过 `document_context` 检查，再执行受控修改：
+
+```toml
+[extension.document-markdown.settings]
+roots = ["."]
+
+[extension.document-realtime.settings]
+workspace_roots = ["."]
+```
+
+Markdown 修改必须使用 `document_context`；Markdown 内 Mermaid/PlantUML 图的修改还须调用 `diagram_context`。查询项目日志和 journald 使用只读 `log_context`。
+
 ## 代码工作区
 
 ```toml

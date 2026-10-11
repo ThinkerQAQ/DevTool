@@ -27,9 +27,12 @@ devtool agent mcp --context codex
 | `code_context` | 组合仓库索引与实时代码语义 |
 | `workspace_apply_patch` | 可选：基于代码上下文凭据对一个已有文件执行 Git 补丁 |
 | `document_context` | Markdown 结构、分段审查和关联上下文 |
-| `diagram_context` | Mermaid/PlantUML 图表分析与验证 |
+| `diagram_context` | Mermaid/PlantUML 图表分析与验证；修改 Markdown 内嵌图时还需配合 Document Context |
+| `log_context` | 对文件日志、journald 进行只读结构化查询 |
 | `scm_publish` | 通过选定 SCM Provider 提交发布 |
 | `project_<command>` | 调用 Project Extension 定义的命令 |
+
+修改 Markdown 先调用 `document_context`；修改 Markdown 内的 Mermaid/PlantUML 图同时调用 `document_context` 和 `diagram_context`；查询日志必须通过 `log_context`，不能用源码编辑工具替代。可选的 `workspace_apply_patch` 在执行前校验相应上下文。
 
 实际参数应以 MCP 返回的 Tool Schema 为准。
 

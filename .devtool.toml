@@ -82,7 +82,7 @@ package = "./extensions/document/marksman/cmd/provider"
 [extension.document-realtime.settings]
 binary = "marksman"
 timeout_seconds = 30
-workspace_roots = ["docs"]
+workspace_roots = ["."]
 
 [extension.document-markdown]
 loader = "go"
@@ -92,7 +92,7 @@ module = "."
 package = "./extensions/document/markdown/cmd/provider"
 
 [extension.document-markdown.settings]
-roots = ["docs"]
+roots = ["."]
 
 [extension.diagram-capability]
 loader = "go"

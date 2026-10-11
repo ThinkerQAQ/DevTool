@@ -27,9 +27,12 @@ The MCP server gives callers engineering intents; configured extensions implemen
 | `code_context` | Indexed repository context plus realtime code semantics |
 | `workspace_apply_patch` | Opt-in, context-authorized Git patch for one existing file |
 | `document_context` | Markdown structure, bounded reviews, and related context |
-| `diagram_context` | Mermaid/PlantUML diagram discovery and configured validation |
+| `diagram_context` | Mermaid/PlantUML diagram discovery and configured validation; required in addition to document context when editing embedded diagrams |
+| `log_context` | Read-only structured log analysis, including project files and journald |
 | `scm_publish` | Publish changes through the selected SCM provider |
 | `project_<command>` | Build, verify, package, or other Project Extension commands |
+
+Use `document_context` when editing Markdown, and both `document_context` and `diagram_context` when changing an embedded Mermaid/PlantUML diagram. Query log files or journald with `log_context` (never treat log investigation as a file patch). The opt-in `workspace_apply_patch` enforces this context routing before any edit.
 
 Use the tool schemas returned by the MCP gateway. Do not assume all tools have the same arguments in every release.
 
