@@ -1,4 +1,4 @@
-package agent
+package gitpatch
 
 import (
 	"bytes"
@@ -20,10 +20,10 @@ import (
 	"github.com/thinkerqaq/devtool/core/config"
 )
 
-// patchGate is a deterministic MCP-boundary policy, not a second agent.
+// Gate is a deterministic MCP-boundary policy, not a second agent.
 // Git owns unified-patch parsing and application. Only a scoped successful
 // code_context result can authorize a one-file mutation on a development branch.
-type patchGate struct {
+type Gate struct {
 	root      string
 	maxBytes  int
 	ttl       time.Duration
@@ -40,7 +40,7 @@ type patchProof struct {
 	expires time.Time
 }
 
-func newPatchGate(root string, settings config.AgentPolicy) *patchGate {
+func New(root string, settings config.AgentPolicy) *Gate {
 	maxBytes := settings.MaxPatchBytes
 	if maxBytes == 0 {
 		maxBytes = 256 * 1024
@@ -49,11 +49,9 @@ func newPatchGate(root string, settings config.AgentPolicy) *patchGate {
 	if ttl == 0 {
 		ttl = 600
 	}
-	branches := settings.ProtectedBranches
-	if len(branches) == 0 {
-		branches = []string{"main", "master"}
-	}
-	gate := &patchGate{
+	// Protect the conventional primary branches even when custom names are added.
+	branches := append([]string{"main", "master"}, settings.ProtectedBranches...)
+	gate := &Gate{
 		root: root, maxBytes: maxBytes, ttl: time.Duration(ttl) * time.Second,
 		protected: make(map[string]bool), proofs: make(map[string]patchProof),
 	}
@@ -63,10 +61,11 @@ func newPatchGate(root string, settings config.AgentPolicy) *patchGate {
 	return gate
 }
 
-func (p *patchGate) tool() json.RawMessage {
+func (p *Gate) Tool() json.RawMessage {
 	raw, _ := json.Marshal(map[string]any{
 		"name":        "workspace_apply_patch",
 		"description": "Apply one Git unified diff to an existing file in the current development worktree. Requires a fresh context_token returned by a scoped code_context tool call; never permitted on protected branches.",
+		"annotations": map[string]any{"readOnlyHint": false, "destructiveHint": true, "openWorldHint": false},
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -82,7 +81,7 @@ func (p *patchGate) tool() json.RawMessage {
 
 // attest wraps the original tool result only after both code backends succeed.
 // A degraded or malformed context remains readable but has no write authority.
-func (p *patchGate) attest(ctx context.Context, args, result json.RawMessage) json.RawMessage {
+func (p *Gate) Attest(ctx context.Context, args, result json.RawMessage) json.RawMessage {
 	var request struct {
 		Path string `json:"path"`
 	}
@@ -93,22 +92,27 @@ func (p *patchGate) attest(ctx context.Context, args, result json.RawMessage) js
 	if err != nil {
 		return result
 	}
-	var envelope struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-		IsError bool `json:"isError"`
-	}
-	if json.Unmarshal(result, &envelope) != nil || envelope.IsError {
+	// Preserve provider-specific fields in the original MCP envelope.
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(result, &envelope) != nil {
 		return result
 	}
-	for i, content := range envelope.Content {
-		if content.Type != "text" {
+	var isError bool
+	if json.Unmarshal(envelope["isError"], &isError) == nil && isError {
+		return result
+	}
+	var contents []map[string]json.RawMessage
+	if json.Unmarshal(envelope["content"], &contents) != nil {
+		return result
+	}
+	for i, content := range contents {
+		var contentType, text string
+		if json.Unmarshal(content["type"], &contentType) != nil ||
+			json.Unmarshal(content["text"], &text) != nil || contentType != "text" {
 			continue
 		}
 		var data map[string]json.RawMessage
-		if json.Unmarshal([]byte(content.Text), &data) != nil {
+		if json.Unmarshal([]byte(text), &data) != nil {
 			continue
 		}
 		if !validContext(data) {
@@ -146,7 +150,8 @@ func (p *patchGate) attest(ctx context.Context, args, result json.RawMessage) js
 		if err != nil {
 			return result
 		}
-		envelope.Content[i].Text = string(updatedText)
+		contents[i]["text"], _ = json.Marshal(string(updatedText))
+		envelope["content"], _ = json.Marshal(contents)
 		updated, err := json.Marshal(envelope)
 		if err == nil {
 			return updated
@@ -167,7 +172,7 @@ func validContext(value map[string]json.RawMessage) bool {
 	return len(degraded) == 0 || bytes.Equal(degraded, []byte("null")) || bytes.Equal(degraded, []byte("{}"))
 }
 
-func (p *patchGate) apply(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
+func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 	var request struct {
 		Token string `json:"context_token"`
 		Patch string `json:"patch"`
@@ -269,7 +274,7 @@ func (p *patchGate) apply(ctx context.Context, args json.RawMessage) (json.RawMe
 	})
 }
 
-func (p *patchGate) checkWorktree(ctx context.Context, head string) error {
+func (p *Gate) checkWorktree(ctx context.Context, head string) error {
 	root, err := p.git(ctx, nil, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("not a Git worktree: %w", err)
@@ -296,7 +301,7 @@ func (p *patchGate) checkWorktree(ctx context.Context, head string) error {
 	return nil
 }
 
-func (p *patchGate) existingFile(raw string) (string, string, error) {
+func (p *Gate) existingFile(raw string) (string, string, error) {
 	if raw == "" || filepath.IsAbs(raw) || strings.Contains(raw, "\\") {
 		return "", "", errors.New("a project-relative existing file path is required")
 	}
@@ -328,7 +333,7 @@ func (p *patchGate) existingFile(raw string) (string, string, error) {
 	return filepath.ToSlash(clean), filename, nil
 }
 
-func (p *patchGate) git(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
+func (p *Gate) git(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, "git", args...)
 	command.Dir = p.root
 	if stdin != nil {

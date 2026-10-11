@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/registry"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
 	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
@@ -20,7 +19,7 @@ import (
 
 const protocolVersion = "2025-06-18"
 
-// Gateway exposes DevTool capabilities over MCP. It is an Agent-facing protocol adapter,
+// Gateway exposes DevTool capabilities over MCP. It is a model-free protocol adapter,
 // not an Agent runtime: it owns no planning, durable run state, retry policy, or workflow semantics.
 type Gateway struct {
 	registry *registry.Registry
@@ -29,18 +28,16 @@ type Gateway struct {
 	mu     sync.Mutex
 	routes map[string]agentsdk.ToolProvider
 	tools  []json.RawMessage
-	policy *patchGate
+	policy agentsdk.ExecutionPolicy
 }
 
 func NewGateway(reg *registry.Registry, session agentsdk.Session) *Gateway {
 	return &Gateway{registry: reg, session: session}
 }
 
-// WithAgentPolicy enables the opt-in deterministic execution boundary.
-func (g *Gateway) WithAgentPolicy(settings config.AgentPolicy) *Gateway {
-	if settings.Enabled {
-		g.policy = newPatchGate(g.session.ProjectRoot, settings)
-	}
+// WithPolicy installs an optional deterministic execution policy adapter.
+func (g *Gateway) WithPolicy(policy agentsdk.ExecutionPolicy) *Gateway {
+	g.policy = policy
 	return g
 }
 
@@ -206,7 +203,7 @@ func (g *Gateway) listTools(ctx context.Context) ([]json.RawMessage, error) {
 		if _, conflict := routes["workspace_apply_patch"]; conflict {
 			return nil, fmt.Errorf("workspace_apply_patch conflicts with a project agent tool")
 		}
-		definitions = append(definitions, g.policy.tool())
+		definitions = append(definitions, g.policy.Tool())
 	}
 	sort.Slice(definitions, func(i, j int) bool {
 		return toolName(definitions[i]) < toolName(definitions[j])
@@ -221,7 +218,7 @@ func (g *Gateway) callTool(ctx context.Context, name string, args json.RawMessag
 		return nil, err
 	}
 	if g.policy != nil && name == "workspace_apply_patch" {
-		return g.policy.apply(ctx, args)
+		return g.policy.Apply(ctx, args)
 	}
 	g.mu.Lock()
 	provider := g.routes[name]
@@ -234,7 +231,7 @@ func (g *Gateway) callTool(ctx context.Context, name string, args json.RawMessag
 	}
 	result, err := provider.CallTool(ctx, g.session, name, args)
 	if err == nil && g.policy != nil && name == "code_context" {
-		result = g.policy.attest(ctx, args, result)
+		result = g.policy.Attest(ctx, args, result)
 	}
 	return result, err
 }

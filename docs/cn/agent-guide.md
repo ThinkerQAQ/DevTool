@@ -25,6 +25,7 @@ devtool agent mcp --context codex
 | 能力 | 用途 |
 | --- | --- |
 | `code_context` | 组合仓库索引与实时代码语义 |
+| `workspace_apply_patch` | 可选：基于代码上下文凭据对一个已有文件执行 Git 补丁 |
 | `document_context` | Markdown 结构、分段审查和关联上下文 |
 | `diagram_context` | Mermaid/PlantUML 图表分析与验证 |
 | `scm_publish` | 通过选定 SCM Provider 提交发布 |

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/thinkerqaq/devtool/adapters/agentpolicy/gitpatch"
 	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/registry"
 	agentsdk "github.com/thinkerqaq/devtool/sdk/agent"
@@ -62,7 +63,7 @@ func testGateway(t *testing.T, branch string, degraded bool) (*Gateway, string) 
 	if err := reg.ProvideAgentTools("context.mock", contextProvider{degraded: degraded}); err != nil {
 		t.Fatal(err)
 	}
-	g := NewGateway(reg, agentsdk.Session{ProjectRoot: root}).WithAgentPolicy(config.AgentPolicy{Enabled: true})
+	g := NewGateway(reg, agentsdk.Session{ProjectRoot: root}).WithPolicy(gitpatch.New(root, config.AgentPolicy{Enabled: true}))
 	return g, root
 }
 
@@ -200,11 +201,9 @@ func TestPolicyRejectsUnsafeAndDegradedContext(t *testing.T) {
 	})
 	t.Run("expired token", func(t *testing.T) {
 		token := issue(t, g, "src/app.go")
-		g.policy.mu.Lock()
-		proof := g.policy.proofs[token]
-		proof.expires = time.Now().Add(-time.Minute)
-		g.policy.proofs[token] = proof
-		g.policy.mu.Unlock()
+		g.policy = gitpatch.New(root, config.AgentPolicy{Enabled: true, ContextTTLSeconds: 1})
+		token = issue(t, g, "src/app.go")
+		time.Sleep(1100 * time.Millisecond)
 		if _, err := apply(t, g, token, patch); err == nil {
 			t.Fatal("accepted expired token")
 		}
@@ -225,7 +224,7 @@ func TestPolicyRejectsUnsafeAndDegradedContext(t *testing.T) {
 	})
 	t.Run("wrong patch size", func(t *testing.T) {
 		token := issue(t, g, "src/app.go")
-		g.policy.maxBytes = 1
+		g.policy = gitpatch.New(root, config.AgentPolicy{Enabled: true, MaxPatchBytes: 1})
 		if _, err := apply(t, g, token, patch); err == nil {
 			t.Fatal("accepted oversized patch")
 		}

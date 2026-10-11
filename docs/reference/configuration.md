@@ -66,6 +66,18 @@ workspaces = ["."]
 
 CodeGraph works on indexed/structural repository context. Serena/LSP supplies realtime semantics. A provider change should preserve the stable agent capability contract.
 
+## Controlled agent edits
+
+```toml
+[agent.policy]
+enabled = true
+protected_branches = ["main", "master"]
+max_patch_bytes = 262144
+context_ttl_seconds = 600
+```
+
+Disabled by default. The policy exposes `workspace_apply_patch` on the existing MCP Gateway and requires a same-process, one-time `code_context` token. `main` and `master` are always protected even with additional custom branch names. For the full workflow see [Controlled Code Edits](../how-to/controlled-edits.md).
+
 ## Validate
 
 ```bash

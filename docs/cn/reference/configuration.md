@@ -62,6 +62,18 @@ workspaces = ["."]
 
 CodeGraph 负责索引/结构信息，Serena/LSP 负责实时语义。更换 Provider 时仍保留稳定 Capability。
 
+## 受控 Agent 修改
+
+```toml
+[agent.policy]
+enabled = true
+protected_branches = ["main", "master"]
+max_patch_bytes = 262144
+context_ttl_seconds = 600
+```
+
+默认关闭；启用后，现有 MCP Gateway 新增 `workspace_apply_patch`。修改既有文件前必须通过**同一个 Gateway 进程**取得一次性 `code_context` 凭据。`main` 和 `master` 始终受保护。操作方法参见[受控代码修改](../how-to/controlled-edits.md)。
+
 ## 验证
 
 ```bash

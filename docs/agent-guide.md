@@ -25,6 +25,7 @@ The MCP server gives callers engineering intents; configured extensions implemen
 | Tool | Purpose |
 | --- | --- |
 | `code_context` | Indexed repository context plus realtime code semantics |
+| `workspace_apply_patch` | Opt-in, context-authorized Git patch for one existing file |
 | `document_context` | Markdown structure, bounded reviews, and related context |
 | `diagram_context` | Mermaid/PlantUML diagram discovery and configured validation |
 | `scm_publish` | Publish changes through the selected SCM provider |
