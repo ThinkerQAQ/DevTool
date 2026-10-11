@@ -38,6 +38,18 @@ devtool agent mcp --context codex
 
 查询特定文件或目录时，为 `code_context` 指定项目相对路径，例如 `"path":"go"`。索引检索先按目录过滤，再排序和截断，不再返回 Android 等目录外的结果。查询符号引用时还应传入 `symbol` 和具体文件路径。CodeGraph Provider 会拒绝绝对路径、无效路径及逃出项目根目录的路径。
 
+## Agent 一次性接入，项目独立配置
+
+每个 Agent 客户端只需要配置所连接的 DevTool MCP 实例，以及一次工具优先级偏好。不要在 PhotoWaypoint、IDFlow、BlogCTL 等项目的 `AGENTS.md` 里复制 Provider 名称或工具映射表。
+
+在 ChatGPT Project Instructions 或其他 Agent 客户端的全局指令中配置一次：
+
+> 在已连接 DevTool 的软件工程任务中，优先选择匹配的 DevTool MCP Capability。以动态发现的工具描述与 Schema 为准，不维护硬编码 Provider 列表。查询无结果时先调整参数；能力不可用或无法满足需求时再使用 Desktop Commander。系统与 GUI 操作直接使用适合的工具，不要无限重试。
+
+**项目侧**只需通过 `.devtool.toml` 声明 Extension 与 Provider，在项目目录按所需 Profile 启动 DevTool MCP；客户端通过 `tools/list` 动态发现能力。CodeGraph、Serena、Sourcegraph 或 SCM Provider 由项目配置选择。项目 `AGENTS.md` 只写项目特有约定，不承担 DevTool 工具目录职责。
+
+注意：这是一条**工具选择偏好**，不是强制权限。Desktop Commander 可用时，指令和 Tool Description 不能保证 Agent 绝对不绕过 DV2。应使用不带逐项提示的真实工程任务衡量首选率、结果正确性、耗时和无必要的 Fallback。
+
 ## 开发循环
 
 1. 明确开发意图，使用 DevTool 查询相关代码与 Contract。
