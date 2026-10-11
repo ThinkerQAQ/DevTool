@@ -49,9 +49,10 @@ DEVTOOL_PROFILES=local /tmp/devtool-policy agent mcp --context agent
 | 修改普通 Markdown | `document_context` |
 | 修改内含 Mermaid/PlantUML 图的 Markdown | 同路径调用 `document_context` 和 `diagram_context` |
 | 新增 Mermaid/PlantUML 图块 | 两种上下文都必须调用，即使旧文件尚无图 |
+| 修改已有的独立 `.mmd` / `.mermaid` / `.puml` / `.plantuml` 图源码 | 只需 `diagram_context`，修改前必须通过已有渲染器的候选版本校验 |
 | 查询项目日志或 journald | `log_context`（只读，不发修改令牌） |
 
-Gateway 依据实际文件类型决定上下文门禁；Markdown 图块识别复用 Goldmark，不再开发额外解析器。现有 `diagram_context` 只支持 **Markdown 内嵌图块**，不支持将独立 SVG/PNG 当成可校验图表。
+Gateway 依据实际文件类型决定上下文门禁；Markdown 图块识别复用 Goldmark，不再开发额外解析器。现在 `diagram_context` 同时支持 **Markdown 内嵌图块**与独立 Mermaid/PlantUML 源码文件，继续复用已有渲染器和 Git 临时预览。SVG/PNG 等渲染产物仍不支持直接修改。
 
 修改普通 Markdown 的第一步：
 
@@ -64,6 +65,14 @@ Gateway 依据实际文件类型决定上下文门禁；Markdown 图块识别复
 ```json
 {"name":"diagram_context","arguments":{"objective":"Inspect the Mermaid diagram","path":"docs/architecture/example.md","include_source":true}}
 ```
+
+例如修改一个独立 Mermaid 图时，先调用：
+
+```json
+{"name":"diagram_context","arguments":{"objective":"Review standalone diagram before editing","path":"docs/architecture/flow.mmd","analyze":true,"include_source":true}}
+```
+
+独立 Mermaid 的结构分析使用现有 Merman CLI，不宣称已有独立文件 LSP 诊断；PlantUML 可以查看和调用配置的渲染器，但不复用 Mermaid 的语义解析。缺少对应渲染器时拒绝修改。
 
 查询日志应直接使用：
 
@@ -89,7 +98,7 @@ Gateway 依据实际文件类型决定上下文门禁；Markdown 图块识别复
 {"name":"workspace_apply_patch","arguments":{"context_token":"<刚才返回的令牌>","patch":"diff --git a/core/agent/gateway.go b/core/agent/gateway.go\n--- a/core/agent/gateway.go\n+++ b/core/agent/gateway.go\n@@ -1 +1 @@\n-old line\n+new line\n"}}
 ```
 
-这里只是参数结构示例，补丁内容应根据真实代码生成。Gateway 检查令牌、项目根目录、工作分支、Git HEAD、文件 SHA-256、补丁路径及过期时间；通过 `git apply --check` 后，再在临时目录用 Git 模拟应用补丁。新增或变动的 Mermaid/PlantUML 图块必须通过**已有配置的 `diagram-render` Provider** 渲染校验，成功后才真正修改工作区。语法错误或渲染器缺失则拒绝补丁；纯文字修改不会重复渲染未变化的图。完成后返回修改文件的 SHA-256。
+这里只是参数结构示例，补丁内容应根据真实代码生成。Gateway 检查令牌、项目根目录、工作分支、Git HEAD、文件 SHA-256、补丁路径及过期时间；通过 `git apply --check` 后，再在临时目录用 Git 模拟应用补丁。新增或变动的 Markdown 图块以及独立 Mermaid/PlantUML 源码必须通过**已有配置的 `diagram-render` Provider** 渲染校验，成功后才真正修改工作区。语法错误或渲染器缺失则拒绝补丁；纯文字修改不会重复渲染未变化的图。完成后返回修改文件的 SHA-256。
 
 **每个令牌仅允许一次修改尝试、仅限一个既有文件。** 下一次修改必须重新调用对应的 Code/Document/Diagram Context。
 
@@ -106,6 +115,6 @@ Gateway 依据实际文件类型决定上下文门禁；Markdown 图块识别复
 ## 当前限制
 
 - 令牌保存在**同一 MCP Gateway 进程的内存**中，进程重启后失效；不能跨两次独立 CLI 运行复用。
-- 暂不支持新增、删除、重命名文件、修改文件权限、编辑日志、独立 SVG/PNG/图文件和二进制补丁。图块被修改时若本机缺少配置的 Mermaid/PlantUML 渲染器，按失败处理；普通 Markdown 文字不受影响。
+- 暂不支持新增、删除、重命名文件、修改文件权限、编辑日志、SVG/PNG 等渲染产物和二进制补丁。图块被修改时若本机缺少配置的 Mermaid/PlantUML 渲染器，按失败处理；普通 Markdown 文字不受影响。
 - 这是 Gateway 的流程校验，不是操作系统安全边界；外部 Agent 仍可通过不受限 Shell 绕过它。
 - MCP Server、stdio/Streamable HTTP 和内部 MCP Client Bridge 已改用[官方 Go MCP SDK](https://github.com/modelcontextprotocol/go-sdk)；项目感知的修改门禁仍由 DV2 管理。当前静态约束无需引入 CEL 或 OPA。

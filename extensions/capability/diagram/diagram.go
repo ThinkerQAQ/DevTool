@@ -26,12 +26,12 @@ func (e *Extension) Register(r extension.Registrar) error {
 func (e *Extension) ListTools(context.Context, agent.Session) ([]agent.Tool, error) {
 	definition, _ := json.Marshal(map[string]any{
 		"name":        "diagram_context",
-		"description": "Inspect Markdown Mermaid/PlantUML diagrams and optionally render to SVG through configured tools, distinguishing rendered, failed and unavailable.",
+		"description": "Inspect Mermaid/PlantUML diagrams embedded in Markdown or standalone .mmd/.mermaid/.puml/.plantuml source files; optionally render via configured providers.",
 		"inputSchema": map[string]any{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{
 				"objective":      map[string]any{"type": "string"},
-				"path":           map[string]any{"type": "string", "description": "Project-relative Markdown file."},
+				"path":           map[string]any{"type": "string", "description": "Project-relative Markdown or standalone diagram source file."},
 				"analyze":        map[string]any{"type": "boolean", "description": "Enrich each diagram with structural graph, Mermaid language symbols, scoped diagnostics and containing Markdown section; provider controlled."},
 				"render":         map[string]any{"type": "boolean", "description": "Validate by renderer and generate SVG artifacts."},
 				"include_source": map[string]any{"type": "boolean", "description": "Return exact diagram sources."},

@@ -94,8 +94,9 @@ func (e *Extension) analyze(ctx context.Context, req diagram.IntelligenceRequest
 		return diagram.IntelligenceResponse{}, fmt.Errorf("diagram source escapes project root")
 	}
 	ext := strings.ToLower(filepath.Ext(path))
-	if ext != ".md" && ext != ".markdown" && ext != ".mdx" {
-		return diagram.IntelligenceResponse{}, fmt.Errorf("diagram intelligence requires Markdown")
+	markdown := ext == ".md" || ext == ".markdown" || ext == ".mdx"
+	if !markdown && diagram.SourceLanguage(path) == "" {
+		return diagram.IntelligenceResponse{}, fmt.Errorf("diagram intelligence requires Markdown or standalone diagram source")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -114,11 +115,16 @@ func (e *Extension) analyze(ctx context.Context, req diagram.IntelligenceRequest
 	if err != nil {
 		return out, err
 	}
-	lsp, err := e.language(ctx, root, path, source)
-	if err == nil {
-		out.DiagnosticsStatus = "reported"
+	var lsp *evidence
+	if markdown {
+		lsp, err = e.language(ctx, root, path, source)
+		if err == nil {
+			out.DiagnosticsStatus = "reported"
+		} else {
+			out.Detail = err.Error()
+		}
 	} else {
-		out.Detail = err.Error()
+		out.Detail = "standalone diagrams use CLI semantic analysis; LSP diagnostics are not reported"
 	}
 	bin, binaryErr := exec.LookPath(e.cli)
 	for _, it := range req.Diagrams {

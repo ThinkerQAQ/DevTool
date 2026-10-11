@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +39,15 @@ func (p routingContextProvider) CallTool(_ context.Context, _ agentsdk.Session, 
 		if request.Path == "docs/graph.md" {
 			results = append(results, map[string]any{"index": 1, "language": "mermaid", "status": "found"})
 		}
+		for _, entry := range []struct{ path, language, source string }{
+			{"docs/flow.mmd", "mermaid", "flowchart LR\n    A --> B\n"},
+			{"docs/flow.puml", "plantuml", "@startuml\nAlice -> Bob : Hi\n@enduml\n"},
+		} {
+			if request.Path == entry.path {
+				fingerprint := sha256.Sum256([]byte(entry.source))
+				results = append(results, map[string]any{"index": 1, "language": entry.language, "status": "found", "sha256": fmt.Sprintf("%x", fingerprint)})
+			}
+		}
 		data, _ := json.Marshal(map[string]any{"objective": "inspect", "path": request.Path, "total_diagrams": len(results), "results": results})
 		response = string(data)
 	}
@@ -52,9 +63,12 @@ func setupContextFixtures(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	for path, content := range map[string]string{
-		"docs/guide.md": "# Guide\n\nBefore change.\n",
-		"docs/graph.md": "# Graph\n\n```mermaid\ngraph TD\n    A-->B\n```\n",
-		"logs/app.log":  "INFO started\nERROR something failed\n",
+		"docs/guide.md":  "# Guide\n\nBefore change.\n",
+		"docs/graph.md":  "# Graph\n\n```mermaid\ngraph TD\n    A-->B\n```\n",
+		"docs/flow.mmd":  "flowchart LR\n    A --> B\n",
+		"docs/flow.puml": "@startuml\nAlice -> Bob : Hi\n@enduml\n",
+		"docs/graph.svg": "<svg>not an editable source</svg>\n",
+		"logs/app.log":   "INFO started\nERROR something failed\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, path), []byte(content), 0644); err != nil {
 			t.Fatal(err)
@@ -276,5 +290,70 @@ func TestPolicyCandidateASTRequiresDiagramContext(t *testing.T) {
 	after, err := os.ReadFile(filepath.Join(root, "docs/guide.md"))
 	if err != nil || string(after) != string(orig) {
 		t.Fatalf("unapproved graph changed source: %v", err)
+	}
+}
+
+func TestPolicyStandaloneDiagramsRequireDiagramContext(t *testing.T) {
+	for _, tc := range []struct{ path, changed, lang string }{
+		{"docs/flow.mmd", "flowchart LR\n    X --> Y\n", "mermaid"},
+		{"docs/flow.puml", "@startuml\nAlice -> Bob : Changed\n@enduml\n", "plantuml"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			g, root := setupContextGateway(t)
+			g.policy.(*gitpatch.Gate).WithDiagramValidator(func(_ context.Context, lang, source string) error {
+				if lang != tc.lang || source != tc.changed {
+					t.Fatalf("wrong candidate: %s %q", lang, source)
+				}
+				return nil
+			})
+			if token := issue(t, g, tc.path); token != "" {
+				t.Fatal("code_context authorized standalone diagram")
+			}
+			if token := tokenFrom(contextData(t, g, "document_context", tc.path)); token != "" {
+				t.Fatal("document_context authorized standalone diagram")
+			}
+			token := tokenFrom(contextData(t, g, "diagram_context", tc.path))
+			if token == "" {
+				t.Fatal("diagram_context did not issue token")
+			}
+			patch := makePatch(t, root, tc.path, tc.changed)
+			if _, err := apply(t, g, token, patch); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(root, tc.path))
+			if err != nil || string(got) != tc.changed {
+				t.Fatalf("patched contents: %s, %v", got, err)
+			}
+		})
+	}
+}
+func TestPolicyStandaloneDiagramFailsClosed(t *testing.T) {
+	g, root := setupContextGateway(t)
+	g.policy.(*gitpatch.Gate).WithDiagramValidator(func(context.Context, string, string) error { return errors.New("syntax invalid") })
+	path := "docs/flow.mmd"
+	original, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := tokenFrom(contextData(t, g, "diagram_context", path))
+	patch := makePatch(t, root, path, "not valid Mermaid\n")
+	if _, err := apply(t, g, token, patch); err == nil || !strings.Contains(err.Error(), "syntax invalid") {
+		t.Fatalf("malformed diagram accepted: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil || string(got) != string(original) {
+		t.Fatal("rejected patch changed file", err)
+	}
+	if token := tokenFrom(contextData(t, g, "diagram_context", "docs/graph.svg")); token != "" {
+		t.Fatal("SVG is not editable diagram source")
+	}
+}
+func TestPolicyStandaloneRejectsForgedDigest(t *testing.T) {
+	g, _ := setupContextGateway(t)
+	args, _ := json.Marshal(map[string]string{"path": "docs/flow.mmd"})
+	bad := `{"path":"docs/flow.mmd","total_diagrams":1,"results":[{"index":1,"language":"mermaid","sha256":"wrong"}]}`
+	response, _ := json.Marshal(map[string]any{"content": []map[string]string{{"type": "text", "text": bad}}})
+	if got := g.policy.Attest(t.Context(), "diagram_context", args, response); string(got) != string(response) {
+		t.Fatalf("forged digest was accepted: %s", got)
 	}
 }

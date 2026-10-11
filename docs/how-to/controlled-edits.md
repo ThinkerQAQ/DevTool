@@ -49,9 +49,10 @@ Connect your MCP client using stdio and keep the process alive for the entire re
 | Change an ordinary `.md` / `.markdown` file | `document_context` |
 | Change Markdown containing Mermaid/PlantUML diagrams | Both `document_context` and `diagram_context` on the same path |
 | Introduce a new Mermaid/PlantUML block | Both document and diagram context, even if the old document had no diagrams |
+| Change an existing standalone `.mmd` / `.mermaid` / `.puml` / `.plantuml` source | `diagram_context` only; successful render validation of the candidate is mandatory |
 | Investigate file logs or journald | `log_context` (read-only; does not issue a patch token) |
 
-The appropriate DevTool capability is selected **by the Gateway**, not by asking a local model to reclassify the file. Markdown diagram detection reuses the repository's Goldmark parser. The `diagram_context` provider currently inspects diagrams **inside Markdown**, not standalone SVG or image files. Those formats remain unsupported by the patch adapter.
+The appropriate DevTool capability is selected **by the Gateway**, not by asking a local model to reclassify the file. Markdown diagram detection reuses the repository's Goldmark parser. The `diagram_context` provider also inspects standalone Mermaid/PlantUML **source** files. It reuses the same rendering Provider and Git preview; independently rendered SVG/PNG/JPEG files are still unsupported.
 
 For example, a normal Markdown edit begins with:
 
@@ -64,6 +65,14 @@ A Markdown file with diagrams also needs:
 ```json
 {"name":"diagram_context","arguments":{"objective":"Inspect Mermaid diagram before modifying it","path":"docs/architecture/example.md","include_source":true}}
 ```
+
+To inspect a standalone Mermaid source before editing it:
+
+```json
+{"name":"diagram_context","arguments":{"objective":"Review standalone diagram before editing","path":"docs/architecture/flow.mmd","analyze":true,"include_source":true}}
+```
+
+Standalone Mermaid analysis uses the existing Merman CLI for structural graph information; no standalone Merman LSP diagnostics are claimed. PlantUML can be inspected and rendered, but Merman's Mermaid semantics do not apply. A missing configured renderer blocks changed source files.
 
 A log investigation uses the existing read-only capability, without any patch token:
 
@@ -87,7 +96,7 @@ After ChatGPT has evaluated that response, generate a Git-format unified diff an
 
 The example patch is illustrative; provide a real diff with correct file content and hunk positions. A successful call returns `structuredContent.status = "applied"`, the changed path, and its SHA-256.
 
-One token authorizes **one attempt on one existing file**. Re-run the appropriate source/document/diagram context for each subsequent edit. The gateway checks the source content digest, Git HEAD, actual worktree root, branch name, patch scope, and token lifetime. Before a Markdown patch is committed, Git applies it inside a temporary preview tree. Changed or newly introduced Mermaid/PlantUML blocks are validated by the **already configured** `diagram-render` Provider. Only a successful renderer result allows the real `git apply`; missing renderers and syntax errors fail closed. Pure prose changes do not rerender unchanged diagrams.
+One token authorizes **one attempt on one existing file**. Re-run the appropriate source/document/diagram context for each subsequent edit. The gateway checks the source content digest, Git HEAD, actual worktree root, branch name, patch scope, and token lifetime. Before a Markdown or standalone diagram-source patch is committed, Git applies it inside a temporary preview tree. Changed or newly introduced Mermaid/PlantUML blocks are validated by the **already configured** `diagram-render` Provider. Only a successful renderer result allows the real `git apply`; missing renderers and syntax errors fail closed. Pure prose changes do not rerender unchanged diagrams.
 
 ## 4. Verify and publish
 
@@ -100,6 +109,6 @@ On 2026-10-11 the new binary returned real CodeGraph and Serena context for `cor
 ## Known limits
 
 - Tokens are held **in memory** by one Gateway instance. Restarting it invalidates them. They do not transfer between independent CLI invocations.
-- Existing regular text files only: no file creation, deletion, rename, permission changes, log edits, standalone image/diagram file edits, or binary patches. A missing Mermaid/PlantUML renderer blocks a changed diagram, but not ordinary Markdown prose edits.
+- Existing regular text files only: no file creation, deletion, rename, permission changes, log edits, rendered SVG/PNG/image edits, or binary patches. A missing Mermaid/PlantUML renderer blocks a changed diagram, but not ordinary Markdown prose edits.
 - Policy applies to this tool boundary; Desktop Commander or another agent with unrestricted local filesystem rights can bypass it. A true isolation boundary requires operating-system permissions or a sandbox.
 - This is a conservative minimal adapter. The MCP Server, stdio/Streamable HTTP and internal MCP Client bridges now use the [official Go MCP SDK](https://github.com/modelcontextprotocol/go-sdk); project-aware authorization remains in DevTool. A CEL or OPA engine is unnecessary for the current static constraints.
