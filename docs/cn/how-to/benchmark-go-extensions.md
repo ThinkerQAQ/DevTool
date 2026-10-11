@@ -41,7 +41,7 @@ python3 scripts/benchmark-extension-cache.py \
 不另造日志框架：通过现有的 `DEVTOOL_TRACE_FILE` 按需记录结构化 JSONL，分解 `project.open`、`extension.resolve`、`go.dependencies`、`extension.load`、`project.extension.start` 和 `mcp.tools.list`。不记录命令参数、源码或密钥。
 
 ```bash
-DEVTOOL_PROFILES=local DEVTOOL_TRACE_FILE=/tmp/dv2-provider-stages.jsonl   /path/to/devtool-candidate config check
+DEVTOOL_PROFILES=local DEVTOOL_TRACE_FILE=/tmp/dv2-provider-stages.jsonl /path/to/devtool-candidate config check
 python3 scripts/summarize-trace-stages.py /tmp/dv2-provider-stages.jsonl
 ```
 

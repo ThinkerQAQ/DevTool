@@ -43,7 +43,7 @@ If an aggregate dependency scan fails, DevTool falls back to the original per-Pr
 DevTool reuses its opt-in `DEVTOOL_TRACE_FILE` JSONL implementation. Startup now records `project.open`, `extension.resolve`, `go.dependencies`, `extension.load`, `project.extension.start`, and `mcp.tools.list`. No command arguments, source contents or secrets are included.
 
 ```bash
-DEVTOOL_PROFILES=local DEVTOOL_TRACE_FILE=/tmp/dv2-provider-stages.jsonl   /path/to/devtool-candidate config check
+DEVTOOL_PROFILES=local DEVTOOL_TRACE_FILE=/tmp/dv2-provider-stages.jsonl /path/to/devtool-candidate config check
 python3 scripts/summarize-trace-stages.py /tmp/dv2-provider-stages.jsonl
 ```
 
