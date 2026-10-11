@@ -23,9 +23,10 @@ The repository selects Docker for its default environment and has a `local` prof
 export DEVTOOL_PROFILES=local
 devtool config path
 devtool config validate
+devtool config check
 ```
 
-Expected: `VALID <path>/.devtool.toml`. If validation fails, inspect the reported table, extension loader, or service binding.
+Expected: `VALID <path>/.devtool.toml` for the fast syntactic check; `CHECKED <path>/.devtool.toml (N MCP tools)` for the full Provider/Agent registration preflight. `config check` loads configured extensions and can take longer on the first run. Neither command executes project build/verify or starts a listening MCP server.
 
 ## 3. Inspect the project
 
