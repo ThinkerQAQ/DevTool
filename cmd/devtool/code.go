@@ -17,7 +17,7 @@ func runCode(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("code requires subcommand: doctor or verify")
 	}
-	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
+	h, err := host.OpenProject(ctx, "", extensionloader.NewResolver())
 	if err != nil {
 		return err
 	}

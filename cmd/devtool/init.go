@@ -36,7 +36,7 @@ func runInit(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
 
-	h, err := host.OpenProject(ctx, "", extensionloader.Resolve)
+	h, err := host.OpenProject(ctx, "", extensionloader.NewResolver())
 	if err != nil {
 		return err
 	}

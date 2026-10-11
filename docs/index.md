@@ -19,6 +19,7 @@ The guides below describe the current repository, not a proposed future implemen
 - [Replace or Add a Provider](how-to/replace-or-add-provider.md).
 - [Build, Verify, and Activate](how-to/self-host.md).
 - [Controlled Code Edits](how-to/controlled-edits.md) — use scoped code context and one-time Git patch authorization.
+- [Benchmark Go Provider loading](how-to/benchmark-go-extensions.md) — reproduce warm-cache startup comparisons.
 
 ## Reference
 
