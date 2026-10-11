@@ -45,7 +45,7 @@ Two independently configured services answer different questions:
 
 An agent requests `code_context`; the capability coordinates the appropriate services. Switching providers should not require changing the caller.
 
-Document and diagram capabilities use the same pattern. See `.devtool.toml` for selected providers and settings.
+Document and diagram capabilities use the same pattern. Merman diagram intelligence uses the mature [jrpc2](https://github.com/creachadair/jrpc2) LSP transport and JSON-RPC client for framing, request/response correlation and server callbacks; DevTool retains diagram-specific symbol and diagnostic mapping. The configured `merman-lsp` executable remains replaceable through `.devtool.toml`. No custom LSP framing implementation is maintained.
 
 ## Environment and lifecycle
 

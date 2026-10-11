@@ -40,7 +40,7 @@ DevTool 是工程开发控制面：上层表达开发意图，配置将稳定能
 
 `code-indexed` 提供仓库索引/结构信息，默认 CodeGraph，也可切换 Sourcegraph；`code-realtime` 通过 Serena/LSP 获取实时语义。Agent 使用 `code_context`，由 Capability 调度服务，Provider 切换不影响调用方。
 
-文档和图表能力采用相同分层。
+文档和图表能力采用相同分层。Merman 图表智能复用成熟的 [jrpc2](https://github.com/creachadair/jrpc2) LSP 传输与 JSON-RPC Client，负责消息分帧、请求关联和服务端回调；DevTool 仅保留图表专用的符号与诊断映射。底层 `merman-lsp` 可执行文件仍通过 `.devtool.toml` 配置替换，不再维护自研 LSP 帧解析器。
 
 ## 环境和生命周期
 
