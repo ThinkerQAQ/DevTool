@@ -27,10 +27,11 @@ import (
 // Git owns unified-patch parsing and application. Only a scoped successful
 // matching code/document/diagram contexts authorize a one-file mutation.
 type Gate struct {
-	root      string
-	maxBytes  int
-	ttl       time.Duration
-	protected map[string]bool
+	root            string
+	maxBytes        int
+	ttl             time.Duration
+	protected       map[string]bool
+	validateDiagram func(context.Context, string, string) error
 
 	mu       sync.Mutex
 	proofs   map[string]patchProof
@@ -71,6 +72,13 @@ func New(root string, settings config.AgentPolicy) *Gate {
 		gate.protected[branch] = true
 	}
 	return gate
+}
+
+// WithDiagramValidator binds the selected existing diagram renderer service.
+// A changed diagram fails closed if no validator has been configured.
+func (p *Gate) WithDiagramValidator(validator func(context.Context, string, string) error) *Gate {
+	p.validateDiagram = validator
+	return p
 }
 
 func (p *Gate) Tool() json.RawMessage {
@@ -254,25 +262,88 @@ func contextKind(path string) string {
 	}
 }
 
-// hasDiagram uses the existing Goldmark Markdown parser (also used by the
-// document provider), not a new fence parser.
-func hasDiagram(source []byte) bool {
-	md := goldmark.DefaultParser()
-	doc := md.Parse(text.NewReader(source))
-	found := false
+// diagramSources reuses Goldmark AST to extract the actual fenced diagram
+// sources from the candidate document, rather than parsing Markdown twice.
+type diagramSource struct{ language, source string }
+
+func diagramSources(source []byte) []diagramSource {
+	doc := goldmark.DefaultParser().Parse(text.NewReader(source))
+	var diagrams []diagramSource
 	ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
-		if entering {
-			if fenced, ok := node.(*ast.FencedCodeBlock); ok {
-				lang := strings.ToLower(strings.TrimSpace(string(fenced.Language(source))))
-				if lang == "mermaid" || lang == "plantuml" {
-					found = true
-					return ast.WalkStop, nil
-				}
-			}
+		if !entering {
+			return ast.WalkContinue, nil
 		}
+		fenced, ok := node.(*ast.FencedCodeBlock)
+		if !ok {
+			return ast.WalkContinue, nil
+		}
+		lang := strings.ToLower(strings.TrimSpace(string(fenced.Language(source))))
+		if lang != "mermaid" && lang != "plantuml" {
+			return ast.WalkContinue, nil
+		}
+		var body strings.Builder
+		for i := 0; i < fenced.Lines().Len(); i++ {
+			segment := fenced.Lines().At(i)
+			body.Write(segment.Value(source))
+		}
+		diagrams = append(diagrams, diagramSource{language: lang, source: body.String()})
 		return ast.WalkContinue, nil
 	})
-	return found
+	return diagrams
+}
+
+func hasDiagram(source []byte) bool { return len(diagramSources(source)) > 0 }
+
+// validateCandidate applies the patch only inside a temporary isolated file
+// tree. The configured renderer validates changed diagram blocks before the
+// actual worktree is modified.
+func (p *Gate) validateCandidate(ctx context.Context, path string, before, patch []byte, hasDiagramContext bool) error {
+	root, err := os.MkdirTemp("", "devtool-diagram-preview-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(root)
+	filename := filepath.Join(root, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(filename), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filename, before, 0600); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "git", "apply", "-")
+	cmd.Dir = root
+	cmd.Stdin = bytes.NewReader(patch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("preview git apply: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	after, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+	old := diagramSources(before)
+	fresh := diagramSources(after)
+	// The candidate AST, not text heuristics over patch lines, is the final
+	// authority for requiring diagram_context on introduced diagrams.
+	if (len(old) > 0 || len(fresh) > 0) && !hasDiagramContext {
+		return fmt.Errorf("patch requires diagram_context for %s", path)
+	}
+	seen := map[diagramSource]int{}
+	for _, d := range old {
+		seen[d]++
+	}
+	for _, d := range fresh {
+		if seen[d] > 0 {
+			seen[d]--
+			continue
+		}
+		if p.validateDiagram == nil {
+			return errors.New("diagram-render provider required to validate changed diagrams")
+		}
+		if err := p.validateDiagram(ctx, d.language, d.source); err != nil {
+			return fmt.Errorf("reject changed %s diagram: %w", d.language, err)
+		}
+	}
+	return nil
 }
 
 func addsDiagramFence(patch string) bool {
@@ -394,6 +465,11 @@ func (p *Gate) Apply(ctx context.Context, args json.RawMessage) (json.RawMessage
 	}
 	if _, err := p.git(commandContext, patch, "apply", "--check", "-"); err != nil {
 		return nil, fmt.Errorf("patch check failed: %w", err)
+	}
+	if kind == "markdown" {
+		if err := p.validateCandidate(commandContext, path, file, patch, proof.contexts["diagram_context"]); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := p.git(commandContext, patch, "apply", "-"); err != nil {
 		return nil, fmt.Errorf("patch apply failed: %w", err)

@@ -32,7 +32,7 @@ The MCP server gives callers engineering intents; configured extensions implemen
 | `scm_publish` | Publish changes through the selected SCM provider |
 | `project_<command>` | Build, verify, package, or other Project Extension commands |
 
-Use `document_context` when editing Markdown, and both `document_context` and `diagram_context` when changing an embedded Mermaid/PlantUML diagram. Query log files or journald with `log_context` (never treat log investigation as a file patch). The opt-in `workspace_apply_patch` enforces this context routing before any edit.
+Use `document_context` when editing Markdown, and both `document_context` and `diagram_context` when changing an embedded Mermaid/PlantUML diagram. The configured `diagram-render` Provider also checks changed/new diagram blocks in a temporary Git preview before the edit is applied. Query log files or journald with `log_context` (never treat log investigation as a file patch). The opt-in `workspace_apply_patch` enforces this context routing before any edit.
 
 Use the tool schemas returned by the MCP gateway. Do not assume all tools have the same arguments in every release.
 
