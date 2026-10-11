@@ -43,9 +43,23 @@ B initialization was 114 ms. The median savings was about **4.2%**; total saving
 
 A sampled 3-hour journald window contained 1,379 tool-request lines: `start_process` 822 (59.6%), `read_process_output` 375 (27.2%), all others 182 (13.2%). This is evidence of heavy shell/poll traffic **across concurrent projects**, not a causal before/after benchmark.
 
+## Actual process audit, October 11, 2026
+
+A second audit found that Desktop Commander Remote owns two necessary Node processes (remote connector and local MCP server). An unresponsive BlogContent pipeline had three extra processes — `bash`, `rg`, and `head` — all inactive for over 65 minutes. The `rg -l` invocation had **no explicit search path**, and in Desktop Commander's non-interactive Shell its standard input was a still-open socket. It waited for stdin instead of finishing a repository search; `head -40` waited on its pipe. The three exact PIDs were terminated without killing the shared Desktop Commander process group or restarting the service. Cgroup task count dropped from 51 to 48.
+
+For non-interactive commands use an explicit search root, such as:
+
+```bash
+timeout 10s rg -l 'some heading' docs
+```
+
+If stdin should not be read, use `</dev/null` or pass explicit file paths. Do **not** apply that redirection to commands that genuinely require interactive input. For long-running child processes, record ownership, set bounded deadlines, and use SDK-managed cleanup. Killing process group 405 would also kill Desktop Commander: only terminate a *verified task-owned PID or independent process group*.
+
+In the sampled 3-hour activity log, there were about 817 `start_process` requests and 366 `read_process_output` requests across 249 PIDs; 178 of those PIDs were read just once. Most calls were distinct, and DevTool appeared frequently among the invoked commands. It would therefore be misleading to claim the overhead is entirely duplicate polling, to merge unrelated commands into one daemon, or to present a persistent MCP service as a mandatory second remote connector.
+
 ## Recommended workflow
 
-1. For supported engineering intents, invoke DV2's `project_verify`, `project_build`, `workspace_create`, `scm_publish`, and context capabilities. Keep one MCP session where the caller can do so.
+1. For supported engineering intents, invoke DV2's `project_verify`, `project_build`, `workspace_create`, `scm_publish`, and context capabilities. Reuse an existing local DevTool session when available, but do not add another remote MCP connector just for process reuse.
 2. Avoid polling a remote PID when the result is already available synchronously; long-running tasks still require appropriate output inspection.
 3. Use Desktop Commander for remote machine setup, direct filesystem/GUI requirements and troubleshooting that DevTool does not model.
 4. Do not build another generic Agent Runner or duplicate the official MCP SDK solely to reduce a few shell calls. Add a direct DevTool MCP connection to the client only through explicit configuration, not a hidden fallback.

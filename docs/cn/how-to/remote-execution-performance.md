@@ -41,10 +41,24 @@ A 每次新建 DevTool CLI 进程执行 `verify`；B 只建立一个官方 MCP s
 
 同一天的近 3 小时日志包含约 1,379 次工具请求：`start_process` 822 次（59.6%）、`read_process_output` 375 次（27.2%），其他 182 次（13.2%）。这是多个并行项目的历史流量画像，**不能当成优化前后的因果对比**。
 
+## 真实进程盘点（2026-10-11）
+
+Desktop Commander Remote 当前只有两个必要的 Node 进程（远程连接与本地 MCP）。另发现 BlogContent 的 `bash → rg → head` 三进程链，已无进展超过 65 分钟：`rg -l` 没有给定搜索路径，在 Desktop Commander 的非交互 Shell 中从**未关闭的 socket 标准输入**等待数据，`head -40` 则一直等上游输出。确认 PID 与父子关系后只结束这三个无效进程，未重启服务，也没有对 Desktop Commander 的共享进程组发信号。systemd 任务数从 51 降至 48。
+
+非交互命令应明确搜索目录，并为可能长期执行的操作设置超时：
+
+```bash
+timeout 10s rg -l 'some heading' docs
+```
+
+不需要 stdin 的操作可使用 `</dev/null`，但不能套用到真实交互任务；停止任务之前确认其拥有的 PID 或独立进程组，**禁止结束 Desktop Commander 共享进程组，也不要全局 `pkill chrome`**。
+
+最近三小时的另一组抽样中，约有 817 次 `start_process` 和 366 次 `read_process_output`（分布在 249 个 PID 上，其中 178 个 PID 只查询一次）。大量命令已经使用 DevTool，不能将所有开销归因于重复轮询，更没有数据支持再造一套远程 MCP 进程管理服务。
+
 ## 建议工作流
 
 1. 开发操作优先调用现有 `project_verify`、`project_build`、`workspace_create`、`scm_publish` 及各 Context。
-2. 能持续复用 MCP 会话时尽量复用；有同步结果时不要额外轮询 PID。长任务仍需合理读取状态。
+2. 现有本地 DevTool 会话可复用时再复用，不为此新增一层远程 MCP；有同步结果时不要额外轮询 PID。长任务仍需合理读取状态。
 3. Desktop Commander 保留操作系统、GUI、环境诊断等 DV2 没有抽象的能力。
 4. 不为减少几次 Shell 调用而自研新的通用 Agent Runner 或 MCP 协议层。直接接入 ChatGPT 需要用户明确配置对应 MCP 连接。
 
