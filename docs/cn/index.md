@@ -13,6 +13,7 @@
 
 - [架构概览](architecture/overview.md)：Core、Capability、Service 和 Provider。
 - [架构原则](architecture/principles.md)：配置化、可扩展、自举、成熟组件优先。
+- [Pi 统一 Agent 入口方案](architecture/pi-agent-gateway.md)：Pi 与 DevTool 接入及强制调用验收方案（尚未实现）。
 
 ## 操作指南
 

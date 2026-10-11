@@ -13,6 +13,7 @@ The guides below describe the current repository, not a proposed future implemen
 
 - [Architecture Overview](architecture/overview.md) — Core, extensions, contracts, and providers.
 - [Architecture Principles](architecture/principles.md) — decision rules for extending DevTool.
+- [Pi Agent Gateway Proposal](architecture/pi-agent-gateway.md) — proposed Pi-to-DevTool execution policy and validation plan (not implemented).
 
 ## How-to
 
