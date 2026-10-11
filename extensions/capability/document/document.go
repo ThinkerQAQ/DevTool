@@ -38,7 +38,7 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 	return []agentsdk.Tool{
 		tool(
 			"document_context",
-			"Build structured document context or traverse a whole document with explicit stateless review coverage.",
+			"Preferred tool for Markdown documentation inspection, section lookup, and structured whole-document review. Use before raw file scanning; use the configured document providers for content and coverage.",
 			map[string]any{
 				"objective": map[string]any{
 					"type":        "string",

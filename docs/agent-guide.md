@@ -38,6 +38,18 @@ Use the tool schemas returned by the MCP gateway. Do not assume all tools have t
 
 For code searches, pass `code_context.path` when you need a file or directory within the project (for example `"path":"go"`). Indexed search results must stay within that path; directories are filtered before ranking and truncation. For symbol references, also provide `symbol` and a concrete file path. Absolute paths, missing paths, and paths that escape the project root are rejected by the local CodeGraph Provider.
 
+## Connect an agent once, configure projects separately
+
+The agent client needs **one MCP connection per running DevTool project instance**, plus one client-level preference for choosing tools. Do not duplicate a list of provider names or tool mappings across project `AGENTS.md` files.
+
+Use the following text once in your ChatGPT Project Instructions, or the equivalent global instructions of another agent client:
+
+> For software engineering tasks in a project connected to DevTool, choose the matching DevTool MCP capability first. Trust its current tool schemas and descriptions, not a hard-coded provider list. If a capability reports no results, refine the query before switching tools. Use Desktop Commander for operating-system/GUI work, or as a fallback when the capability is unavailable or insufficient. Do not loop endlessly on failed calls.
+
+The **project** declares extensions and providers in `.devtool.toml` and starts a DevTool MCP server with its project root and selected profile. The client discovers `tools/list` from that server; CodeGraph, Serena, Sourcegraph and SCM Provider choices remain implementation details. A project `AGENTS.md` is for project-specific conventions, not an MCP tool catalog. For an additional project, configure its DevTool instance and client MCP connection without copying tool mappings.
+
+This is a **selection preference**, not a mandatory enforcement mechanism. When Desktop Commander remains available, prompts and tool descriptions cannot guarantee the agent will always choose DevTool. Evaluate routing on unprompted tasks and measure time, correctness, and unnecessary fallbacks.
+
 ## Work on a change
 
 1. Determine the requested engineering intent and inspect the related contract.

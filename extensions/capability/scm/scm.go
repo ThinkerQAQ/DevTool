@@ -35,10 +35,10 @@ func (e *Extension) Register(reg extensioncontract.Registrar) error {
 
 func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Tool, error) {
 	return []agentsdk.Tool{
-		tool("scm_checkpoint", "Save the current coherent source change and push the branch through the configured SCM provider.", map[string]any{
+		tool("scm_checkpoint", "Preferred tool to checkpoint, commit, and push a coherent source change using the configured SCM provider. Use instead of direct git add/commit/push when available.", map[string]any{
 			"message": map[string]any{"type": "string", "description": "Commit message used when the worktree has changes."},
 		}, []string{"message"}),
-		tool("scm_publish", "Publish the current clean branch through the configured SCM provider and optionally merge it.", map[string]any{
+		tool("scm_publish", "Preferred tool to publish a clean feature branch as a pull request using the configured SCM provider, and optionally merge after required checks. Use instead of direct GitHub or git publish commands when available.", map[string]any{
 			"base":  map[string]any{"type": "string", "description": "Optional target branch. When omitted, the SCM provider resolves the repository default branch."},
 			"title": map[string]any{"type": "string"},
 			"body":  map[string]any{"type": "string"},

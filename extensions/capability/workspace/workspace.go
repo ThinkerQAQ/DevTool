@@ -37,7 +37,7 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 	return []agentsdk.Tool{
 		tool(
 			"workspace_create",
-			"Create an isolated development workspace for a branch through the configured workspace provider.",
+			"Preferred tool to create an isolated development workspace for a branch through the configured workspace provider, instead of invoking provider-native CLI commands.",
 			map[string]any{
 				"name": map[string]any{
 					"type":        "string",
@@ -52,13 +52,13 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 		),
 		tool(
 			"workspace_list",
-			"List development workspaces for the current repository.",
+			"Preferred tool to discover project development workspaces through the configured workspace provider instead of manual repository inspection.",
 			map[string]any{},
 			nil,
 		),
 		tool(
 			"workspace_inspect",
-			"Inspect one development workspace by its stable workspace id.",
+			"Inspect a project workspace using its DV2 stable workspace ID.",
 			map[string]any{
 				"workspace_id": map[string]any{
 					"type": "string",
@@ -68,7 +68,7 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 		),
 		tool(
 			"workspace_remove",
-			"Remove a clean non-primary development workspace through the configured workspace provider.",
+			"Remove an eligible clean non-primary worktree through the DV2 workspace provider.",
 			map[string]any{
 				"workspace_id": map[string]any{
 					"type": "string",

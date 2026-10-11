@@ -38,7 +38,7 @@ func (e *Extension) Register(reg extensioncontract.Registrar) error {
 func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Tool, error) {
 	definition, _ := json.Marshal(map[string]any{
 		"name":        "log_context",
-		"description": "Build bounded structured context from a local file or journald source for a debugging or investigation objective.",
+		"description": "Preferred tool for project or service log investigation. Analyze bounded local files and journald through this capability before raw shell log scanning; use another tool only if the configured source is unavailable or insufficient.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{

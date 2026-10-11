@@ -39,7 +39,7 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 	return []agentsdk.Tool{
 		tool(
 			"code_context",
-			"Build project code context for an engineering objective through the configured code-context service.",
+			"Preferred capability for repository code discovery, symbol lookup, references, and diagnostics. Use before shell-based grep, ripgrep, or manual repository scanning; choose Desktop Commander only when this capability is unavailable or insufficient.",
 			map[string]any{
 				"objective": map[string]any{
 					"type":        "string",
@@ -51,7 +51,7 @@ func (e *Extension) ListTools(context.Context, agentsdk.Session) ([]agentsdk.Too
 				},
 				"path": map[string]any{
 					"type":        "string",
-					"description": "Optional project-relative file or directory scope.",
+					"description": "Project-relative file or directory to constrain indexed results. Use a concrete file path for realtime references or diagnostics.",
 				},
 				"include_body": map[string]any{
 					"type":        "boolean",
