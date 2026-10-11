@@ -14,6 +14,7 @@ import (
 	"github.com/thinkerqaq/devtool/core/registry"
 	extensioncontract "github.com/thinkerqaq/devtool/sdk/extension"
 	"github.com/thinkerqaq/devtool/sdk/readiness"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 type ExecutableResolver func(context.Context, project.Project, string, config.Extension) (string, error)
@@ -47,7 +48,9 @@ func extensionIsSelected(cfg config.Config, extension config.Extension) bool {
 	return false
 }
 
-func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) (*ProjectHost, error) {
+func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) (opened *ProjectHost, resultErr error) {
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{Name: "project.open", Layer: "host"})
+	defer func() { span.End(0, resultErr) }()
 	p, err := project.Discover(start)
 	if err != nil {
 		return nil, err
@@ -86,7 +89,11 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 		if err != nil {
 			return nil, fmt.Errorf("resolve extension %q executable: %w", name, err)
 		}
-		ext, err := coreextension.LoadProcessExtension(ctx, p, name, executable, configured.Settings, reg)
+		loadCtx, loadSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
+			Name: "extension.load", Layer: "host", Provider: name,
+		})
+		ext, err := coreextension.LoadProcessExtension(loadCtx, p, name, executable, configured.Settings, reg)
+		loadSpan.End(0, err)
 		if err != nil {
 			return nil, fmt.Errorf("load extension %q: %w", name, err)
 		}
@@ -123,7 +130,11 @@ func OpenProject(ctx context.Context, start string, resolve ExecutableResolver) 
 	if err != nil {
 		return nil, fmt.Errorf("resolve project extension executable: %w", err)
 	}
-	process, err := coreextension.StartProjectProcess(ctx, p, projectExecutable, projectExtension.Settings, reg)
+	projectCtx, projectSpan := devtooltrace.Start(ctx, devtooltrace.Attributes{
+		Name: "project.extension.start", Layer: "host", Provider: "project",
+	})
+	process, err := coreextension.StartProjectProcess(projectCtx, p, projectExecutable, projectExtension.Settings, reg)
+	projectSpan.End(0, err)
 	if err != nil {
 		return nil, fmt.Errorf("start project extension: %w", err)
 	}

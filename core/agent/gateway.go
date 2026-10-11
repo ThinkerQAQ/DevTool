@@ -146,7 +146,9 @@ func authorizedBearer(header, token string) bool {
 	return len(header) == len(expected) && subtle.ConstantTimeCompare([]byte(header), []byte(expected)) == 1
 }
 
-func (g *Gateway) listTools(ctx context.Context) ([]json.RawMessage, error) {
+func (g *Gateway) listTools(ctx context.Context) (definitionsOut []json.RawMessage, resultErr error) {
+	ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{Name: "mcp.tools.list", Layer: "gateway"})
+	defer func() { span.End(0, resultErr) }()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.routes != nil {

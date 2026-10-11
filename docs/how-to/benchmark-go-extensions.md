@@ -37,3 +37,16 @@ This measures **local DevTool startup/provider discovery**, not ChatGPT/Remote D
 The per-Provider dependency snapshot includes its transitive Go imports and local module roots. Each Provider still checks file timestamps and local `go.mod`/`go.sum` against its own cached binary. Modifying another Provider's unrelated source must not invalidate it; modifying a transitive dependency must invalidate it. The automated regression test creates independent fixture providers to verify both conditions against the previous individual dependency scan.
 
 If an aggregate dependency scan fails, DevTool falls back to the original per-Provider resolution instead of silently accepting an incomplete dependency graph.
+
+## Break down Provider initialization with existing trace spans
+
+DevTool reuses its opt-in `DEVTOOL_TRACE_FILE` JSONL implementation. Startup now records `project.open`, `extension.resolve`, `go.dependencies`, `extension.load`, `project.extension.start`, and `mcp.tools.list`. No command arguments, source contents or secrets are included.
+
+```bash
+DEVTOOL_PROFILES=local DEVTOOL_TRACE_FILE=/tmp/dv2-provider-stages.jsonl   /path/to/devtool-candidate config check
+python3 scripts/summarize-trace-stages.py /tmp/dv2-provider-stages.jsonl
+```
+
+After caches warmed, two measured runs showed `project.open` at 265–267 ms, of which the batched Go dependency scan took 124–129 ms; loading 24 extension processes summed to 60–62 ms; MCP tool-list registration took about 3 ms. `project.open` is a *parent* span and `extension.resolve` encompasses `go.dependencies`, so **do not add all span durations together**. The first traced run included additional machine/cache warming and took ~894 ms.
+
+Tracing stays opt-in and reuses the existing SDK event writer. Those results indicate that another long-running Provider pool is not justified by the remaining local startup cost.

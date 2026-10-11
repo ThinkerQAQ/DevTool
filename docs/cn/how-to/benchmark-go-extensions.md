@@ -35,3 +35,16 @@ python3 scripts/benchmark-extension-cache.py \
 ## 正确性
 
 自动化回归会在临时 Go Module 中构造相互独立的 Provider，比较批量扫描与旧版单独扫描的依赖集合：修改无关包不应触发重建；修改传递依赖必须触发重建。若批量扫描发生错误，则退回原有的单个 Provider 依赖扫描和构建路径，不会把不完整的依赖信息当成有效缓存。
+
+## 使用现有 Trace 分解初始化耗时
+
+不另造日志框架：通过现有的 `DEVTOOL_TRACE_FILE` 按需记录结构化 JSONL，分解 `project.open`、`extension.resolve`、`go.dependencies`、`extension.load`、`project.extension.start` 和 `mcp.tools.list`。不记录命令参数、源码或密钥。
+
+```bash
+DEVTOOL_PROFILES=local DEVTOOL_TRACE_FILE=/tmp/dv2-provider-stages.jsonl   /path/to/devtool-candidate config check
+python3 scripts/summarize-trace-stages.py /tmp/dv2-provider-stages.jsonl
+```
+
+热缓存下连续两次记录的 `project.open` 为 265–267 ms，其中一次批量 Go 依赖扫描耗时 124–129 ms，24 个扩展进程的加载耗时合计 60–62 ms，MCP 工具列表注册约 3 ms。`project.open` 是父 Span，`extension.resolve` 又包含 `go.dependencies`，**各级耗时存在重叠，不可直接相加**。第一轮含额外机器和缓存预热，约 894 ms。
+
+追踪功能默认关闭。根据剩余的本地初始化成本，没有必要再增加常驻 Provider 进程池。

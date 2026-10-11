@@ -14,6 +14,7 @@ import (
 
 	"github.com/thinkerqaq/devtool/core/config"
 	"github.com/thinkerqaq/devtool/core/project"
+	devtooltrace "github.com/thinkerqaq/devtool/sdk/trace"
 )
 
 // dependencySnapshot is scoped to one OpenProject call. It preserves the
@@ -29,7 +30,11 @@ type dependencySnapshot struct {
 func NewResolver() func(context.Context, project.Project, string, config.Extension) (string, error) {
 	var once sync.Once
 	var snapshots map[string]dependencySnapshot
-	return func(ctx context.Context, p project.Project, name string, configured config.Extension) (string, error) {
+	return func(ctx context.Context, p project.Project, name string, configured config.Extension) (executable string, resultErr error) {
+		ctx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+			Name: "extension.resolve", Layer: "loader", Provider: name, Method: configured.Loader,
+		})
+		defer func() { span.End(0, resultErr) }()
 		if strings.TrimSpace(configured.Loader) != "go" {
 			return Resolve(ctx, p, name, configured)
 		}
@@ -84,7 +89,11 @@ func batchLocalDependencies(ctx context.Context, p project.Project) map[string]d
 		}
 		slices.Sort(pkgs)
 		pkgs = slices.Compact(pkgs)
-		snapshots, err := goDependencyDirsBatch(ctx, p.Root, moduleDir, pkgs)
+		scanCtx, span := devtooltrace.Start(ctx, devtooltrace.Attributes{
+			Name: "go.dependencies", Layer: "loader", Method: "go-list-batch",
+		})
+		snapshots, err := goDependencyDirsBatch(scanCtx, p.Root, moduleDir, pkgs)
+		span.End(0, err)
 		if err != nil {
 			continue // don't mask authoritative individual go list/build failures
 		}
