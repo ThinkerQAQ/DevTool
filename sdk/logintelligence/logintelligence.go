@@ -52,16 +52,42 @@ type Evidence struct {
 	Text          string `json:"text"`
 }
 
+// ToolCallMetric contains aggregate transport call events without tool payloads.
+// Durations are inferred from log timestamps and are approximate when calls
+// of the same name overlap.
+type ToolCallMetric struct {
+	Tool            string `json:"tool"`
+	Received        int    `json:"received"`
+	Completed       int    `json:"completed"`
+	Failed          int    `json:"failed"`
+	DurationSamples int    `json:"duration_samples"`
+	P50MS           int64  `json:"p50_ms"`
+	P90MS           int64  `json:"p90_ms"`
+	MaxMS           int64  `json:"max_ms"`
+}
+
+// ToolCallSummary is populated only if recognizable structured tool events
+// are present. Original detailed journald records remain untouched.
+type ToolCallSummary struct {
+	Correlation    string           `json:"correlation"`
+	Note           string           `json:"note"`
+	TotalReceived  int              `json:"total_received"`
+	TotalCompleted int              `json:"total_completed"`
+	TotalFailed    int              `json:"total_failed"`
+	Tools          []ToolCallMetric `json:"tools"`
+}
+
 type AnalyzeResponse struct {
-	Provider       string         `json:"provider"`
-	Source         string         `json:"source"`
-	SourceKind     string         `json:"source_kind,omitempty"`
-	Format         string         `json:"format"`
-	Summary        Summary        `json:"summary"`
-	Levels         map[string]int `json:"levels,omitempty"`
-	EmbeddedLevels map[string]int `json:"embedded_levels,omitempty"`
-	Patterns       []Pattern      `json:"patterns,omitempty"`
-	Matches        []Evidence     `json:"matches,omitempty"`
-	Evidence       []Evidence     `json:"evidence,omitempty"`
-	LnavUsed       bool           `json:"lnav_used"`
+	Provider       string           `json:"provider"`
+	Source         string           `json:"source"`
+	SourceKind     string           `json:"source_kind,omitempty"`
+	Format         string           `json:"format"`
+	Summary        Summary          `json:"summary"`
+	Levels         map[string]int   `json:"levels,omitempty"`
+	EmbeddedLevels map[string]int   `json:"embedded_levels,omitempty"`
+	Patterns       []Pattern        `json:"patterns,omitempty"`
+	Matches        []Evidence       `json:"matches,omitempty"`
+	Evidence       []Evidence       `json:"evidence,omitempty"`
+	LnavUsed       bool             `json:"lnav_used"`
+	ToolCalls      *ToolCallSummary `json:"tool_calls,omitempty"`
 }

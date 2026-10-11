@@ -32,6 +32,8 @@ Before editing Go or other code, call `code_context`; before editing Markdown, c
 
 Do not directly integrate CodeGraph, Serena, Sourcegraph, Dagger, or GitHub into agent workflows when DevTool already provides the intent.
 
+Remote Shell process hygiene: in non-interactive Desktop Commander calls, pass explicit search roots (e.g., `rg -l 'pattern' .` instead of `rg -l 'pattern'`), because the tool's stdin can remain open on a socket. Bound potentially long scans with `timeout`; do not blindly append `head` to an unbounded stdin-reading command. Prefer one existing project-level DevTool command to an improvised chain of redundant Shell calls. Terminate only verified, task-owned child processes; never kill Desktop Commander's shared process group or globally `pkill chrome`.
+
 ## Where changes belong
 
 1. Reuse a mature existing component, SDK, library, service, or protocol.
