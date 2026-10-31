@@ -49,6 +49,8 @@ Document and diagram capabilities use the same pattern. Merman diagram intellige
 
 ## Environment and lifecycle
 
+The Docker environment provider can consume the [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) toolchain images. The selected \`dev-base\` image is pinned by digest in the repository’s [\`.devtool.toml\`](../../.devtool.toml). DevEnvironment owns toolchain builds and image publication; DevTool owns provider contracts and lifecycle. Neither repository vendors the other.
+
 Portable operations can use configured environment/runtime providers. Host-specific operations (for example a physical Android device) remain native. Core coordinates lifetime and cleanup; it does not implement an external tool's runtime.
 
 ## Self-hosting
