@@ -11,6 +11,9 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Public validation runs with local tools, without any private GHCR pull.
+    env:
+      DEVTOOL_PROFILES: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -27,12 +30,16 @@ jobs:
         # GHCR dev-base may be private; do not fail public CI on an inaccessible image.
         # Enable explicitly in a trusted environment with image pull permission.
         if: vars.DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS == 'true'
+        env:
+          DEVTOOL_PROFILES: ''
         run: |
           go run ./cmd/devtool code doctor
           go run ./cmd/devtool code verify
       - name: Agent Gateway through configured extensions
         # Full code-context MCP flow also pulls the private configured dev-base image.
         if: vars.DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS == 'true'
+        env:
+          DEVTOOL_PROFILES: ''
         run: |
           go build -o /tmp/devtool-mcp-ci ./cmd/devtool
           python3 scripts/verify-agent-mcp.py /tmp/devtool-mcp-ci
