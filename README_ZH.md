@@ -4,6 +4,8 @@
 
 **项目状态：实验性原型 · 已暂停维护 · 不保证生产可用。** 该仓库保留了一次高复杂度工程探索的源码、设计取舍及验证记录。它没有达成最初设想的完整产品目标，不能当作成熟的开箱即用工具。
 
+**配套开发环境：** [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) 提供可复用的 Docker 工具链镜像；DevTool 的环境 Provider 通过 [`.devtool.toml`](.devtool.toml) 引用固定 digest 的 `dev-base` 镜像。两者独立成仓，DevEnvironment 无须依赖 DevTool 即可构建。
+
 [English](README.md) · [中文文档](docs/cn/index.md) · [技术复盘](docs/cn/retrospective.md) · [MIT License](LICENSE)
 
 ## 试图解决什么问题
@@ -66,6 +68,8 @@ Provider 依赖、构建和 MCP 示例见 [快速开始](docs/cn/quick-start.md)
 | 技术复盘 | [复盘](docs/cn/retrospective.md) | [Retrospective](docs/retrospective.md) |
 
 ## 项目结果
+
+公开 CI 执行代码与本地集成检查；依赖私有 GHCR 镜像的 DevEnvironment 联调默认跳过，仅在具有镜像读取权限并设置 `DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS=true` 时执行。运行时镜像发布改为手动触发，且须设置 `DEVTOOL_ENABLE_IMAGE_PUBLISH=true`；这些开关本身不代表第三方组件已获分发许可。
 
 DevTool 并没有成为最初设想中稳定、通用、易部署的工程控制平台，但留下了可研究的架构与实现：意图级 MCP 接口、配置驱动 Provider、代码上下文路由、自举构建与验证等。
 

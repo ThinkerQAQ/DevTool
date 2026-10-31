@@ -24,10 +24,19 @@ jobs:
       - name: Inspect through project extension
         run: go run ./cmd/devtool project inspect --json
       - name: Code intelligence through configured DevEnvironment
+        # GHCR dev-base may be private; do not fail public CI on an inaccessible image.
+        # Enable explicitly in a trusted environment with image pull permission.
+        if: vars.DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS == 'true'
+        env:
+          DEVTOOL_PROFILES: ''
         run: |
           go run ./cmd/devtool code doctor
           go run ./cmd/devtool code verify
       - name: Agent Gateway through configured extensions
+        # Full code-context MCP flow also pulls the private configured dev-base image.
+        if: vars.DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS == 'true'
+        env:
+          DEVTOOL_PROFILES: ''
         run: |
           go build -o /tmp/devtool-mcp-ci ./cmd/devtool
           python3 scripts/verify-agent-mcp.py /tmp/devtool-mcp-ci
@@ -38,8 +47,14 @@ jobs:
             exit 1
           fi
       - name: Self-host build
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: go run ./cmd/devtool build
       - name: Self-host N+1 to N+2
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: |
           cp .devtool/out/devtool-next /tmp/devtool-n1
           /tmp/devtool-n1 project inspect --json
@@ -50,10 +65,19 @@ jobs:
           /tmp/devtool-n2 version --json
           cmp /tmp/devtool-n1 /tmp/devtool-n2
       - name: Self-host through local environment provider
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: |
           DEVTOOL_PROFILES=railway go run ./cmd/devtool build
           ./.devtool/out/devtool-next project inspect --json
       - name: Self-host verify
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: go run ./cmd/devtool verify
       - name: Self-host package
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: go run ./cmd/devtool package

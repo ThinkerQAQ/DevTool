@@ -4,6 +4,8 @@
 
 **Status: Experimental · maintenance paused · not production-ready.** This repository preserves a technically ambitious engineering experiment. The larger product goal was not completed, and there is no supported installation or compatibility promise. Read the [retrospective](docs/retrospective.md) / [技术复盘](docs/cn/retrospective.md) for the outcome and open questions.
 
+**Companion infrastructure:** [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) supplies the optional shared Docker toolchains used by DevTool’s environment provider. The concrete `dev-base` image is pinned by digest in [`.devtool.toml`](.devtool.toml). DevEnvironment is a separate repository and remains independently reusable; this experimental control plane is not required to build its images.
+
 DevTool exposes project operations and engineering capabilities through stable contracts. A project declares its extensions and provider bindings in `.devtool.toml`; callers use the same commands regardless of the selected implementation.
 
 [Documentation](docs/index.md) · [中文 README](README_ZH.md) · [Agent instructions](AGENTS.md) · [MIT License](LICENSE)
@@ -65,6 +67,8 @@ The guiding principles are **minimal Core, composable extensions, declarative co
 For the current project's concrete provider selection, consult [`.devtool.toml`](.devtool.toml). Names and examples in documentation do not supersede that file.
 
 ## Project outcome
+
+Public CI exercises the code and local integrations. The optional DevEnvironment image integration test is gated by `DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS=true` because the pinned GHCR image may not be anonymously pullable. Runtime-image publishing is manual and requires `DEVTOOL_ENABLE_IMAGE_PUBLISH=true`; these flags do not grant third-party redistribution permission.
 
 DevTool explored a minimal, project-aware control plane with replaceable providers and intention-level agent capabilities. The repository contains source and tests for that exploration, but it did **not** become the stable, broadly usable engineering platform originally envisioned. The current version marker is **0.1.0-dev**. Existing documentation describes experimental capabilities; it is not a promise that every provider works out of the box.
 
