@@ -4,7 +4,7 @@
 
 **项目状态：实验性原型 · 已暂停维护 · 不保证生产可用。** 该仓库保留了一次高复杂度工程探索的源码、设计取舍及验证记录。它没有达成最初设想的完整产品目标，不能当作成熟的开箱即用工具。
 
-**配套开发环境：** [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) 提供可复用的 Docker 工具链镜像；DevTool 的环境 Provider 通过 [\`.devtool.toml\`](.devtool.toml) 引用固定 digest 的 \`dev-base\` 镜像。两者独立成仓，DevEnvironment 无须依赖 DevTool 即可构建。
+**配套开发环境：** [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) 提供可复用的 Docker 工具链镜像；DevTool 的环境 Provider 通过 [`.devtool.toml`](.devtool.toml) 引用固定 digest 的 `dev-base` 镜像。两者独立成仓，DevEnvironment 无须依赖 DevTool 即可构建。
 
 [English](README.md) · [中文文档](docs/cn/index.md) · [技术复盘](docs/cn/retrospective.md) · [MIT License](LICENSE)
 

@@ -4,7 +4,7 @@
 
 **Status: Experimental · maintenance paused · not production-ready.** This repository preserves a technically ambitious engineering experiment. The larger product goal was not completed, and there is no supported installation or compatibility promise. Read the [retrospective](docs/retrospective.md) / [技术复盘](docs/cn/retrospective.md) for the outcome and open questions.
 
-**Companion infrastructure:** [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) supplies the optional shared Docker toolchains used by DevTool’s environment provider. The concrete \`dev-base\` image is pinned by digest in [\`.devtool.toml\`](.devtool.toml). DevEnvironment is a separate repository and remains independently reusable; this experimental control plane is not required to build its images.
+**Companion infrastructure:** [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) supplies the optional shared Docker toolchains used by DevTool’s environment provider. The concrete `dev-base` image is pinned by digest in [`.devtool.toml`](.devtool.toml). DevEnvironment is a separate repository and remains independently reusable; this experimental control plane is not required to build its images.
 
 DevTool exposes project operations and engineering capabilities through stable contracts. A project declares its extensions and provider bindings in `.devtool.toml`; callers use the same commands regardless of the selected implementation.
 

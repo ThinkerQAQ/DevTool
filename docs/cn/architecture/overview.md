@@ -44,7 +44,7 @@ DevTool 是工程开发控制面：上层表达开发意图，配置将稳定能
 
 ## 环境和生命周期
 
-Docker 环境 Provider 可以使用独立的 [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) 工具链镜像；当前 [\`.devtool.toml\`](../../../.devtool.toml) 以 digest 固定 \`dev-base\`。DevEnvironment 负责工具链构建与镜像发布，DevTool 负责 Provider 契约与资源生命周期；两个仓库互不内嵌源码。
+Docker 环境 Provider 可以使用独立的 [DevEnvironment](https://github.com/ThinkerQAQ/DevEnvironment) 工具链镜像；当前 [`.devtool.toml`](../../../.devtool.toml) 以 digest 固定 `dev-base`。DevEnvironment 负责工具链构建与镜像发布，DevTool 负责 Provider 契约与资源生命周期；两个仓库互不内嵌源码。
 
 构建、测试、打包等可移植工作通过环境或运行时 Provider 执行；USB、ADB、物理设备属于 Native 能力。谁申请资源谁负责取消和清理。
 
