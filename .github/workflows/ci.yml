@@ -11,9 +11,6 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Public validation runs with local tools, without any private GHCR pull.
-    env:
-      DEVTOOL_PROFILES: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -50,8 +47,14 @@ jobs:
             exit 1
           fi
       - name: Self-host build
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: go run ./cmd/devtool build
       - name: Self-host N+1 to N+2
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: |
           cp .devtool/out/devtool-next /tmp/devtool-n1
           /tmp/devtool-n1 project inspect --json
@@ -62,10 +65,19 @@ jobs:
           /tmp/devtool-n2 version --json
           cmp /tmp/devtool-n1 /tmp/devtool-n2
       - name: Self-host through local environment provider
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: |
           DEVTOOL_PROFILES=railway go run ./cmd/devtool build
           ./.devtool/out/devtool-next project inspect --json
       - name: Self-host verify
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: go run ./cmd/devtool verify
       - name: Self-host package
+        # Self-host checks must not depend on anonymous access to private GHCR images.
+        env:
+          DEVTOOL_PROFILES: local
         run: go run ./cmd/devtool package
