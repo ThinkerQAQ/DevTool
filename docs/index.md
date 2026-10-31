@@ -27,6 +27,12 @@ The guides below describe the current repository, not a proposed future implemen
 - [CLI Reference](reference/cli.md).
 - [Configuration Reference](reference/configuration.md).
 
+## Project record
+
+- [Engineering retrospective](retrospective.md) — original objective, technical trade-offs, work preserved, unfinished productization, and maintenance status.
+
+**Status:** experimental; active development paused. Guides describe the checked-in prototype, not a supported product release.
+
 ## Scope and maintenance
 
 - English pages in `docs/` are canonical. The corresponding Chinese pages live in `docs/cn/` with the same relative names.
