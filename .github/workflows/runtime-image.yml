@@ -1,10 +1,7 @@
 name: Runtime Image
 
+# Experimental, maintenance-paused repository: do not publish images on every push.
 on:
-  push:
-    branches:
-      - main
-      - 'feat/**'
   workflow_dispatch:
 
 concurrency:
@@ -17,6 +14,8 @@ permissions:
 
 jobs:
   runtime-image:
+    # Manual dispatch plus explicit opt-in; image redistribution needs separate license review.
+    if: vars.DEVTOOL_ENABLE_IMAGE_PUBLISH == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

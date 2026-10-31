@@ -68,6 +68,8 @@ For the current project's concrete provider selection, consult [`.devtool.toml`]
 
 ## Project outcome
 
+Public CI exercises the code and local integrations. The optional DevEnvironment image integration test is gated by `DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS=true` because the pinned GHCR image may not be anonymously pullable. Runtime-image publishing is manual and requires `DEVTOOL_ENABLE_IMAGE_PUBLISH=true`; these flags do not grant third-party redistribution permission.
+
 DevTool explored a minimal, project-aware control plane with replaceable providers and intention-level agent capabilities. The repository contains source and tests for that exploration, but it did **not** become the stable, broadly usable engineering platform originally envisioned. The current version marker is **0.1.0-dev**. Existing documentation describes experimental capabilities; it is not a promise that every provider works out of the box.
 
 See [what was built, why it was difficult, and what remains unresolved](docs/retrospective.md). Third-party tools and dependencies retain their own licenses. The author's original code and documentation are released under the [MIT License](LICENSE) **as is**, without maintenance or production-support guarantees.

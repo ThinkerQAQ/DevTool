@@ -69,6 +69,8 @@ Provider 依赖、构建和 MCP 示例见 [快速开始](docs/cn/quick-start.md)
 
 ## 项目结果
 
+公开 CI 执行代码与本地集成检查；依赖私有 GHCR 镜像的 DevEnvironment 联调默认跳过，仅在具有镜像读取权限并设置 `DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS=true` 时执行。运行时镜像发布改为手动触发，且须设置 `DEVTOOL_ENABLE_IMAGE_PUBLISH=true`；这些开关本身不代表第三方组件已获分发许可。
+
 DevTool 并没有成为最初设想中稳定、通用、易部署的工程控制平台，但留下了可研究的架构与实现：意图级 MCP 接口、配置驱动 Provider、代码上下文路由、自举构建与验证等。
 
 [技术复盘](docs/cn/retrospective.md) 将已探索的技术问题与尚未解决的产品化挑战分开说明。暂停维护不等于否定探索价值，也不代表源码已经生产验证。

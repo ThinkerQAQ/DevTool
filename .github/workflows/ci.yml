@@ -24,6 +24,9 @@ jobs:
       - name: Inspect through project extension
         run: go run ./cmd/devtool project inspect --json
       - name: Code intelligence through configured DevEnvironment
+        # GHCR dev-base may be private; do not fail public CI on an inaccessible image.
+        # Enable explicitly in a trusted environment with image pull permission.
+        if: vars.DEVTOOL_RUN_PRIVATE_IMAGE_CHECKS == 'true'
         run: |
           go run ./cmd/devtool code doctor
           go run ./cmd/devtool code verify
