@@ -2,9 +2,11 @@
 
 **A configuration-driven development control plane for humans, AI agents, and CI.**
 
+**Status: Experimental · maintenance paused · not production-ready.** This repository preserves a technically ambitious engineering experiment. The larger product goal was not completed, and there is no supported installation or compatibility promise. Read the [retrospective](docs/retrospective.md) / [技术复盘](docs/cn/retrospective.md) for the outcome and open questions.
+
 DevTool exposes project operations and engineering capabilities through stable contracts. A project declares its extensions and provider bindings in `.devtool.toml`; callers use the same commands regardless of the selected implementation.
 
-[Documentation](docs/index.md) · [中文文档](docs/cn/index.md) · [Agent instructions](AGENTS.md)
+[Documentation](docs/index.md) · [中文 README](README_ZH.md) · [Agent instructions](AGENTS.md) · [MIT License](LICENSE)
 
 ## What it does
 
@@ -61,6 +63,12 @@ The guiding principles are **minimal Core, composable extensions, declarative co
 | Look up commands and configuration | [CLI](docs/reference/cli.md) / [TOML](docs/reference/configuration.md) | [CLI](docs/cn/reference/cli.md) / [TOML](docs/cn/reference/configuration.md) |
 
 For the current project's concrete provider selection, consult [`.devtool.toml`](.devtool.toml). Names and examples in documentation do not supersede that file.
+
+## Project outcome
+
+DevTool explored a minimal, project-aware control plane with replaceable providers and intention-level agent capabilities. The repository contains source and tests for that exploration, but it did **not** become the stable, broadly usable engineering platform originally envisioned. The current version marker is **0.1.0-dev**. Existing documentation describes experimental capabilities; it is not a promise that every provider works out of the box.
+
+See [what was built, why it was difficult, and what remains unresolved](docs/retrospective.md). Third-party tools and dependencies retain their own licenses. The author's original code and documentation are released under the [MIT License](LICENSE) **as is**, without maintenance or production-support guarantees.
 
 ## Contributing
 
