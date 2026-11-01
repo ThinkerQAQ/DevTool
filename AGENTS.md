@@ -46,7 +46,7 @@ Keep configuration declarative. Do not invent dynamic workflow scripts in TOML, 
 
 ## Working loop
 
-1. Read [Quick Start](docs/quick-start.md), [Architecture Overview](docs/architecture/overview.md), and the relevant reference page.
+1. Read [README](README.md) / [中文 README](README_ZH.md), then inspect the relevant source contracts and tests.
 2. Inspect current configuration and related contract using DevTool.
 3. Make one focused change; review the diff; commit and push.
 4. Repeat for the next coherent change.
@@ -56,6 +56,6 @@ Use `devtool build`, `devtool verify`, and `devtool package` when declared by th
 
 ## Documentation
 
-English is the default; matching Chinese pages live in `docs/cn/`. Update both languages when behavior changes. The guide is a description of actual functionality, not an implementation proposal.
+English is the default in `README.md`, and the matching Chinese guide is `README_ZH.md`. Describe implemented behavior in both languages.
 
-[English documentation](docs/index.md) · [中文文档](docs/cn/index.md) · [Architecture Principles](docs/architecture/principles.md)
+[English README](README.md) · [中文 README](README_ZH.md)
